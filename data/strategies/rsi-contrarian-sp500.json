@@ -1,0 +1,17 @@
+{
+  "id": "rsi-contrarian-sp500",
+  "name": "RSI Contrarian — S&P 500",
+  "universe": "sp500",
+  "selector": "rsi-oversold",
+  "manager": "scaled-exit",
+  "funding": {
+    "initial": 10000,
+    "monthly_addition": 500
+  },
+  "dividends": "reinvest",
+  "rules": {
+    "max_positions": 15,
+    "max_position_pct": 10.0,
+    "min_hold_days": 3
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "id": "golden-cross-sp500",
+  "name": "Golden Cross — S&P 500",
+  "universe": "sp500",
+  "selector": "golden-cross",
+  "manager": "trailing-stop",
+  "funding": {
+    "initial": 10000,
+    "monthly_addition": 500
+  },
+  "dividends": "reinvest",
+  "rules": {
+    "max_positions": 20,
+    "max_position_pct": 10.0,
+    "min_hold_days": 5
+  }
+}

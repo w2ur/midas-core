@@ -1,0 +1,51 @@
+globals:
+  day_one: 2026-04-17
+  currencies: [USD]
+  initial_capital: 10000
+  global_reference: { label: "MSCI World", ticker: URTH, currency: USD }
+  agents_dir: .claude/agents
+agents:
+  demo-momentum:
+    display_name: "Demo Momentum"
+    voice: "Trend-follower. Short sentences."
+    post_time: "09:30"
+    home_currency: USD
+    initial_capital: 10000
+    max_positions: 3
+    universe: [SPY, QQQ, IWM]
+    benchmark: { label: "S&P 500", ticker: SPY, currency: USD }
+    persona: demo-momentum.md
+    role: trader
+    safety: { max_order_notional: 5000, max_orders_per_day: 20, daily_drawdown_halt_pct: -10, allowed_universe: [], dry_run: false }
+  demo-value:
+    display_name: "Demo Value"
+    voice: "Patient. Buys cheap."
+    post_time: "10:00"
+    home_currency: USD
+    initial_capital: 10000
+    max_positions: 3
+    universe: [VTV, SCHD, BRK-B]
+    benchmark: { label: "S&P 500", ticker: SPY, currency: USD }
+    persona: demo-value.md
+    role: trader
+    safety: { max_order_notional: 5000, max_orders_per_day: 20, daily_drawdown_halt_pct: -10, allowed_universe: [], dry_run: false }
+  demo-oracle:
+    display_name: "Demo Oracle"
+    voice: "Narrates the demo desk."
+    role: narrator
+    persona: demo-oracle.md
+  demo-allocator:
+    display_name: "Demo Allocator"
+    role: allocator
+    post_time: ''
+    persona: demo-allocator.md
+    home_currency: USD
+    initial_capital: 2000.0
+    safety: { max_order_notional: 500, max_orders_per_day: 5, daily_drawdown_halt_pct: -5, allowed_universe: [], dry_run: false }
+    allocator:
+      channels_prefix: demo-allocator
+      outcome_resolution_days: 10
+      outcome_memory: { same_ticker_max: 5, other_ticker_max: 3 }
+      baseline: { enabled: false }
+      risk_budget: { max_positions: 3, per_position_cap: 400, cash_floor: 100, max_trades_per_week: 2, min_conviction: 6 }
+      policy: { blocklist: [] }

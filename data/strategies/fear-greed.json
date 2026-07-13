@@ -1,0 +1,17 @@
+{
+  "id": "fear-greed",
+  "name": "Fear & Greed — Volatility-Sized Broad ETF",
+  "universe": "etf-broad",
+  "selector": "fear-greed",
+  "manager": "volatility-sized",
+  "funding": {
+    "initial": 10000,
+    "monthly_addition": 500
+  },
+  "dividends": "cash",
+  "rules": {
+    "max_positions": 5,
+    "max_position_pct": 30.0,
+    "min_hold_days": 1
+  }
+}

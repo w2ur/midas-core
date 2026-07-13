@@ -1,0 +1,17 @@
+{
+  "id": "insider-shadow",
+  "name": "Insider Shadow — Follow Smart Money",
+  "universe": "insiders",
+  "selector": "data-follow",
+  "manager": "equal-weight",
+  "funding": {
+    "initial": 10000,
+    "monthly_addition": 500
+  },
+  "dividends": "cash",
+  "rules": {
+    "max_positions": 10,
+    "max_position_pct": 15.0,
+    "min_hold_days": 5
+  }
+}

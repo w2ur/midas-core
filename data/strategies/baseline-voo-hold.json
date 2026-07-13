@@ -1,0 +1,10 @@
+{
+  "id": "baseline-voo-hold",
+  "name": "Baseline: Buy & Hold VOO",
+  "universe": "single-voo",
+  "selector": "buy-and-hold",
+  "manager": "equal-weight",
+  "funding": {"initial": 10000, "monthly_addition": 0},
+  "dividends": "reinvest",
+  "rules": {"max_positions": 1, "max_position_pct": 100, "min_hold_days": 1}
+}

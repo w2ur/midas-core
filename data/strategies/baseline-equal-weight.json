@@ -1,0 +1,10 @@
+{
+  "id": "baseline-equal-weight",
+  "name": "Baseline: Equal Weight ETF Broad",
+  "universe": "etf-broad",
+  "selector": "buy-and-hold",
+  "manager": "equal-weight",
+  "funding": {"initial": 10000, "monthly_addition": 0},
+  "dividends": "reinvest",
+  "rules": {"max_positions": 10, "max_position_pct": 100, "min_hold_days": 1}
+}

@@ -1,0 +1,17 @@
+{
+  "id": "dividend-aristocrats-drip",
+  "name": "Dividend Aristocrats DRIP",
+  "universe": "dividend-aristocrats",
+  "selector": "rsi-oversold",
+  "manager": "equal-weight",
+  "funding": {
+    "initial": 10000,
+    "monthly_addition": 500
+  },
+  "dividends": "reinvest",
+  "rules": {
+    "max_positions": 20,
+    "max_position_pct": 8.0,
+    "min_hold_days": 30
+  }
+}

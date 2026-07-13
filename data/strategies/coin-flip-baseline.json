@@ -1,0 +1,17 @@
+{
+  "id": "coin-flip-baseline",
+  "name": "Coin Flip Baseline — The Null Hypothesis",
+  "universe": "sp500",
+  "selector": "random",
+  "manager": "equal-weight",
+  "funding": {
+    "initial": 10000,
+    "monthly_addition": 0
+  },
+  "dividends": "cash",
+  "rules": {
+    "max_positions": 10,
+    "max_position_pct": 20.0,
+    "min_hold_days": 3
+  }
+}

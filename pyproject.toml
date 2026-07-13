@@ -1,0 +1,32 @@
+[project]
+name = "midas-core"
+version = "0.1.0"
+description = "Midas — open multi-agent fund-manager engine (Brain/Hands, honest controls)"
+requires-python = ">=3.12"
+dependencies = [
+    "bt>=1.1.0",
+    "yfinance>=0.2.30",
+    "pandas>=2.0,!=3.0.4",
+    "pandas-ta>=0.4.67b0",
+    "numpy>=1.24",
+    "requests>=2.31",
+    "ccxt>=4.0",
+    "PyYAML>=6.0",
+]
+# NOTE: requirements.txt remains the pinned lock everyone installs (pip-compile from
+# requirements.in). These loose constraints are the core runtime subset of
+# requirements.in (a curated subset, not a full mirror) for `pip install -e .`.
+
+[project.scripts]
+midas = "engine.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["engine*", "scripts*"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
