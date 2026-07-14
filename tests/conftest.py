@@ -52,13 +52,16 @@ def _isolated_session_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def _running_live_cast() -> bool:
-    """True on the live Midas desk, False on the bundled demo desk.
+    """True on the live Midas desk, False only on the confirmed demo desk.
 
     Cast-coupled tests (``@pytest.mark.live_cast``) hardcode the live roster and
-    are skipped when the suite resolves the demo desk, whose agent ids are all
-    ``demo-*``. Reads the roster directly from the resolved data dir — it does
-    NOT call ``get_config()``, so the lru-cache is never populated at collection
-    time.
+    are skipped ONLY when the suite affirmatively resolves the demo desk (whose
+    agent ids are all ``demo-*``). Any other outcome — a live roster, an empty
+    roster, or an unreadable/malformed one — returns True so the tests RUN. This
+    fails closed: the whole point of guards like ``test_live_switch`` is to catch
+    a bad live config on CI, so an unreadable roster must never silently skip
+    them. Reads the roster directly from the resolved data dir — it does NOT call
+    ``get_config()``, so the lru-cache is never populated at collection time.
     """
     from engine.config import _resolve_data_dir
 
@@ -66,8 +69,9 @@ def _running_live_cast() -> bool:
         raw = yaml.safe_load((_resolve_data_dir() / "roster.yaml").read_text("utf-8"))
         agent_ids = list((raw or {}).get("agents", {}))
     except (OSError, yaml.YAMLError, AttributeError):
-        return False
-    return bool(agent_ids) and not all(aid.startswith("demo-") for aid in agent_ids)
+        return True  # roster unreadable → assume live and RUN (fail closed)
+    # Skip only when we can confirm the demo desk (non-empty, all demo-* ids).
+    return not (bool(agent_ids) and all(aid.startswith("demo-") for aid in agent_ids))
 
 
 def pytest_collection_modifyitems(config, items):
