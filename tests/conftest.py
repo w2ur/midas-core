@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+import yaml
 
 
 @pytest.fixture
@@ -48,3 +49,32 @@ def _isolated_session_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     import scripts.session_state as ss
 
     monkeypatch.setattr(ss, "_STATE_DIR", tmp_path / "session_state")
+
+
+def _running_live_cast() -> bool:
+    """True on the live Midas desk, False on the bundled demo desk.
+
+    Cast-coupled tests (``@pytest.mark.live_cast``) hardcode the live roster and
+    are skipped when the suite resolves the demo desk, whose agent ids are all
+    ``demo-*``. Reads the roster directly from the resolved data dir — it does
+    NOT call ``get_config()``, so the lru-cache is never populated at collection
+    time.
+    """
+    from engine.config import _resolve_data_dir
+
+    try:
+        raw = yaml.safe_load((_resolve_data_dir() / "roster.yaml").read_text("utf-8"))
+        agent_ids = list((raw or {}).get("agents", {}))
+    except (OSError, yaml.YAMLError, AttributeError):
+        return False
+    return bool(agent_ids) and not all(aid.startswith("demo-") for aid in agent_ids)
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip ``live_cast``-marked tests when the demo desk is the active roster."""
+    if _running_live_cast():
+        return
+    skip = pytest.mark.skip(reason="cast-coupled; live desk only (demo cast active)")
+    for item in items:
+        if "live_cast" in item.keywords:
+            item.add_marker(skip)
