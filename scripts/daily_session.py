@@ -171,19 +171,29 @@ def step_author_orders(
 
     Returns
     -------
-    Number of orders appended to the outbox (malformed trades raise at Order construction
-    time; callers are expected to pass well-formed trades from agent JSON).
+    Number of orders appended to the outbox. The action is normalized to
+    upper-case and any non-BUY/SELL trade (e.g. a lowercase ``"sell"`` or a
+    ``"HOLD"`` pseudo-trade) is dropped rather than raising — an unattended
+    session must not crash on an agent's loose action string (2026-07-17
+    incident). Malformed ticker/shares still raise at Order construction.
 
     Each trade may optionally include ``trigger`` and ``expires`` for conditional
     orders. See CONDITIONAL_ORDER_INSTRUCTIONS for the schema.
     """
     print(f"\n=== Step 3a: Author orders for {agent_id} ({len(trades)} trades) ===")
+    authored = 0
     for seq, t in enumerate(trades, start=1):
+        action = str(t.get("action", "")).strip().upper()
+        if action not in ("BUY", "SELL"):
+            print(
+                f"  [SKIP] {agent_id} trade {seq}: non-tradeable action {t.get('action')!r}"
+            )
+            continue
         order = Order(
             order_id=make_order_id(trade_date, agent_id, seq),
             ts=datetime.now(timezone.utc),
             agent_id=agent_id,
-            action=t["action"],
+            action=action,
             ticker=t["ticker"],
             shares=float(t["shares"]),
             reasoning=t.get("reasoning", ""),
@@ -192,7 +202,8 @@ def step_author_orders(
             expires=t.get("expires"),
         )
         append_order(trade_date, order)
-    return len(trades)
+        authored += 1
+    return authored
 
 
 CONDITIONAL_ORDER_INSTRUCTIONS = """\

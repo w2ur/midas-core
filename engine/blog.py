@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -25,6 +26,12 @@ def _truncate(text: str, cap: int) -> str:
     return text[: cap - 1].rstrip() + "…"
 
 
+def _slugify(text: str) -> str:
+    """Lower-case ASCII slug (letters/digits joined by single hyphens)."""
+    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    return slug or "untitled"
+
+
 @dataclass
 class BlogDraft:
     """Daily blog post draft produced by The Oracle."""
@@ -38,7 +45,12 @@ class BlogDraft:
 
     @classmethod
     def from_dict(cls, d: dict) -> "BlogDraft":
-        return cls(title=d["title"], body_md=d["body_md"], slug=d["slug"])
+        # The Oracle sometimes omits (or blanks) the slug; derive it from the
+        # title so the pipeline never crashes on a missing key (2026-07-17
+        # incident). A "Day N: …" title slugifies to the "day-n-…" convention.
+        title = d["title"]
+        slug = d.get("slug") or _slugify(title)
+        return cls(title=title, body_md=d["body_md"], slug=slug)
 
 
 def build_oracle_prompt(
