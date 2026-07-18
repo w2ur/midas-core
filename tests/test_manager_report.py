@@ -21,8 +21,10 @@ import pytest
 
 from engine.config import get_config, reset_config_cache
 from engine.manager_report import (
+    authored_status,
     book_paths,
     build_manager_summary,
+    index_manager_inbox,
     load_decisions,
     load_resolved,
     read_portfolio,
@@ -253,3 +255,166 @@ def test_book_paths_review_dir_matches_legacy() -> None:
         paths["snapshots"]
         == get_config().portfolios_dir / "the-manager" / "snapshots.json"
     )
+
+
+# ---------------------------------------------------------------------------
+# index_manager_inbox + authored_status
+#
+# Regression cover for the 2026-07-18 confusion: the decision log rendered an
+# armed-but-unfired conditional order identically to an executed market buy, so
+# "BUY QQQ3.L €250" read as a fill when it had actually expired unfired. These
+# tests pin the terminal-status join (inbox = filled/expired/cancelled, pending
+# = armed) that the log now uses to disambiguate authored intent from outcome.
+# ---------------------------------------------------------------------------
+
+
+def _jsonl(path: Path, records: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+
+
+def test_index_manager_inbox_missing_dir_returns_empty(tmp_path: Path) -> None:
+    assert index_manager_inbox(tmp_path / "nope") == {}
+
+
+def test_index_manager_inbox_scans_all_files_last_wins(tmp_path: Path) -> None:
+    inbox = tmp_path / "manager-inbox"
+    # A conditional authored 06-30 fills on 07-07 — its terminal record lives in
+    # the file dated by the FILL day, not the authoring day. The index must scan
+    # every *.jsonl (glob order is sorted, so a later file wins on a dup id).
+    _jsonl(inbox / "2026-07-07.jsonl", [{"order_id": "a", "status": "filled"}])
+    _jsonl(
+        inbox / "2026-07-16.jsonl",
+        [
+            {"order_id": "b", "status": "rejected", "reason": "TRIGGER_EXPIRED"},
+            {"order_id": "a", "status": "rejected", "reason": "later"},
+        ],
+    )
+    idx = index_manager_inbox(inbox)
+    assert idx["a"]["reason"] == "later"  # later file wins
+    assert idx["b"]["status"] == "rejected"
+
+
+def test_index_manager_inbox_tolerates_blank_and_bad_lines(tmp_path: Path) -> None:
+    inbox = tmp_path / "manager-inbox"
+    inbox.mkdir(parents=True)
+    (inbox / "2026-07-07.jsonl").write_text(
+        '\n{"order_id": "a", "status": "filled"}\n{bad json\n\n',
+        encoding="utf-8",
+    )
+    idx = index_manager_inbox(inbox)
+    assert set(idx) == {"a"}
+
+
+def _decision(date_str: str, positions: list[dict]) -> dict:
+    return {"date": date_str, "conviction": 6, "positions": positions}
+
+
+def test_authored_status_market_fill_is_filled(tmp_path: Path) -> None:
+    inbox_index = {"ord_2026-07-13_the-manager_001": {"status": "filled"}}
+    d = _decision("2026-07-13", [{"ticker": "NVDA", "action": "BUY", "size_eur": 300}])
+    out = authored_status(
+        d,
+        agent_id="the-manager",
+        inbox_index=inbox_index,
+        pending_dir=tmp_path / "manager-pending",
+    )
+    assert out == ["filled"]
+
+
+def test_authored_status_armed_pending_order(tmp_path: Path) -> None:
+    pending = tmp_path / "manager-pending"
+    pending.mkdir(parents=True)
+    (pending / "ord_2026-07-14_the-manager_001.json").write_text("{}", encoding="utf-8")
+    d = _decision(
+        "2026-07-14",
+        [
+            {
+                "ticker": "BTC-EUR",
+                "action": "BUY",
+                "size_eur": 300,
+                "trigger": {"op": ">=", "level": 58000.0},
+            }
+        ],
+    )
+    out = authored_status(
+        d, agent_id="the-manager", inbox_index={}, pending_dir=pending
+    )
+    assert out == ["armed"]
+
+
+def test_authored_status_expired_carries_date(tmp_path: Path) -> None:
+    inbox_index = {
+        "ord_2026-07-02_the-manager_001": {
+            "status": "rejected",
+            "reason": "TRIGGER_EXPIRED",
+            "ts_filled": "2026-07-16T01:06:12.508888Z",
+        }
+    }
+    d = _decision(
+        "2026-07-02", [{"ticker": "QQQ3.L", "action": "BUY", "size_eur": 250}]
+    )
+    out = authored_status(
+        d,
+        agent_id="the-manager",
+        inbox_index=inbox_index,
+        pending_dir=tmp_path / "manager-pending",
+    )
+    assert out == ["expired 07-16"]
+
+
+def test_authored_status_cancelled(tmp_path: Path) -> None:
+    inbox_index = {
+        "ord_2026-07-05_the-manager_001": {
+            "status": "rejected",
+            "reason": "CANCELLED_BY_AGENT",
+            "ts_filled": "2026-07-06T20:00:00Z",
+        }
+    }
+    d = _decision("2026-07-05", [{"ticker": "FOO", "action": "BUY", "size_eur": 100}])
+    out = authored_status(
+        d,
+        agent_id="the-manager",
+        inbox_index=inbox_index,
+        pending_dir=tmp_path / "manager-pending",
+    )
+    assert out == ["cancelled 07-06"]
+
+
+def test_authored_status_other_rejection_names_reason(tmp_path: Path) -> None:
+    inbox_index = {
+        "ord_2026-07-05_the-manager_001": {
+            "status": "rejected",
+            "reason": "NOTIONAL_CAP_EXCEEDED",
+        }
+    }
+    d = _decision("2026-07-05", [{"ticker": "FOO", "action": "BUY", "size_eur": 100}])
+    out = authored_status(
+        d,
+        agent_id="the-manager",
+        inbox_index=inbox_index,
+        pending_dir=tmp_path / "manager-pending",
+    )
+    assert out == ["rejected: NOTIONAL_CAP_EXCEEDED"]
+
+
+def test_authored_status_unknown_when_no_record(tmp_path: Path) -> None:
+    d = _decision("2026-07-05", [{"ticker": "FOO", "action": "BUY", "size_eur": 100}])
+    out = authored_status(
+        d,
+        agent_id="the-manager",
+        inbox_index={},
+        pending_dir=tmp_path / "manager-pending",
+    )
+    assert out == [""]
+
+
+def test_authored_status_bad_date_degrades_gracefully(tmp_path: Path) -> None:
+    d = _decision("not-a-date", [{"ticker": "FOO", "action": "BUY", "size_eur": 100}])
+    out = authored_status(
+        d,
+        agent_id="the-manager",
+        inbox_index={},
+        pending_dir=tmp_path / "manager-pending",
+    )
+    assert out == [""]

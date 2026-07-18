@@ -195,6 +195,19 @@ class TestParseOracleResponse:
         )
         assert draft.slug == "rally-rout"
 
+    def test_missing_body_and_title_degrade_without_crashing(self) -> None:
+        # Oracle omits body_md (and title): degrade to defaults, don't KeyError.
+        draft = BlogDraft.from_dict({"slug": "day-5"})
+        assert draft.body_md == ""
+        assert draft.title == "Midas Daily"
+        assert draft.slug == "day-5"
+
+    def test_missing_blog_draft_key_does_not_crash(self) -> None:
+        draft, posts = parse_oracle_response(json.dumps({"posts": []}))
+        assert draft.title == "Midas Daily"
+        assert draft.body_md == ""
+        assert posts == []
+
 
 class TestSaveDailyBlogDraft:
     def test_writes_frontmatter_and_body(self, midas_data_root: Path) -> None:

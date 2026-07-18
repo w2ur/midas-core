@@ -26,10 +26,12 @@ the Manager has ever run.
 from __future__ import annotations
 
 import json
+from datetime import date as _date
 from pathlib import Path
 
 from engine.config import get_config
 from engine.orders import allocator_channel_dir as _order_dir
+from engine.orders import make_order_id
 
 # Snapshot record: {"date": "YYYY-MM-DD", "portfolio_value": float, ...}
 Snapshot = dict
@@ -185,3 +187,114 @@ def load_resolved(resolved_path: Path) -> list[ResolvedOutcome]:
     except (OSError, json.JSONDecodeError):
         return []
     return raw if isinstance(raw, list) else []
+
+
+# ---------------------------------------------------------------------------
+# Authored-order terminal status
+#
+# The decision log records what the Manager *authored*; a conditional order's
+# outcome (fired / expired / cancelled) or open state (armed) lives in the
+# separate broker channels. These helpers join the two so the log can mark an
+# armed-but-unfired conditional distinctly from an executed buy — the
+# 2026-07-18 confusion where "BUY QQQ3.L €250" (a trigger that expired unfired)
+# read identically to a real fill.
+# ---------------------------------------------------------------------------
+
+
+def index_manager_inbox(inbox_dir: Path) -> dict[str, dict]:
+    """Map ``order_id -> its terminal inbox record`` across every ``{date}.jsonl``.
+
+    A conditional authored on day D fills (or expires) on a *later* day, so its
+    record lands in the inbox file dated by the processing day — not D. The join
+    therefore has to scan the whole directory rather than a single date's file.
+    Files are read in sorted (chronological) order so a later record wins on a
+    duplicated id. Blank/malformed lines and unreadable files are skipped.
+    Returns ``{}`` if the directory is absent.
+    """
+    index: dict[str, dict] = {}
+    inbox_dir = Path(inbox_dir)
+    if not inbox_dir.is_dir():
+        return index
+    for f in sorted(inbox_dir.glob("*.jsonl")):
+        try:
+            lines = f.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            oid = rec.get("order_id") if isinstance(rec, dict) else None
+            if oid:
+                index[oid] = rec
+    return index
+
+
+def authored_status(
+    decision: Decision,
+    *,
+    agent_id: str,
+    inbox_index: dict[str, dict],
+    pending_dir: Path,
+) -> list[str]:
+    """Per-position terminal status label for an authored daily decision.
+
+    Positions are joined to their deterministic ``order_id``
+    (``ord_{date}_{agent_id}_{seq:03d}``, 1-indexed in author order) and resolved
+    against the inbox (``inbox_index`` from :func:`index_manager_inbox`) then the
+    pending channel:
+
+      - ``"filled"``            — a market or fired-conditional fill
+      - ``"expired MM-DD"``     — a conditional that expired unfired
+      - ``"cancelled MM-DD"``   — cancelled by the agent
+      - ``"rejected: REASON"``  — any other broker rejection
+      - ``"armed"``             — still-open conditional in ``pending_dir``
+      - ``""``                  — no record yet (unknown)
+
+    Returns one label per position, in order; ``[]`` for a HOLD day. Never
+    raises — an unparseable ``date`` degrades every label to ``""``.
+    """
+    positions = decision.get("positions", []) or []
+    try:
+        d = _date.fromisoformat(decision.get("date", ""))
+    except (ValueError, TypeError):
+        return ["" for _ in positions]
+
+    pending_dir = Path(pending_dir)
+    labels: list[str] = []
+    for seq, _pos in enumerate(positions, start=1):
+        oid = make_order_id(d, agent_id, seq)
+        rec = inbox_index.get(oid)
+        if rec is not None:
+            labels.append(_inbox_status_label(rec))
+        elif (pending_dir / f"{oid}.json").is_file():
+            labels.append("armed")
+        else:
+            labels.append("")
+    return labels
+
+
+def _inbox_status_label(rec: dict) -> str:
+    """Terminal label for a single inbox fill record."""
+    if rec.get("status") == "filled":
+        return "filled"
+    reason = rec.get("reason")
+    if reason == "TRIGGER_EXPIRED":
+        return f"expired {_short_date(rec)}".rstrip()
+    if reason == "CANCELLED_BY_AGENT":
+        return f"cancelled {_short_date(rec)}".rstrip()
+    if reason:
+        return f"rejected: {reason}"
+    return rec.get("status") or ""
+
+
+def _short_date(rec: dict) -> str:
+    """``MM-DD`` from a record's ``ts_filled`` ISO timestamp, or ``""``."""
+    ts = rec.get("ts_filled")
+    if isinstance(ts, str) and len(ts) >= 10:
+        return ts[5:10]  # "YYYY-MM-DDT..." -> "MM-DD"
+    return ""

@@ -184,9 +184,18 @@ def step_author_orders(
     authored = 0
     for seq, t in enumerate(trades, start=1):
         action = str(t.get("action", "")).strip().upper()
-        if action not in ("BUY", "SELL"):
+        ticker = str(t.get("ticker", "")).strip()
+        if action not in ("BUY", "SELL") or not ticker:
             print(
-                f"  [SKIP] {agent_id} trade {seq}: non-tradeable action {t.get('action')!r}"
+                f"  [SKIP] {agent_id} trade {seq}: non-tradeable "
+                f"action={t.get('action')!r} ticker={t.get('ticker')!r}"
+            )
+            continue
+        try:
+            shares = float(t["shares"])
+        except (KeyError, TypeError, ValueError):
+            print(
+                f"  [SKIP] {agent_id} trade {seq}: invalid shares {t.get('shares')!r}"
             )
             continue
         order = Order(
@@ -194,8 +203,8 @@ def step_author_orders(
             ts=datetime.now(timezone.utc),
             agent_id=agent_id,
             action=action,
-            ticker=t["ticker"],
-            shares=float(t["shares"]),
+            ticker=ticker,
+            shares=shares,
             reasoning=t.get("reasoning", ""),
             currency=currency,
             trigger=t.get("trigger"),

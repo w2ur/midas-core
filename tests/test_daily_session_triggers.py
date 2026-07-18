@@ -129,6 +129,30 @@ class TestAuthorOrderNormalization:
         assert len(out) == 1
         assert out[0].action == "BUY"
 
+    def test_missing_ticker_or_shares_is_dropped_not_crashed(
+        self, midas_data_root
+    ) -> None:
+        d = date(2026, 5, 17)
+        n = step_author_orders(
+            "satoshi",
+            trades=[
+                {"action": "BUY", "shares": 1, "reasoning": "no ticker"},
+                {"action": "BUY", "ticker": "BTC-EUR", "reasoning": "no shares"},
+                {
+                    "action": "BUY",
+                    "ticker": "ETH-EUR",
+                    "shares": "lots",
+                    "reasoning": "bad",
+                },
+                {"action": "BUY", "ticker": "SOL-EUR", "shares": 2, "reasoning": "ok"},
+            ],
+            trade_date=d,
+            currency="EUR",
+        )
+        assert n == 1  # only the well-formed trade is authored
+        out = read_outbox(d)
+        assert [o.ticker for o in out] == ["SOL-EUR"]
+
 
 class TestAuthorCancels:
     def test_cancel_written_to_cancels_dir(self, midas_data_root) -> None:
