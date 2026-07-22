@@ -191,6 +191,43 @@ class Fill:
         )
 
 
+@dataclass
+class DroppedTrade:
+    """A trade the Brain dropped before it reached the broker.
+
+    Some agent output is not a valid order — a lowercase/HOLD action, a missing
+    ticker, or non-numeric/non-positive shares. Rather than crash the unattended
+    session at Order construction (2026-07-17 incident) or drop it with no trace,
+    the authoring step records it here (data/orders/dropped/YYYY-MM-DD.jsonl,
+    committed) so the git ledger keeps a tamper-evident audit trail — the Brain-
+    side analogue of the broker's inbox rejection codes.
+
+    ``raw`` preserves the trade dict exactly as the agent emitted it.
+    """
+
+    ts: datetime
+    agent_id: str
+    reason: str  # NON_TRADEABLE_ACTION | MISSING_TICKER | INVALID_SHARES
+    raw: dict
+
+    def to_dict(self) -> dict:
+        return {
+            "ts": self.ts.isoformat().replace("+00:00", "Z"),
+            "agent_id": self.agent_id,
+            "reason": self.reason,
+            "raw": self.raw,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "DroppedTrade":
+        return cls(
+            ts=datetime.fromisoformat(d["ts"].replace("Z", "+00:00")),
+            agent_id=d["agent_id"],
+            reason=d["reason"],
+            raw=d.get("raw", {}),
+        )
+
+
 def make_order_id(d: date, agent_id: str, seq: int) -> str:
     """Deterministic order ID: ord_{iso_date}_{agent_id}_{seq:03d}."""
     return f"ord_{d.isoformat()}_{agent_id}_{seq:03d}"
@@ -242,6 +279,25 @@ def append_fill(d: date, fill: Fill, inbox_dir: Path | None = None) -> None:
 def read_inbox(d: date, inbox_dir: Path | None = None) -> list[Fill]:
     base = inbox_dir if inbox_dir is not None else get_config().orders_dir / "inbox"
     return [Fill.from_dict(r) for r in _read_jsonl(base / f"{d.isoformat()}.jsonl")]
+
+
+def append_dropped(
+    d: date, record: DroppedTrade, dropped_dir: Path | None = None
+) -> None:
+    """Append a dropped-trade audit record for date ``d`` (committed ledger)."""
+    base = (
+        dropped_dir if dropped_dir is not None else get_config().orders_dir / "dropped"
+    )
+    _append_jsonl(base / f"{d.isoformat()}.jsonl", record.to_dict())
+
+
+def read_dropped(d: date, dropped_dir: Path | None = None) -> list[DroppedTrade]:
+    base = (
+        dropped_dir if dropped_dir is not None else get_config().orders_dir / "dropped"
+    )
+    return [
+        DroppedTrade.from_dict(r) for r in _read_jsonl(base / f"{d.isoformat()}.jsonl")
+    ]
 
 
 def inbox_order_ids(d: date | None = None, inbox_dir: Path | None = None) -> set[str]:

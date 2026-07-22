@@ -67,7 +67,13 @@ from engine.baseline_manager import (
 )
 from engine.blog import build_oracle_prompt, save_daily_blog_draft
 from engine.ohlcv_store import latest_close_on_or_before
-from engine.orders import Order, append_order, make_order_id
+from engine.orders import (
+    DroppedTrade,
+    Order,
+    append_dropped,
+    append_order,
+    make_order_id,
+)
 from engine.research_note import parse_research_note
 from engine.triggers import (
     CancelRequest,
@@ -172,10 +178,13 @@ def step_author_orders(
     Returns
     -------
     Number of orders appended to the outbox. The action is normalized to
-    upper-case and any non-BUY/SELL trade (e.g. a lowercase ``"sell"`` or a
-    ``"HOLD"`` pseudo-trade) is dropped rather than raising — an unattended
-    session must not crash on an agent's loose action string (2026-07-17
-    incident). Malformed ticker/shares still raise at Order construction.
+    upper-case; any trade that is not a valid order — non-BUY/SELL action
+    (e.g. a lowercase ``"sell"`` or a ``"HOLD"`` pseudo-trade), missing ticker,
+    or non-numeric/non-positive shares — is dropped rather than raising at Order
+    construction, so an unattended session never crashes on loose agent output
+    (2026-07-17 incident). Every drop is recorded to the committed dropped-trade
+    ledger (``data/orders/dropped/``) with a reason code, keeping a tamper-
+    evident audit trail rather than a silent skip.
 
     Each trade may optionally include ``trigger`` and ``expires`` for conditional
     orders. See CONDITIONAL_ORDER_INSTRUCTIONS for the schema.
@@ -185,17 +194,30 @@ def step_author_orders(
     for seq, t in enumerate(trades, start=1):
         action = str(t.get("action", "")).strip().upper()
         ticker = str(t.get("ticker", "")).strip()
-        if action not in ("BUY", "SELL") or not ticker:
-            print(
-                f"  [SKIP] {agent_id} trade {seq}: non-tradeable "
-                f"action={t.get('action')!r} ticker={t.get('ticker')!r}"
-            )
-            continue
         try:
             shares = float(t["shares"])
         except (KeyError, TypeError, ValueError):
-            print(
-                f"  [SKIP] {agent_id} trade {seq}: invalid shares {t.get('shares')!r}"
+            shares = None
+        # Classify anything that is not a valid order and record it to the
+        # committed dropped-trade ledger instead of crashing (2026-07-17).
+        if action not in ("BUY", "SELL"):
+            reason = "NON_TRADEABLE_ACTION"
+        elif not ticker:
+            reason = "MISSING_TICKER"
+        elif shares is None or shares <= 0:
+            reason = "INVALID_SHARES"
+        else:
+            reason = None
+        if reason is not None:
+            print(f"  [SKIP] {agent_id} trade {seq}: {reason} {t!r}")
+            append_dropped(
+                trade_date,
+                DroppedTrade(
+                    ts=datetime.now(timezone.utc),
+                    agent_id=agent_id,
+                    reason=reason,
+                    raw=t,
+                ),
             )
             continue
         order = Order(

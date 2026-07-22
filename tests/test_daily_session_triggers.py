@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from engine.orders import Order, read_outbox
+from engine.orders import Order, read_dropped, read_outbox
 from engine.triggers import list_pending, read_cancels, save_pending
 from engine.portfolio import PortfolioManager
 from scripts.daily_session import (
@@ -128,6 +128,42 @@ class TestAuthorOrderNormalization:
         out = read_outbox(d)
         assert len(out) == 1
         assert out[0].action == "BUY"
+        # Both drops are recorded to the committed audit ledger.
+        dropped = read_dropped(d)
+        assert [r.reason for r in dropped] == [
+            "NON_TRADEABLE_ACTION",
+            "NON_TRADEABLE_ACTION",
+        ]
+        assert dropped[0].raw["action"] == "HOLD"  # raw trade preserved verbatim
+
+    def test_nonpositive_shares_are_dropped_not_crashed(self, midas_data_root) -> None:
+        # shares<=0 would raise in Order.__post_init__; must be dropped + audited.
+        d = date(2026, 5, 17)
+        n = step_author_orders(
+            "satoshi",
+            trades=[
+                {
+                    "action": "BUY",
+                    "ticker": "BTC-EUR",
+                    "shares": 0,
+                    "reasoning": "zero",
+                },
+                {
+                    "action": "SELL",
+                    "ticker": "ETH-EUR",
+                    "shares": -3,
+                    "reasoning": "neg",
+                },
+            ],
+            trade_date=d,
+            currency="EUR",
+        )
+        assert n == 0
+        assert read_outbox(d) == []
+        assert [r.reason for r in read_dropped(d)] == [
+            "INVALID_SHARES",
+            "INVALID_SHARES",
+        ]
 
     def test_missing_ticker_or_shares_is_dropped_not_crashed(
         self, midas_data_root
@@ -152,6 +188,11 @@ class TestAuthorOrderNormalization:
         assert n == 1  # only the well-formed trade is authored
         out = read_outbox(d)
         assert [o.ticker for o in out] == ["SOL-EUR"]
+        assert [r.reason for r in read_dropped(d)] == [
+            "MISSING_TICKER",
+            "INVALID_SHARES",
+            "INVALID_SHARES",
+        ]
 
 
 class TestAuthorCancels:

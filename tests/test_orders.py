@@ -7,14 +7,42 @@ from pathlib import Path
 import pytest
 
 from engine.orders import (
+    DroppedTrade,
     Fill,
     Order,
+    append_dropped,
     append_fill,
     append_order,
     make_order_id,
+    read_dropped,
     read_inbox,
     read_outbox,
 )
+
+
+class TestDroppedTrade:
+    def _rec(self) -> DroppedTrade:
+        return DroppedTrade(
+            ts=datetime(2026, 5, 17, 20, 3, tzinfo=timezone.utc),
+            agent_id="monsieur-forex",
+            reason="NON_TRADEABLE_ACTION",
+            raw={"action": "HOLD", "ticker": "EURUSD=X", "reasoning": "wait"},
+        )
+
+    def test_dict_roundtrip(self) -> None:
+        rec = self._rec()
+        assert DroppedTrade.from_dict(rec.to_dict()) == rec
+
+    def test_ts_serialized_with_z_suffix(self) -> None:
+        assert self._rec().to_dict()["ts"].endswith("Z")
+
+    def test_append_and_read(self, midas_data_root: Path) -> None:
+        d = date(2026, 5, 17)
+        append_dropped(d, self._rec())
+        got = read_dropped(d)
+        assert len(got) == 1
+        assert got[0].reason == "NON_TRADEABLE_ACTION"
+        assert got[0].raw["action"] == "HOLD"
 
 
 class TestOrderIdGeneration:
