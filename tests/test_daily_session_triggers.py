@@ -40,7 +40,7 @@ class TestAuthorConditionalOrders:
             trade_date=d,
             currency="EUR",
         )
-        assert n == 1
+        assert len(n) == 1
         out = read_outbox(d)
         assert out[0].trigger is None
         assert out[0].expires is None
@@ -70,12 +70,14 @@ class TestAuthorConditionalOrders:
 
 
 class TestAuthorOrderNormalization:
-    """Agents emit lowercase actions and HOLD pseudo-trades; an unattended
-    session must not crash at Order construction (2026-07-17 incident)."""
+    """Agents emit loose output (lowercase actions, HOLD/invalid pseudo-trades);
+    an unattended session must not crash at Order construction (2026-07-17), must
+    audit every drop, and must return only the authored trades so narration never
+    references a phantom fill."""
 
     def test_lowercase_action_is_normalized(self, midas_data_root) -> None:
         d = date(2026, 5, 17)
-        n = step_author_orders(
+        authored = step_author_orders(
             "satoshi",
             trades=[
                 {
@@ -94,18 +96,21 @@ class TestAuthorOrderNormalization:
             trade_date=d,
             currency="EUR",
         )
-        assert n == 2
+        assert len(authored) == 2
         assert {o.action for o in read_outbox(d)} == {"BUY", "SELL"}
+        assert read_dropped(d) == []
 
-    def test_hold_and_non_tradeable_actions_are_dropped(self, midas_data_root) -> None:
+    def test_hold_and_non_tradeable_actions_are_dropped_and_audited(
+        self, midas_data_root
+    ) -> None:
         d = date(2026, 5, 17)
-        n = step_author_orders(
+        authored = step_author_orders(
             "monsieur-forex",
             trades=[
                 {
                     "action": "HOLD",
                     "ticker": "EURUSD=X",
-                    "shares": 0,
+                    "shares": 1,
                     "reasoning": "wait",
                 },
                 {
@@ -124,22 +129,22 @@ class TestAuthorOrderNormalization:
             trade_date=d,
             currency="EUR",
         )
-        assert n == 1  # only the buy is authored; HOLD and blank are dropped
-        out = read_outbox(d)
-        assert len(out) == 1
-        assert out[0].action == "BUY"
-        # Both drops are recorded to the committed audit ledger.
+        # Only the buy is authored and returned; HOLD and blank are dropped.
+        assert [t["reasoning"] for t in authored] == ["long"]
+        assert [o.action for o in read_outbox(d)] == ["BUY"]
         dropped = read_dropped(d)
         assert [r.reason for r in dropped] == [
             "NON_TRADEABLE_ACTION",
             "NON_TRADEABLE_ACTION",
         ]
-        assert dropped[0].raw["action"] == "HOLD"  # raw trade preserved verbatim
+        assert dropped[0].raw["action"] == "HOLD"  # raw preserved verbatim
 
-    def test_nonpositive_shares_are_dropped_not_crashed(self, midas_data_root) -> None:
-        # shares<=0 would raise in Order.__post_init__; must be dropped + audited.
+    def test_nonpositive_and_nonfinite_shares_dropped_not_crashed(
+        self, midas_data_root
+    ) -> None:
+        # shares<=0/NaN/inf would raise in Order.__post_init__; must be audited.
         d = date(2026, 5, 17)
-        n = step_author_orders(
+        authored = step_author_orders(
             "satoshi",
             trades=[
                 {
@@ -154,22 +159,25 @@ class TestAuthorOrderNormalization:
                     "shares": -3,
                     "reasoning": "neg",
                 },
+                {
+                    "action": "BUY",
+                    "ticker": "SOL-EUR",
+                    "shares": "nan",
+                    "reasoning": "nan",
+                },
             ],
             trade_date=d,
             currency="EUR",
         )
-        assert n == 0
+        assert authored == []
         assert read_outbox(d) == []
-        assert [r.reason for r in read_dropped(d)] == [
-            "INVALID_SHARES",
-            "INVALID_SHARES",
-        ]
+        assert [r.reason for r in read_dropped(d)] == ["INVALID_SHARES"] * 3
 
-    def test_missing_ticker_or_shares_is_dropped_not_crashed(
+    def test_missing_ticker_or_shares_is_dropped_and_audited(
         self, midas_data_root
     ) -> None:
         d = date(2026, 5, 17)
-        n = step_author_orders(
+        authored = step_author_orders(
             "satoshi",
             trades=[
                 {"action": "BUY", "shares": 1, "reasoning": "no ticker"},
@@ -185,14 +193,158 @@ class TestAuthorOrderNormalization:
             trade_date=d,
             currency="EUR",
         )
-        assert n == 1  # only the well-formed trade is authored
-        out = read_outbox(d)
-        assert [o.ticker for o in out] == ["SOL-EUR"]
+        assert len(authored) == 1
+        assert [o.ticker for o in read_outbox(d)] == ["SOL-EUR"]
         assert [r.reason for r in read_dropped(d)] == [
             "MISSING_TICKER",
             "INVALID_SHARES",
             "INVALID_SHARES",
         ]
+
+    def test_malformed_conditional_is_dropped_as_invalid_order(
+        self, midas_data_root
+    ) -> None:
+        # expires without trigger raises in Order.__post_init__; the try/except
+        # net must record it as INVALID_ORDER, not crash the session.
+        d = date(2026, 5, 17)
+        authored = step_author_orders(
+            "satoshi",
+            trades=[
+                {
+                    "action": "BUY",
+                    "ticker": "BTC-EUR",
+                    "shares": 1,
+                    "reasoning": "bad conditional",
+                    "expires": "2026-08-01",
+                },
+            ],
+            trade_date=d,
+            currency="EUR",
+        )
+        assert authored == []
+        assert read_outbox(d) == []
+        assert [r.reason for r in read_dropped(d)] == ["INVALID_ORDER"]
+
+    def test_step_author_all_filters_dropped_from_narration(
+        self, tmp_path, midas_data_root
+    ) -> None:
+        # The phantom-trade fix: step_author_all replaces result["trades"] with
+        # only the authored trades so posts/journal/bundle never see a drop.
+        pm = PortfolioManager(tmp_path / "portfolios")
+        pm.initialize("satoshi", initial_capital=10_000.0, currency="EUR")
+        d = date(2026, 5, 17)
+        agent_results = {
+            "satoshi": {
+                "commentary": "...",
+                "trades": [
+                    {
+                        "action": "HOLD",
+                        "ticker": "BTC-EUR",
+                        "shares": 1,
+                        "reasoning": "x",
+                    },
+                    {
+                        "action": "buy",
+                        "ticker": "BTC-EUR",
+                        "shares": 0.01,
+                        "reasoning": "y",
+                    },
+                ],
+            }
+        }
+        summary = step_author_all(agent_results, d, portfolio_manager=pm)
+        assert summary["satoshi"]["orders"] == 1
+        # result["trades"] now holds only the authored buy — the HOLD is gone,
+        # and its action is normalized to match the outbox Order.
+        kept = agent_results["satoshi"]["trades"]
+        assert [t["reasoning"] for t in kept] == ["y"]
+        assert kept[0]["action"] == "BUY"  # narration matches the ledger, not "buy"
+
+    def test_boolean_shares_dropped_not_authored_as_one(self, midas_data_root) -> None:
+        # float(True) == 1.0 would sneak past isfinite/>0 and author a phantom
+        # 1-share order; a boolean must be dropped as INVALID_SHARES instead.
+        d = date(2026, 5, 17)
+        authored = step_author_orders(
+            "satoshi",
+            trades=[
+                {"action": "BUY", "ticker": "BTC-EUR", "shares": True, "reasoning": "b"}
+            ],
+            trade_date=d,
+            currency="EUR",
+        )
+        assert authored == []
+        assert read_outbox(d) == []
+        assert [r.reason for r in read_dropped(d)] == ["INVALID_SHARES"]
+
+    def test_null_ticker_dropped_not_authored_as_string_none(
+        self, midas_data_root
+    ) -> None:
+        # null ticker stringifies to "None"; it must be MISSING_TICKER, not a
+        # phantom order for ticker "None".
+        d = date(2026, 5, 17)
+        authored = step_author_orders(
+            "satoshi",
+            trades=[{"action": "BUY", "ticker": None, "shares": 1, "reasoning": "x"}],
+            trade_date=d,
+            currency="EUR",
+        )
+        assert authored == []
+        assert read_outbox(d) == []
+        assert [r.reason for r in read_dropped(d)] == ["MISSING_TICKER"]
+
+    def test_non_dict_trade_element_dropped_not_crashed(self, midas_data_root) -> None:
+        d = date(2026, 5, 17)
+        authored = step_author_orders(
+            "satoshi",
+            trades=[
+                "BUY BTC-EUR",
+                None,
+                {
+                    "action": "buy",
+                    "ticker": "BTC-EUR",
+                    "shares": 0.01,
+                    "reasoning": "ok",
+                },
+            ],
+            trade_date=d,
+            currency="EUR",
+        )
+        assert len(authored) == 1
+        assert [r.reason for r in read_dropped(d)] == [
+            "MALFORMED_TRADE",
+            "MALFORMED_TRADE",
+        ]
+
+    def test_null_trades_does_not_crash(self, tmp_path, midas_data_root) -> None:
+        # "trades": null must not crash len()/enumerate at the boundary.
+        pm = PortfolioManager(tmp_path / "portfolios")
+        pm.initialize("satoshi", initial_capital=10_000.0, currency="EUR")
+        d = date(2026, 5, 17)
+        agent_results = {"satoshi": {"commentary": "flat", "trades": None}}
+        summary = step_author_all(agent_results, d, portfolio_manager=pm)
+        assert summary["satoshi"]["orders"] == 0
+        assert agent_results["satoshi"]["trades"] == []
+
+    def test_narration_filter_survives_idempotent_resume(
+        self, tmp_path, midas_data_root
+    ) -> None:
+        # Finding: the filter must NOT live only inside the idempotent authoring
+        # step, or a resumed fire (authoring skipped) re-exposes phantom trades.
+        pm = PortfolioManager(tmp_path / "portfolios")
+        pm.initialize("satoshi", initial_capital=10_000.0, currency="EUR")
+        d = date(2026, 5, 17)
+        raw = [
+            {"action": "HOLD", "ticker": "BTC-EUR", "shares": 1, "reasoning": "hold"},
+            {"action": "buy", "ticker": "BTC-EUR", "shares": 0.01, "reasoning": "buy"},
+        ]
+        first = {"satoshi": {"trades": [dict(t) for t in raw]}}
+        step_author_all(first, d, portfolio_manager=pm)
+        assert [t["reasoning"] for t in first["satoshi"]["trades"]] == ["buy"]
+        # Simulate resume: agent_results rebuilt from raw output; _author_all_orders
+        # is now skipped by idempotency, but the filter must still trim the HOLD.
+        resumed = {"satoshi": {"trades": [dict(t) for t in raw]}}
+        step_author_all(resumed, d, portfolio_manager=pm)
+        assert [t["reasoning"] for t in resumed["satoshi"]["trades"]] == ["buy"]
 
 
 class TestAuthorCancels:

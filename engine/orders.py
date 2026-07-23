@@ -196,18 +196,20 @@ class DroppedTrade:
     """A trade the Brain dropped before it reached the broker.
 
     Some agent output is not a valid order — a lowercase/HOLD action, a missing
-    ticker, or non-numeric/non-positive shares. Rather than crash the unattended
+    ticker, non-finite/non-positive shares, or a shape the Order validator
+    rejects (e.g. a malformed trigger/expires). Rather than crash the unattended
     session at Order construction (2026-07-17 incident) or drop it with no trace,
     the authoring step records it here (data/orders/dropped/YYYY-MM-DD.jsonl,
     committed) so the git ledger keeps a tamper-evident audit trail — the Brain-
-    side analogue of the broker's inbox rejection codes.
-
-    ``raw`` preserves the trade dict exactly as the agent emitted it.
+    side analogue of the broker's inbox rejection codes. ``raw`` preserves the
+    trade dict exactly as the agent emitted it.
     """
 
     ts: datetime
     agent_id: str
-    reason: str  # NON_TRADEABLE_ACTION | MISSING_TICKER | INVALID_SHARES
+    reason: (
+        str  # NON_TRADEABLE_ACTION | MISSING_TICKER | INVALID_SHARES | INVALID_ORDER
+    )
     raw: dict
 
     def to_dict(self) -> dict:

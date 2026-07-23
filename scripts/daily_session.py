@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import functools
 import json
+import math
 import subprocess
 import sys
 from datetime import date, datetime, timezone
@@ -156,9 +157,70 @@ def step_fetch_market_data() -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _classify_trade(
+    t: object, *, order_id: str, agent_id: str, currency: str
+) -> tuple[str | None, str, "Order | None"]:
+    """Pure classifier shared by the authoring loop and the narration filter so
+    the two never diverge (and the filter stays correct on a resumed session
+    where authoring was skipped).
+
+    Returns ``(reason, detail, order)``. ``reason`` is None and ``order`` is set
+    when the trade is a valid, authorable order; otherwise ``reason`` is the drop
+    code (``order`` is None). ``detail`` is extra context for the stdout log only.
+    Handles every loose shape without raising: a non-dict element, a boolean
+    ``shares`` (``float(True) == 1.0`` would otherwise author a phantom 1 share),
+    non-finite/non-positive shares, and any Order-validator rejection.
+    """
+    if not isinstance(t, dict):
+        return "MALFORMED_TRADE", f" (not a dict: {type(t).__name__})", None
+    # Only accept string action/ticker: a JSON null ticker would otherwise
+    # stringify to "None" and slip past the missing-ticker check as a phantom.
+    raw_action = t.get("action")
+    action = raw_action.strip().upper() if isinstance(raw_action, str) else ""
+    raw_ticker = t.get("ticker")
+    ticker = raw_ticker.strip() if isinstance(raw_ticker, str) else ""
+    raw_shares = t.get("shares")
+    if isinstance(raw_shares, bool):  # bool is an int subclass; reject it
+        shares: float | None = None
+    else:
+        try:
+            shares = float(raw_shares)
+        except (TypeError, ValueError):
+            shares = None
+    if action not in ("BUY", "SELL"):
+        return "NON_TRADEABLE_ACTION", "", None
+    if not ticker:
+        return "MISSING_TICKER", "", None
+    if shares is None or not math.isfinite(shares) or shares <= 0:
+        return "INVALID_SHARES", "", None
+    try:
+        order = Order(
+            order_id=order_id,
+            ts=datetime.now(timezone.utc),
+            agent_id=agent_id,
+            action=action,
+            ticker=ticker,
+            shares=shares,
+            reasoning=t.get("reasoning", ""),
+            currency=currency,
+            trigger=t.get("trigger"),
+            expires=t.get("expires"),
+        )
+    except ValueError as exc:  # e.g. malformed trigger/expires
+        return "INVALID_ORDER", f" ({exc})", None
+    return None, "", order
+
+
+def _normalized_trade(t: dict, order: "Order") -> dict:
+    """The trade dict for narration — raw plus the normalized (uppercased action,
+    stripped ticker, float shares) fields the outbox Order actually carries, so
+    the story never shows ``buy`` where the trade card shows ``BUY``."""
+    return {**t, "action": order.action, "ticker": order.ticker, "shares": order.shares}
+
+
 def step_author_orders(
     agent_id: str, trades: list[dict], trade_date: date, currency: str
-) -> int:
+) -> list[dict]:
     """Step 3a — convert an agent's trades[] into outbox orders.
 
     Not wrapped with @idempotent_step: per-agent inner helper invoked via
@@ -177,63 +239,41 @@ def step_author_orders(
 
     Returns
     -------
-    Number of orders appended to the outbox. The action is normalized to
-    upper-case; any trade that is not a valid order — non-BUY/SELL action
-    (e.g. a lowercase ``"sell"`` or a ``"HOLD"`` pseudo-trade), missing ticker,
-    or non-numeric/non-positive shares — is dropped rather than raising at Order
-    construction, so an unattended session never crashes on loose agent output
-    (2026-07-17 incident). Every drop is recorded to the committed dropped-trade
-    ledger (``data/orders/dropped/``) with a reason code, keeping a tamper-
-    evident audit trail rather than a silent skip.
+    The list of trades actually authored to the outbox (a subset of ``trades``).
+    Any trade that is not a valid order — non-BUY/SELL action, missing ticker,
+    non-finite/non-positive shares, or a shape the Order validator rejects (e.g.
+    a malformed trigger/expires) — is dropped rather than raising, so an
+    unattended session never crashes on loose agent output (2026-07-17 incident).
+    Every drop is recorded to the committed dropped-trade ledger
+    (``data/orders/dropped/``) with a reason code (a tamper-evident audit trail,
+    not a silent skip). Callers narrate the returned list — never the raw input —
+    so a dropped trade is never posted, journaled, or bundled as a phantom fill.
 
     Each trade may optionally include ``trigger`` and ``expires`` for conditional
     orders. See CONDITIONAL_ORDER_INSTRUCTIONS for the schema.
     """
+    trades = trades or []
     print(f"\n=== Step 3a: Author orders for {agent_id} ({len(trades)} trades) ===")
-    authored = 0
+    authored: list[dict] = []
     for seq, t in enumerate(trades, start=1):
-        action = str(t.get("action", "")).strip().upper()
-        ticker = str(t.get("ticker", "")).strip()
-        try:
-            shares = float(t["shares"])
-        except (KeyError, TypeError, ValueError):
-            shares = None
-        # Classify anything that is not a valid order and record it to the
-        # committed dropped-trade ledger instead of crashing (2026-07-17).
-        if action not in ("BUY", "SELL"):
-            reason = "NON_TRADEABLE_ACTION"
-        elif not ticker:
-            reason = "MISSING_TICKER"
-        elif shares is None or shares <= 0:
-            reason = "INVALID_SHARES"
-        else:
-            reason = None
+        order_id = make_order_id(trade_date, agent_id, seq)
+        reason, detail, order = _classify_trade(
+            t, order_id=order_id, agent_id=agent_id, currency=currency
+        )
         if reason is not None:
-            print(f"  [SKIP] {agent_id} trade {seq}: {reason} {t!r}")
+            print(f"  [SKIP] {agent_id} trade {seq}: {reason}{detail} {t!r}")
             append_dropped(
                 trade_date,
                 DroppedTrade(
                     ts=datetime.now(timezone.utc),
                     agent_id=agent_id,
                     reason=reason,
-                    raw=t,
+                    raw=t if isinstance(t, dict) else {"malformed": repr(t)},
                 ),
             )
             continue
-        order = Order(
-            order_id=make_order_id(trade_date, agent_id, seq),
-            ts=datetime.now(timezone.utc),
-            agent_id=agent_id,
-            action=action,
-            ticker=ticker,
-            shares=shares,
-            reasoning=t.get("reasoning", ""),
-            currency=currency,
-            trigger=t.get("trigger"),
-            expires=t.get("expires"),
-        )
         append_order(trade_date, order)
-        authored += 1
+        authored.append(_normalized_trade(t, order))
     return authored
 
 
@@ -327,41 +367,83 @@ def step_author_cancels(
     return len(cancels)
 
 
-@idempotent_step(skip_return={})
 def step_author_all(
     agent_results: dict[str, dict],
     trade_date: date,
     portfolio_manager: PortfolioManager | None = None,
 ) -> dict[str, dict[str, int]]:
-    """Step 3 — author orders + cancels for every agent in `agent_results`.
+    """Step 3 — author orders + cancels, then trim narration trades.
 
     Single entry point the trigger prose calls instead of looping in prose
-    over `step_author_orders` (which was the 2026-05-15 leaderboard-bug
-    pattern: per-agent loops as natural-language instructions). Each agent's
-    base currency is read from disk via PortfolioManager — no prose lookup.
+    over `step_author_orders` (which was the 2026-05-15 leaderboard-bug pattern).
 
-    Reads `trades` and optional `cancels` from each agent's result dict.
-    Returns {agent_id: {"orders": N, "cancels": M}} for caller logging.
+    Idempotency is hand-inlined (rather than via ``@idempotent_step``) because
+    the two halves have different resume semantics under the SAME ``step_author_all``
+    marker (a rename would orphan any pre-existing marker and re-author on a
+    cross-deploy resume):
+
+    - **Authoring** (outbox + cancels writes) runs once — guarded by the
+      done-marker so a resumed session never double-writes orders.
+    - **The narration filter** runs on BOTH paths — including the skip path — so
+      ``result["trades"]`` is always trimmed to the authorable trades. Folding it
+      into the guarded body would lose it on a resumed fire (``data/session_state``
+      survives the sandbox ``git reset``), letting a dropped trade resurface as a
+      phantom fill. The filter recomputes purely (no portfolio load — currency is
+      irrelevant to classification), so it is safe even when authoring is skipped.
+
+    Returns {agent_id: {"orders": N, "cancels": M}} for caller logging ({} on the
+    skip path).
     """
-    print("\n=== Step 3: Author orders + cancels (all agents) ===")
     if portfolio_manager is None:
         portfolio_manager = PortfolioManager(base_dir=get_config().portfolios_dir)
+
+    if _is_done("step_author_all"):
+        print("\n[SKIP] step_author_all already completed this session.")
+        _filter_narration_trades(agent_results, trade_date)
+        return {}
+
+    print("\n=== Step 3: Author orders + cancels (all agents) ===")
     summary: dict[str, dict[str, int]] = {}
     for agent_id, result in agent_results.items():
         portfolio = portfolio_manager.load(agent_id)
-        n_orders = step_author_orders(
+        authored = step_author_orders(
             agent_id,
-            result.get("trades", []),
+            result.get("trades") or [],
             trade_date,
             portfolio.currency,
         )
+        # Trim in-line on the normal path (already classified — no rework).
+        result["trades"] = authored
         n_cancels = step_author_cancels(
             agent_id,
-            result.get("cancels", []),
+            result.get("cancels") or [],
             trade_date,
         )
-        summary[agent_id] = {"orders": n_orders, "cancels": n_cancels}
+        summary[agent_id] = {"orders": len(authored), "cancels": n_cancels}
+    _mark_done("step_author_all")
     return summary
+
+
+def _filter_narration_trades(agent_results: dict[str, dict], trade_date: date) -> None:
+    """Replace each agent's ``result["trades"]`` with only the authorable trades
+    (normalized), so the Oracle, posts, journal, and output bundle never narrate a
+    dropped/invalid trade as a phantom fill. Pure and re-runnable — recomputes from
+    the raw trades via the shared classifier, loading no portfolios (currency does
+    not affect classification) — so it is correct and crash-free on a resumed
+    session where authoring was skipped.
+    """
+    for agent_id, result in agent_results.items():
+        kept: list[dict] = []
+        for seq, t in enumerate(result.get("trades") or [], start=1):
+            reason, _detail, order = _classify_trade(
+                t,
+                order_id=make_order_id(trade_date, agent_id, seq),
+                agent_id=agent_id,
+                currency="",  # unused by classification; avoids a portfolio load
+            )
+            if reason is None:
+                kept.append(_normalized_trade(t, order))
+        result["trades"] = kept
 
 
 @idempotent_step(skip_return=[])

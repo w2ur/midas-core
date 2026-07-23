@@ -138,11 +138,30 @@ def parse_oracle_response(response: str) -> tuple[BlogDraft, list[PostPayload]]:
         start = 1
         end = len(lines) - 1 if lines[-1].strip().startswith("```") else len(lines)
         text = "\n".join(lines[start:end]).strip()
-    data = json.loads(text)
-    draft = BlogDraft.from_dict(data.get("blog_draft") or {})
-    posts = [
-        PostPayload.from_agent_output("the-oracle", p) for p in data.get("posts", [])
-    ]
+    # Degrade every loose Oracle shape rather than crash the unattended session
+    # (2026-07-17): truncated/non-JSON output (the Oracle repeatedly trips the
+    # cloud streaming idle timeout), a non-dict payload or blog_draft, and a
+    # null/absent/non-list posts — plus any malformed post element — all resolve
+    # to safe empties instead of raising.
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    blog_draft = data.get("blog_draft")
+    draft = BlogDraft.from_dict(blog_draft if isinstance(blog_draft, dict) else {})
+    raw_posts = data.get("posts")
+    if not isinstance(raw_posts, list):
+        raw_posts = []
+    posts = []
+    for p in raw_posts:
+        if not isinstance(p, dict):
+            continue
+        try:
+            posts.append(PostPayload.from_agent_output("the-oracle", p))
+        except (KeyError, TypeError, ValueError):
+            continue
     return draft, posts
 
 

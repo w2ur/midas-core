@@ -208,6 +208,50 @@ class TestParseOracleResponse:
         assert draft.body_md == ""
         assert posts == []
 
+    def test_null_posts_does_not_crash(self) -> None:
+        # "posts": null (explicit null, not omitted) must not crash iteration.
+        draft, posts = parse_oracle_response(
+            json.dumps(
+                {"blog_draft": {"title": "Day 5", "body_md": "B"}, "posts": None}
+            )
+        )
+        assert posts == []
+        assert draft.title == "Day 5"
+
+    def test_non_dict_blog_draft_does_not_crash(self) -> None:
+        # A truthy non-dict blog_draft (string) must degrade, not AttributeError.
+        draft, _ = parse_oracle_response(
+            json.dumps({"blog_draft": "Day 5 was rough", "posts": []})
+        )
+        assert draft.title == "Midas Daily"
+        assert draft.body_md == ""
+
+    def test_non_dict_top_level_does_not_crash(self) -> None:
+        draft, posts = parse_oracle_response(json.dumps(["not", "an", "object"]))
+        assert draft.title == "Midas Daily"
+        assert posts == []
+
+    def test_truncated_json_does_not_crash(self) -> None:
+        # The Oracle stream is cut mid-object (cloud streaming idle timeout).
+        draft, posts = parse_oracle_response('{"blog_draft": {"title": "Day 5')
+        assert draft.title == "Midas Daily"
+        assert posts == []
+
+    def test_malformed_post_elements_are_skipped(self) -> None:
+        # A bare-string post and a dict missing "text" must be skipped, not crash.
+        resp = json.dumps(
+            {
+                "blog_draft": {"title": "Day 5", "body_md": "B", "slug": "day-5"},
+                "posts": [
+                    "nice day",
+                    {"kind": "recap", "mentions": ["satoshi"]},
+                    {"text": "real post", "mentions": [], "kind": "scoreboard"},
+                ],
+            }
+        )
+        draft, posts = parse_oracle_response(resp)
+        assert [p.text for p in posts] == ["real post"]
+
 
 class TestSaveDailyBlogDraft:
     def test_writes_frontmatter_and_body(self, midas_data_root: Path) -> None:
