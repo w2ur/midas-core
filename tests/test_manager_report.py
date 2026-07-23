@@ -310,22 +310,31 @@ def _decision(date_str: str, positions: list[dict]) -> dict:
     return {"date": date_str, "conviction": 6, "positions": positions}
 
 
+def _outbox(outbox_dir: Path, date_str: str, orders: list[dict]) -> None:
+    """Write a day's manager outbox — the broker's emitted-order record."""
+    _jsonl(outbox_dir / f"{date_str}.jsonl", orders)
+
+
 def test_authored_status_market_fill_is_filled(tmp_path: Path) -> None:
-    inbox_index = {"ord_2026-07-13_the-manager_001": {"status": "filled"}}
+    outbox = tmp_path / "manager-outbox"
+    _outbox(outbox, "2026-07-13", [{"order_id": "ord_x", "ticker": "NVDA"}])
+    inbox_index = {"ord_x": {"status": "filled"}}
     d = _decision("2026-07-13", [{"ticker": "NVDA", "action": "BUY", "size_eur": 300}])
     out = authored_status(
         d,
-        agent_id="the-manager",
         inbox_index=inbox_index,
         pending_dir=tmp_path / "manager-pending",
+        outbox_dir=outbox,
     )
     assert out == ["filled"]
 
 
 def test_authored_status_armed_pending_order(tmp_path: Path) -> None:
+    outbox = tmp_path / "manager-outbox"
+    _outbox(outbox, "2026-07-14", [{"order_id": "ord_btc", "ticker": "BTC-EUR"}])
     pending = tmp_path / "manager-pending"
     pending.mkdir(parents=True)
-    (pending / "ord_2026-07-14_the-manager_001.json").write_text("{}", encoding="utf-8")
+    (pending / "ord_btc.json").write_text("{}", encoding="utf-8")
     d = _decision(
         "2026-07-14",
         [
@@ -337,15 +346,15 @@ def test_authored_status_armed_pending_order(tmp_path: Path) -> None:
             }
         ],
     )
-    out = authored_status(
-        d, agent_id="the-manager", inbox_index={}, pending_dir=pending
-    )
+    out = authored_status(d, inbox_index={}, pending_dir=pending, outbox_dir=outbox)
     assert out == ["armed"]
 
 
 def test_authored_status_expired_carries_date(tmp_path: Path) -> None:
+    outbox = tmp_path / "manager-outbox"
+    _outbox(outbox, "2026-07-02", [{"order_id": "ord_qqq", "ticker": "QQQ3.L"}])
     inbox_index = {
-        "ord_2026-07-02_the-manager_001": {
+        "ord_qqq": {
             "status": "rejected",
             "reason": "TRIGGER_EXPIRED",
             "ts_filled": "2026-07-16T01:06:12.508888Z",
@@ -356,16 +365,18 @@ def test_authored_status_expired_carries_date(tmp_path: Path) -> None:
     )
     out = authored_status(
         d,
-        agent_id="the-manager",
         inbox_index=inbox_index,
         pending_dir=tmp_path / "manager-pending",
+        outbox_dir=outbox,
     )
     assert out == ["expired 07-16"]
 
 
 def test_authored_status_cancelled(tmp_path: Path) -> None:
+    outbox = tmp_path / "manager-outbox"
+    _outbox(outbox, "2026-07-05", [{"order_id": "ord_foo", "ticker": "FOO"}])
     inbox_index = {
-        "ord_2026-07-05_the-manager_001": {
+        "ord_foo": {
             "status": "rejected",
             "reason": "CANCELLED_BY_AGENT",
             "ts_filled": "2026-07-06T20:00:00Z",
@@ -374,37 +385,37 @@ def test_authored_status_cancelled(tmp_path: Path) -> None:
     d = _decision("2026-07-05", [{"ticker": "FOO", "action": "BUY", "size_eur": 100}])
     out = authored_status(
         d,
-        agent_id="the-manager",
         inbox_index=inbox_index,
         pending_dir=tmp_path / "manager-pending",
+        outbox_dir=outbox,
     )
     assert out == ["cancelled 07-06"]
 
 
 def test_authored_status_other_rejection_names_reason(tmp_path: Path) -> None:
-    inbox_index = {
-        "ord_2026-07-05_the-manager_001": {
-            "status": "rejected",
-            "reason": "NOTIONAL_CAP_EXCEEDED",
-        }
-    }
+    outbox = tmp_path / "manager-outbox"
+    _outbox(outbox, "2026-07-05", [{"order_id": "ord_foo", "ticker": "FOO"}])
+    inbox_index = {"ord_foo": {"status": "rejected", "reason": "NOTIONAL_CAP_EXCEEDED"}}
     d = _decision("2026-07-05", [{"ticker": "FOO", "action": "BUY", "size_eur": 100}])
     out = authored_status(
         d,
-        agent_id="the-manager",
         inbox_index=inbox_index,
         pending_dir=tmp_path / "manager-pending",
+        outbox_dir=outbox,
     )
     assert out == ["rejected: NOTIONAL_CAP_EXCEEDED"]
 
 
-def test_authored_status_unknown_when_no_record(tmp_path: Path) -> None:
+def test_authored_status_unknown_when_in_flight(tmp_path: Path) -> None:
+    # An emitted order with no inbox record and no pending file yet — in flight.
+    outbox = tmp_path / "manager-outbox"
+    _outbox(outbox, "2026-07-05", [{"order_id": "ord_foo", "ticker": "FOO"}])
     d = _decision("2026-07-05", [{"ticker": "FOO", "action": "BUY", "size_eur": 100}])
     out = authored_status(
         d,
-        agent_id="the-manager",
         inbox_index={},
         pending_dir=tmp_path / "manager-pending",
+        outbox_dir=outbox,
     )
     assert out == [""]
 
@@ -413,8 +424,89 @@ def test_authored_status_bad_date_degrades_gracefully(tmp_path: Path) -> None:
     d = _decision("not-a-date", [{"ticker": "FOO", "action": "BUY", "size_eur": 100}])
     out = authored_status(
         d,
-        agent_id="the-manager",
         inbox_index={},
         pending_dir=tmp_path / "manager-pending",
+        outbox_dir=tmp_path / "manager-outbox",
+    )
+    assert out == [""]
+
+
+def test_authored_status_skipped_position_does_not_shift_labels(
+    tmp_path: Path,
+) -> None:
+    """The core regression: a position the broker SKIPS (no store price, HOLD,
+    zero size) must not shift the status of later positions.
+
+    The Manager authors [XYZ, QQQ3.L]. XYZ has no store price, so
+    manager_decision_to_orders skips it WITHOUT bumping seq — only QQQ3.L is
+    emitted, as ord_...001. Joining by position index would attribute _001's
+    fill to XYZ and leave QQQ3.L unresolved (the exact mislabeling this feature
+    exists to prevent). Joining via the outbox's ticker->order_id map keeps each
+    label on its own ticker.
+    """
+    outbox = tmp_path / "manager-outbox"
+    # Only QQQ3.L reached the broker; XYZ was filtered before an id was assigned.
+    _outbox(
+        outbox,
+        "2026-07-20",
+        [{"order_id": "ord_2026-07-20_the-manager_001", "ticker": "QQQ3.L"}],
+    )
+    inbox_index = {"ord_2026-07-20_the-manager_001": {"status": "filled"}}
+    d = _decision(
+        "2026-07-20",
+        [
+            {"ticker": "XYZ", "action": "BUY", "size_eur": 200},
+            {"ticker": "QQQ3.L", "action": "BUY", "size_eur": 250},
+        ],
+    )
+    out = authored_status(
+        d,
+        inbox_index=inbox_index,
+        pending_dir=tmp_path / "manager-pending",
+        outbox_dir=outbox,
+    )
+    assert out == ["", "filled"]  # NOT ["filled", ""]
+
+
+def test_authored_status_repeated_ticker_consumes_in_emit_order(
+    tmp_path: Path,
+) -> None:
+    outbox = tmp_path / "manager-outbox"
+    _outbox(
+        outbox,
+        "2026-07-20",
+        [
+            {"order_id": "ord_a", "ticker": "FOO"},
+            {"order_id": "ord_b", "ticker": "FOO"},
+        ],
+    )
+    inbox_index = {"ord_a": {"status": "filled"}}
+    pending = tmp_path / "manager-pending"
+    pending.mkdir(parents=True)
+    (pending / "ord_b.json").write_text("{}", encoding="utf-8")
+    d = _decision(
+        "2026-07-20",
+        [
+            {"ticker": "FOO", "action": "BUY", "size_eur": 100},
+            {"ticker": "FOO", "action": "BUY", "size_eur": 100},
+        ],
+    )
+    out = authored_status(
+        d,
+        inbox_index=inbox_index,
+        pending_dir=pending,
+        outbox_dir=outbox,
+    )
+    assert out == ["filled", "armed"]
+
+
+def test_authored_status_missing_outbox_is_unknown(tmp_path: Path) -> None:
+    inbox_index = {"ord_x": {"status": "filled"}}
+    d = _decision("2026-07-13", [{"ticker": "NVDA", "action": "BUY", "size_eur": 300}])
+    out = authored_status(
+        d,
+        inbox_index=inbox_index,
+        pending_dir=tmp_path / "manager-pending",
+        outbox_dir=tmp_path / "manager-outbox",  # dir absent
     )
     assert out == [""]

@@ -26,12 +26,10 @@ the Manager has ever run.
 from __future__ import annotations
 
 import json
-from datetime import date as _date
 from pathlib import Path
 
 from engine.config import get_config
 from engine.orders import allocator_channel_dir as _order_dir
-from engine.orders import make_order_id
 
 # Snapshot record: {"date": "YYYY-MM-DD", "portfolio_value": float, ...}
 Snapshot = dict
@@ -237,37 +235,47 @@ def index_manager_inbox(inbox_dir: Path) -> dict[str, dict]:
 def authored_status(
     decision: Decision,
     *,
-    agent_id: str,
     inbox_index: dict[str, dict],
     pending_dir: Path,
+    outbox_dir: Path,
 ) -> list[str]:
     """Per-position terminal status label for an authored daily decision.
 
-    Positions are joined to their deterministic ``order_id``
-    (``ord_{date}_{agent_id}_{seq:03d}``, 1-indexed in author order) and resolved
-    against the inbox (``inbox_index`` from :func:`index_manager_inbox`) then the
-    pending channel:
+    Each authored position is matched to the order the broker actually emitted
+    by reading that day's outbox (``{outbox_dir}/{date}.jsonl``) and joining on
+    ``ticker`` — deliberately NOT on the position's index. The broker emits an
+    order only for *tradable* positions: ``manager_decision_to_orders`` skips
+    HOLD actions, tickers with no store price, and zero-size positions. So a
+    position's index in the persisted decision does not track the order's
+    ``seq``, and inferring ``order_id`` from the index would shift every label
+    after a skipped position (the exact mislabeling this whole feature fixes).
+    Reading the ``order_id`` straight from the outbox is immune to that drift.
+
+    The resolved ``order_id`` is looked up against the inbox (``inbox_index``
+    from :func:`index_manager_inbox`) then the pending channel:
 
       - ``"filled"``            — a market or fired-conditional fill
       - ``"expired MM-DD"``     — a conditional that expired unfired
       - ``"cancelled MM-DD"``   — cancelled by the agent
       - ``"rejected: REASON"``  — any other broker rejection
       - ``"armed"``             — still-open conditional in ``pending_dir``
-      - ``""``                  — no record yet (unknown)
+      - ``""``                  — no emitted order (a position the broker
+                                  skipped) or no terminal record yet (in flight)
 
     Returns one label per position, in order; ``[]`` for a HOLD day. Never
-    raises — an unparseable ``date`` degrades every label to ``""``.
+    raises — a missing date/outbox degrades every label to ``""``.
     """
     positions = decision.get("positions", []) or []
-    try:
-        d = _date.fromisoformat(decision.get("date", ""))
-    except (ValueError, TypeError):
-        return ["" for _ in positions]
-
+    ids_by_ticker = _outbox_order_ids_by_ticker(outbox_dir, decision.get("date", ""))
     pending_dir = Path(pending_dir)
+
     labels: list[str] = []
-    for seq, _pos in enumerate(positions, start=1):
-        oid = make_order_id(d, agent_id, seq)
+    for pos in positions:
+        queue = ids_by_ticker.get(pos.get("ticker"))
+        if not queue:
+            labels.append("")  # broker emitted no order for this position
+            continue
+        oid = queue.pop(0)  # consume in emit order if a ticker repeats in a day
         rec = inbox_index.get(oid)
         if rec is not None:
             labels.append(_inbox_status_label(rec))
@@ -276,6 +284,43 @@ def authored_status(
         else:
             labels.append("")
     return labels
+
+
+def _outbox_order_ids_by_ticker(
+    outbox_dir: Path, date_str: str
+) -> dict[str, list[str]]:
+    """``ticker -> [order_id, ...]`` from a day's outbox, preserving emit order.
+
+    The outbox (``{outbox_dir}/{date}.jsonl``) is the broker's authoritative
+    record of the orders it actually created for that session — one line per
+    emitted order, each carrying both ``order_id`` and ``ticker``. Repeated
+    tickers keep their emit order so a caller can match repeated authored
+    positions positionally within a ticker. A missing/malformed file or line
+    contributes nothing; an absent date yields ``{}``.
+    """
+    out: dict[str, list[str]] = {}
+    if not date_str:
+        return out
+    path = Path(outbox_dir) / f"{date_str}.jsonl"
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(rec, dict):
+            continue
+        ticker = rec.get("ticker")
+        oid = rec.get("order_id")
+        if ticker and oid:
+            out.setdefault(ticker, []).append(oid)
+    return out
 
 
 def _inbox_status_label(rec: dict) -> str:
