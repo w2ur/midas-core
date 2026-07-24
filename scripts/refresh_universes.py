@@ -24,25 +24,14 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_PROJECT_ROOT))
 
 from engine.universes.alternative import refresh_all_alternatives
-from engine.universes.index import refresh_all_indexes
-
-
-_ALL_INDEX_NAMES = (
-    "sp500",
-    "dow30",
-    "nasdaq100",
-    "cac40",
-    "dax",
-    "ftse100",
-    "stoxx600",
-)
+from engine.universes.index import INDEX_REFRESHERS, refresh_all_indexes
 
 
 def main() -> int:
-    print("Refreshing index universes from Wikipedia...")
+    print("Refreshing index universes from Wikipedia/Slickcharts...")
     indexes = refresh_all_indexes()
     print(json.dumps(indexes, indent=2))
-    skipped = [name for name in _ALL_INDEX_NAMES if name not in indexes]
+    skipped = [name for name in INDEX_REFRESHERS if name not in indexes]
     if skipped:
         print(
             f"\nSkipped (see warnings above): {', '.join(skipped)} — "
@@ -54,7 +43,10 @@ def main() -> int:
     print(json.dumps(alts, indent=2))
 
     print("\nDone. Review `git diff data/universes/` and commit any changes.")
-    return 0
+    # A skipped index must still fail the run: the weekly workflow's only
+    # alert channel is a non-zero exit (GitHub failure email). The workflow
+    # commits the successful indexes regardless — see refresh-universes.yml.
+    return 1 if skipped else 0
 
 
 if __name__ == "__main__":

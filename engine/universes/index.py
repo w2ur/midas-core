@@ -352,6 +352,22 @@ def refresh_stoxx600() -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+# Canonical {name: refresher-function-name} mapping — the single source of
+# truth for which indexes exist. `scripts/refresh_universes.py` derives its
+# skip report from these keys, so adding an index here is the only change
+# needed. Values are attribute names resolved at call time (late-bound) so
+# tests can monkeypatch the individual refresh_* functions.
+INDEX_REFRESHERS = {
+    "sp500": "refresh_sp500",
+    "dow30": "refresh_dow30",
+    "nasdaq100": "refresh_nasdaq100",
+    "cac40": "refresh_cac40",
+    "dax": "refresh_dax",
+    "ftse100": "refresh_ftse100",
+    "stoxx600": "refresh_stoxx600",
+}
+
+
 def refresh_all_indexes() -> dict[str, int]:
     """Re-fetch every index universe from Wikipedia/Slickcharts and overwrite
     committed files.
@@ -363,19 +379,12 @@ def refresh_all_indexes() -> dict[str, int]:
     broken source must never take the other six indexes down with it. The
     committed file for a skipped index is left untouched at its last known
     -good value. Returns {name: ticker_count} for indexes that succeeded
-    only; a failed index is simply absent from the result.
+    only; a failed index is simply absent from the result (callers alert on
+    the gap — the weekly workflow exits non-zero so the failure still emails).
     """
-    refreshers = {
-        "sp500": refresh_sp500,
-        "dow30": refresh_dow30,
-        "nasdaq100": refresh_nasdaq100,
-        "cac40": refresh_cac40,
-        "dax": refresh_dax,
-        "ftse100": refresh_ftse100,
-        "stoxx600": refresh_stoxx600,
-    }
     results: dict[str, int] = {}
-    for name, refresher in refreshers.items():
+    for name, fn_name in INDEX_REFRESHERS.items():
+        refresher = globals()[fn_name]
         try:
             results[name] = len(refresher())
         except Exception as exc:
