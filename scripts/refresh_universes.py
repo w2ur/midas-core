@@ -27,10 +27,27 @@ from engine.universes.alternative import refresh_all_alternatives
 from engine.universes.index import refresh_all_indexes
 
 
+_ALL_INDEX_NAMES = (
+    "sp500",
+    "dow30",
+    "nasdaq100",
+    "cac40",
+    "dax",
+    "ftse100",
+    "stoxx600",
+)
+
+
 def main() -> int:
     print("Refreshing index universes from Wikipedia...")
     indexes = refresh_all_indexes()
     print(json.dumps(indexes, indent=2))
+    skipped = [name for name in _ALL_INDEX_NAMES if name not in indexes]
+    if skipped:
+        print(
+            f"\nSkipped (see warnings above): {', '.join(skipped)} — "
+            "committed file left at its last known-good value."
+        )
 
     print("\nRe-seeding alternative universes from curated fallbacks...")
     alts = refresh_all_alternatives()

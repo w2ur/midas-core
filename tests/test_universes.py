@@ -190,6 +190,108 @@ class TestRefreshFunctions:
         result = ix_mod.refresh_nasdaq100()
         assert result == sorted(fresh)
 
+    def test_refresh_nasdaq100_falls_back_to_ticker_column(
+        self, midas_data_root, monkeypatch
+    ):
+        """Tolerant column detection: if Slickcharts ever renames "Symbol" to
+        "Ticker" (a real-world rename its Nasdaq-100 sibling pages already
+        use), the refresher must still find the tickers instead of raising."""
+        import engine.universes.index as ix_mod
+        import pandas as pd
+
+        fake_dir = get_config().universes_dir
+        fake_dir.mkdir(parents=True, exist_ok=True)
+        fresh = [f"N{i:03d}" for i in range(100)]
+
+        def fake_fetch(url):
+            # No "Symbol" column at all — only the renamed "Ticker" column.
+            return [pd.DataFrame({"Company": fresh, "Ticker": fresh})]
+
+        monkeypatch.setattr(ix_mod, "_fetch_html_tables", fake_fetch)
+        result = ix_mod.refresh_nasdaq100()
+        assert result == sorted(fresh)
+
+    def test_refresh_nasdaq100_raises_when_no_known_column(
+        self, midas_data_root, monkeypatch
+    ):
+        """Neither 'Symbol' nor 'Ticker' present — this is a genuine layout
+        change the refresher cannot recover from and must surface loudly."""
+        import engine.universes.index as ix_mod
+        import pandas as pd
+
+        fake_dir = get_config().universes_dir
+        fake_dir.mkdir(parents=True, exist_ok=True)
+
+        def fake_fetch(url):
+            return [pd.DataFrame({"Company": ["Apple", "Microsoft"]})]
+
+        monkeypatch.setattr(ix_mod, "_fetch_html_tables", fake_fetch)
+        with pytest.raises(RuntimeError, match="Nasdaq-100"):
+            ix_mod.refresh_nasdaq100()
+
+
+class TestRefreshAllIndexesDegradesPerIndex:
+    """The weekly refresh must not go dark for the other six indexes because
+    one scraper's upstream layout changed — this is the class of bug that
+    broke Nasdaq-100 on 2026-07-13 and, before the loop was hardened, would
+    have aborted sp500/dow30/cac40/dax/ftse100/stoxx600 too."""
+
+    def test_one_failing_refresher_does_not_abort_the_others(
+        self, midas_data_root, monkeypatch
+    ):
+        import engine.universes.index as ix_mod
+
+        def boom():
+            raise RuntimeError(
+                "Nasdaq-100: no 'Symbol' or 'Ticker' column on Slickcharts page"
+            )
+
+        monkeypatch.setattr(ix_mod, "refresh_nasdaq100", boom)
+        monkeypatch.setattr(ix_mod, "refresh_sp500", lambda: ["AAPL", "MSFT"])
+        monkeypatch.setattr(ix_mod, "refresh_dow30", lambda: ["AAPL"])
+        monkeypatch.setattr(ix_mod, "refresh_cac40", lambda: ["MC.PA"])
+        monkeypatch.setattr(ix_mod, "refresh_dax", lambda: ["SAP.DE"])
+        monkeypatch.setattr(ix_mod, "refresh_ftse100", lambda: ["HSBA.L"])
+        monkeypatch.setattr(ix_mod, "refresh_stoxx600", lambda: ["ASML.AS"])
+
+        result = ix_mod.refresh_all_indexes()
+
+        assert "nasdaq100" not in result
+        assert result == {
+            "sp500": 2,
+            "dow30": 1,
+            "cac40": 1,
+            "dax": 1,
+            "ftse100": 1,
+            "stoxx600": 1,
+        }
+
+    def test_all_succeed_returns_all_seven(self, midas_data_root, monkeypatch):
+        import engine.universes.index as ix_mod
+
+        for name in (
+            "refresh_sp500",
+            "refresh_dow30",
+            "refresh_nasdaq100",
+            "refresh_cac40",
+            "refresh_dax",
+            "refresh_ftse100",
+            "refresh_stoxx600",
+        ):
+            monkeypatch.setattr(ix_mod, name, lambda: ["X"])
+
+        result = ix_mod.refresh_all_indexes()
+        assert set(result) == {
+            "sp500",
+            "dow30",
+            "nasdaq100",
+            "cac40",
+            "dax",
+            "ftse100",
+            "stoxx600",
+        }
+        assert all(count == 1 for count in result.values())
+
 
 # ---------------------------------------------------------------------------
 # Asset class universe resolvers (no I/O)

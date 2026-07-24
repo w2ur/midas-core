@@ -18,11 +18,14 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import urllib.request
 
 import pandas as pd
 
 from engine.config import get_config
+
+logger = logging.getLogger(__name__)
 
 _WIKI_USER_AGENT = "midas-fund/0.1 (https://github.com/w2ur/midas; research)"
 
@@ -155,6 +158,12 @@ def get_nasdaq100_tickers() -> list[str]:
     return refresh_nasdaq100()
 
 
+# Candidate ticker-column header names on the Slickcharts Nasdaq-100 page,
+# tried in order. Tolerant to a future header rename (Slickcharts has already
+# forced one source change — see docstring below) without another crash.
+_NASDAQ100_SYMBOL_COLUMNS: tuple[str, ...] = ("Symbol", "Ticker")
+
+
 def refresh_nasdaq100() -> list[str]:
     """Re-fetch Nasdaq-100 from Slickcharts and overwrite the committed file.
 
@@ -162,14 +171,27 @@ def refresh_nasdaq100() -> list[str]:
     article dropped its constituents table entirely (the "Components" section is
     now just an external link to nasdaq.com), so no column-name variant could
     recover it. Slickcharts publishes a clean weighted table with a "Symbol"
-    column (~100 rows, dual-class shares like GOOGL/GOOG included).
+    column (~100 rows, dual-class shares like GOOGL/GOOG included). Column
+    detection tries each of `_NASDAQ100_SYMBOL_COLUMNS` in turn so a future
+    Slickcharts header rename (e.g. back to "Ticker") degrades gracefully
+    instead of raising immediately.
     """
     url = "https://www.slickcharts.com/nasdaq100"
     tables = _fetch_html_tables(url)
-    table = _largest_table_with_column(tables, "Symbol")
+    table = None
+    symbol_col = None
+    for candidate in _NASDAQ100_SYMBOL_COLUMNS:
+        table = _largest_table_with_column(tables, candidate)
+        if table is not None:
+            symbol_col = candidate
+            break
     if table is None:
-        raise RuntimeError("Nasdaq-100: no 'Symbol' column on Slickcharts page")
-    raw = [str(t) for t in table["Symbol"].dropna().tolist() if str(t) != "Symbol"]
+        raise RuntimeError(
+            "Nasdaq-100: no "
+            f"{' or '.join(repr(c) for c in _NASDAQ100_SYMBOL_COLUMNS)} "
+            "column on Slickcharts page"
+        )
+    raw = [str(t) for t in table[symbol_col].dropna().tolist() if str(t) != symbol_col]
     tickers = sorted({_normalise(t) for t in raw if t})
     if len(tickers) < 90:
         raise RuntimeError(
@@ -331,17 +353,31 @@ def refresh_stoxx600() -> list[str]:
 
 
 def refresh_all_indexes() -> dict[str, int]:
-    """Re-fetch every index universe from Wikipedia and overwrite committed files.
+    """Re-fetch every index universe from Wikipedia/Slickcharts and overwrite
+    committed files.
 
     Used by `scripts/refresh_universes.py` and the weekly GitHub Actions cron.
-    Returns a dict of {name: ticker_count} so the caller can log the diff.
+    Each index refreshes independently: a scraper that raises (e.g. an
+    upstream layout change like the 2026-07-13 Nasdaq-100/Wikipedia break)
+    logs a warning and is skipped rather than aborting the whole run — one
+    broken source must never take the other six indexes down with it. The
+    committed file for a skipped index is left untouched at its last known
+    -good value. Returns {name: ticker_count} for indexes that succeeded
+    only; a failed index is simply absent from the result.
     """
-    return {
-        "sp500": len(refresh_sp500()),
-        "dow30": len(refresh_dow30()),
-        "nasdaq100": len(refresh_nasdaq100()),
-        "cac40": len(refresh_cac40()),
-        "dax": len(refresh_dax()),
-        "ftse100": len(refresh_ftse100()),
-        "stoxx600": len(refresh_stoxx600()),
+    refreshers = {
+        "sp500": refresh_sp500,
+        "dow30": refresh_dow30,
+        "nasdaq100": refresh_nasdaq100,
+        "cac40": refresh_cac40,
+        "dax": refresh_dax,
+        "ftse100": refresh_ftse100,
+        "stoxx600": refresh_stoxx600,
     }
+    results: dict[str, int] = {}
+    for name, refresher in refreshers.items():
+        try:
+            results[name] = len(refresher())
+        except Exception as exc:
+            logger.warning("refresh_all_indexes: skipping %s — %s", name, exc)
+    return results
