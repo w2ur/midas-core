@@ -838,7 +838,7 @@ def step_apply_manager_decision(
     3. Convert non-HOLD positions to Orders, append to the allocator's outbox.
     4. fill_day against the allocator channel (separate outbox/inbox) and a
        PortfolioManager rooted at data/portfolios (the allocator's book, init from
-       its spec if absent). All 14 rails + fees + idempotency apply identically.
+       its spec if absent). All 15 rails + fees + idempotency apply identically.
 
     Returns cleanly (no artifacts) when the deployment has no allocator (opt-out).
     Public surfaces are untouched: orders never enter the public outbox, fills

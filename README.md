@@ -15,7 +15,7 @@ desk, and the deterministic Hands pipeline. Bring your own agents.
 ## Why this exists
 
 - **Safety lives in the broker, not the prompt.** The persona is aspirational; the broker is
-  enforcing. Every order is checked at fill time against a fixed set of 14 rejection/cancel
+  enforcing. Every order is checked at fill time against a fixed set of 15 rejection/cancel
   reason codes — `MAX_ORDER_NOTIONAL`, `MAX_ORDERS_PER_DAY`, `TICKER_NOT_IN_UNIVERSE`,
   `INSUFFICIENT_CASH`, `DAILY_DRAWDOWN_HALT`, … — so a coaxed or confused agent still can't
   slip an oversized or out-of-universe trade through.

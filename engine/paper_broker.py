@@ -55,6 +55,31 @@ from engine.valuation import mtm_base_currency
 
 logger = logging.getLogger(__name__)
 
+#: The complete set of rejection/cancel reason codes this broker can emit.
+#: The module docstring above documents what each one means; `tests/test_reason_codes.py`
+#: asserts the three views (this set, the docstring, the emitted literals) agree.
+#: The watcher in `scripts/check_triggers.py` owns a sixteenth code, TRIGGER_EXPIRED,
+#: which is deliberately NOT in this set — it is a different enforcement point.
+REJECTION_REASON_CODES = frozenset(
+    {
+        "INVALID_SHARES",
+        "MAX_ORDERS_PER_DAY",
+        "MAX_ORDER_NOTIONAL",
+        "TICKER_NOT_IN_UNIVERSE",
+        "NO_PRICE_DATA",
+        "NO_FX_RATE",
+        "INSUFFICIENT_CASH",
+        "NO_POSITION_TO_SELL",
+        "INSUFFICIENT_SHARES",
+        "FEE_EXCEEDS_PROCEEDS",
+        "DAILY_DRAWDOWN_HALT",
+        "APPLY_TRADE_FAILED",
+        "TRIGGER_NO_EXPIRY",
+        "CANCELLED_BY_AGENT",
+        "CANCEL_TARGET_NOT_FOUND",
+    }
+)
+
 
 @dataclass
 class AgentConfig:
@@ -415,7 +440,7 @@ def fill_day(
 
     The portfolio is still selected per order via the order's agent_id, so a
     the-manager order routes to data/portfolios/the-manager/ via the passed
-    portfolio_manager. All 14 rails, fees, and idempotency apply identically on
+    portfolio_manager. All 15 rails, fees, and idempotency apply identically on
     either channel. With all four channel args None the behaviour is byte-for-byte
     identical to the legacy single-channel path.
     """
