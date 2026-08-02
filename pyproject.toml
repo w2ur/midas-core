@@ -1,7 +1,7 @@
 [project]
 name = "midas-core"
-version = "0.1.0"
-description = "Midas — open multi-agent fund-manager engine (Brain/Hands, honest controls)"
+version = "0.1.1"
+description = "Multi-agent paper-trading framework: LLM agents propose trades, a separate broker validates and executes them."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
