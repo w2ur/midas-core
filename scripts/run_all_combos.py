@@ -44,9 +44,11 @@ _BACKTESTABLE_SELECTORS = [
 ]
 
 # Only managers with a DISTINCT implemented behavior. grid-conservative,
-# trailing-stop, and rebalance-monthly are aliases for equal-weight (see
-# engine/adapter.py) — advertising them in the default grid produced identical
-# columns dressed up as different strategies.
+# trailing-stop, scaled-exit, time-boxed, and rebalance-monthly were removed
+# from VALID_MANAGERS (see engine/types.py) — they never had distinct
+# behavior and used to silently fall back to equal-weight, which produced
+# identical columns dressed up as different strategies. They now raise
+# NotImplementedError if named explicitly (see engine/adapter.py).
 _DEFAULT_MANAGERS = [
     "equal-weight",
     "volatility-sized",

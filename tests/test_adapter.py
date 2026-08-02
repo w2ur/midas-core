@@ -191,13 +191,6 @@ class TestAdapter:
 
     # ----- Manager variations -----
 
-    def test_grid_conservative_manager(self, sample_prices):
-        spec = self._make_spec("random", "grid-conservative")
-        strategy = build_bt_strategy(spec, sample_prices)
-        test = bt.Backtest(strategy, sample_prices, initial_capital=10000)
-        result = bt.run(test)
-        assert result.stats is not None
-
     def test_grid_aggressive_manager(self, sample_prices):
         spec = self._make_spec("random", "grid-aggressive")
         strategy = build_bt_strategy(spec, sample_prices)
@@ -205,33 +198,38 @@ class TestAdapter:
         result = bt.run(test)
         assert result.stats is not None
 
-    def test_trailing_stop_manager(self, sample_prices):
+    # ----- Unimplemented alias managers raise (never silently equal-weight) -----
+    #
+    # These specs bypass StrategySpec.from_dict (the schema layer, which
+    # already rejects these names — see tests/test_types.py
+    # test_removed_alias_managers_rejected) by constructing StrategySpec
+    # directly, so they exercise the second line of defense: the manager
+    # factory function itself raises when actually invoked.
+
+    def test_grid_conservative_manager_raises(self, sample_prices):
+        spec = self._make_spec("random", "grid-conservative")
+        with pytest.raises(NotImplementedError, match="grid-conservative"):
+            build_bt_strategy(spec, sample_prices)
+
+    def test_trailing_stop_manager_raises(self, sample_prices):
         spec = self._make_spec("random", "trailing-stop")
-        strategy = build_bt_strategy(spec, sample_prices)
-        test = bt.Backtest(strategy, sample_prices, initial_capital=10000)
-        result = bt.run(test)
-        assert result.stats is not None
+        with pytest.raises(NotImplementedError, match="trailing-stop"):
+            build_bt_strategy(spec, sample_prices)
 
-    def test_scaled_exit_manager(self, sample_prices):
+    def test_scaled_exit_manager_raises(self, sample_prices):
         spec = self._make_spec("random", "scaled-exit")
-        strategy = build_bt_strategy(spec, sample_prices)
-        test = bt.Backtest(strategy, sample_prices, initial_capital=10000)
-        result = bt.run(test)
-        assert result.stats is not None
+        with pytest.raises(NotImplementedError, match="scaled-exit"):
+            build_bt_strategy(spec, sample_prices)
 
-    def test_time_boxed_manager(self, sample_prices):
+    def test_time_boxed_manager_raises(self, sample_prices):
         spec = self._make_spec("random", "time-boxed")
-        strategy = build_bt_strategy(spec, sample_prices)
-        test = bt.Backtest(strategy, sample_prices, initial_capital=10000)
-        result = bt.run(test)
-        assert result.stats is not None
+        with pytest.raises(NotImplementedError, match="time-boxed"):
+            build_bt_strategy(spec, sample_prices)
 
-    def test_rebalance_monthly_manager(self, sample_prices):
+    def test_rebalance_monthly_manager_raises(self, sample_prices):
         spec = self._make_spec("random", "rebalance-monthly")
-        strategy = build_bt_strategy(spec, sample_prices)
-        test = bt.Backtest(strategy, sample_prices, initial_capital=10000)
-        result = bt.run(test)
-        assert result.stats is not None
+        with pytest.raises(NotImplementedError, match="rebalance-monthly"):
+            build_bt_strategy(spec, sample_prices)
 
     def test_volatility_sized_manager(self, sample_prices):
         spec = self._make_spec("random", "volatility-sized")

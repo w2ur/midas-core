@@ -3,7 +3,7 @@
   "name": "Golden Cross S&P 500 — DCA Funding",
   "universe": "sp500",
   "selector": "golden-cross",
-  "manager": "trailing-stop",
+  "manager": "equal-weight",
   "funding": {
     "initial": 10000,
     "monthly_addition": 500

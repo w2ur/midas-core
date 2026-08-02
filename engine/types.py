@@ -56,15 +56,14 @@ VALID_SELECTORS: frozenset[str] = frozenset(
     }
 )
 
+# grid-conservative, trailing-stop, scaled-exit, time-boxed, and
+# rebalance-monthly were removed 2026-07-27 — they were never implemented and
+# used to silently resolve to equal-weight (see engine/adapter.py). Removing
+# them here means a spec naming one now fails validation instead of resolving.
 VALID_MANAGERS: frozenset[str] = frozenset(
     {
         "equal-weight",
-        "grid-conservative",
         "grid-aggressive",
-        "scaled-exit",
-        "trailing-stop",
-        "time-boxed",
-        "rebalance-monthly",
         "volatility-sized",
         "fixed-60-40",
     }

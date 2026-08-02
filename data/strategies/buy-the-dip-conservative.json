@@ -1,9 +1,9 @@
 {
   "id": "buy-the-dip-conservative",
-  "name": "Buy the Dip — Conservative Grid",
+  "name": "Buy the Dip — Conservative",
   "universe": "sp500",
   "selector": "dip-entry",
-  "manager": "grid-conservative",
+  "manager": "equal-weight",
   "funding": {
     "initial": 10000,
     "monthly_addition": 500

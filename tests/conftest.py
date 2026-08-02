@@ -82,3 +82,23 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "live_cast" in item.keywords:
             item.add_marker(skip)
+
+
+@pytest.fixture(autouse=True)
+def _neutralize_session_guard(request, monkeypatch):
+    """Let step_* unit tests run without a live session anchor.
+
+    ``scripts.session_guard.assert_session_fresh`` is deliberately fatal when no
+    anchor exists — an unguarded session is what produced the 2026-07-31 stall.
+    That contract is right in production and wrong for unit tests, which call
+    ``step_author_all`` / ``step_git_commit_push`` directly and have no session.
+
+    Patched here rather than behind an env-var bypass so the escape hatch cannot
+    leak into a real run. ``tests/test_session_guard.py`` opts out — it is the
+    suite that exercises the guard itself.
+    """
+    if request.node.fspath.basename == "test_session_guard.py":
+        return
+    monkeypatch.setattr(
+        "scripts.daily_session.assert_session_fresh", lambda *a, **k: None
+    )

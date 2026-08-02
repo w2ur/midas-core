@@ -3,7 +3,7 @@
   "name": "Dogs of the Dow — RSI Oversold Rotation",
   "universe": "dow30",
   "selector": "rsi-oversold",
-  "manager": "rebalance-monthly",
+  "manager": "equal-weight",
   "funding": {
     "initial": 10000,
     "monthly_addition": 500

@@ -49,6 +49,7 @@ _F = TypeVar("_F", bound=Callable[..., Any])
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_PROJECT_ROOT))
 
+from scripts.session_guard import assert_session_fresh, clear_anchor
 from scripts.session_state import clear as _clear_state
 from scripts.session_state import is_done as _is_done
 from scripts.session_state import mark_done as _mark_done
@@ -394,6 +395,12 @@ def step_author_all(
     Returns {agent_id: {"orders": N, "cancels": M}} for caller logging ({} on the
     skip path).
     """
+    # First irreversible write of the session. Everything before this point is
+    # reads and prompt-building; from here on we mutate the committed ledger,
+    # so this is where a stalled sandbox has to be caught (2026-07-31: the
+    # sandbox resumed 63h later and authored orders against a dead snapshot).
+    assert_session_fresh("step_author_all")
+
     if portfolio_manager is None:
         portfolio_manager = PortfolioManager(base_dir=get_config().portfolios_dir)
 
@@ -1365,6 +1372,12 @@ def step_git_commit_push(dry_run: bool = False) -> None:
 
     print("\n=== Step 5: Git commit and push ===")
 
+    # Last gate before the work becomes public. Re-checked here as well as in
+    # step_author_all because a stall can happen anywhere in between — the
+    # 2026-07-31 session passed every earlier check and still pushed a
+    # 63-hour-stale snapshot.
+    assert_session_fresh("step_git_commit_push")
+
     if dry_run:
         print("  [DRY RUN] Skipping git operations.")
         # no _mark_done: _clear_state() below removes the whole state file — a finished session leaves no state
@@ -1401,6 +1414,10 @@ def step_git_commit_push(dry_run: bool = False) -> None:
         # instead of advancing main, leaving the daily snapshot off the
         # public deploy. Fast-forward only — anything else is a real
         # conflict that should fail loudly.
+        # origin/main is current here because assert_session_fresh() fetched it
+        # above. Before that guard existed this count was computed against
+        # whatever Step 0 had fetched, so a stalled session could believe it was
+        # a clean fast-forward when main had moved on hours earlier.
         ahead = subprocess.run(
             ["git", "rev-list", "--count", "origin/main..HEAD"],
             cwd=_PROJECT_ROOT,
@@ -1453,6 +1470,7 @@ def step_git_commit_push(dry_run: bool = False) -> None:
 
     # no _mark_done: _clear_state() below removes the whole state file — a finished session leaves no state
     _clear_state()
+    clear_anchor()
 
 
 # ---------------------------------------------------------------------------

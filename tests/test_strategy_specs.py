@@ -52,7 +52,7 @@ class TestGoldenCrossSP500:
         assert self._spec().selector == "golden-cross"
 
     def test_manager(self):
-        assert self._spec().manager == "trailing-stop"
+        assert self._spec().manager == "equal-weight"
 
     def test_funding(self):
         spec = self._spec()
@@ -74,7 +74,7 @@ class TestRSIContrarianSP500:
         assert self._spec().selector == "rsi-oversold"
 
     def test_manager(self):
-        assert self._spec().manager == "scaled-exit"
+        assert self._spec().manager == "equal-weight"
 
     def test_dividends(self):
         assert self._spec().dividends == "reinvest"
@@ -85,7 +85,7 @@ class TestBuyTheDipConservative:
         return StrategySpec.from_json(STRATEGIES_DIR / "buy-the-dip-conservative.json")
 
     def test_manager(self):
-        assert self._spec().manager == "grid-conservative"
+        assert self._spec().manager == "equal-weight"
 
     def test_selector(self):
         assert self._spec().selector == "dip-entry"
@@ -144,7 +144,7 @@ class TestDogsOfTheDow:
         assert self._spec().universe == "dow30"
 
     def test_manager(self):
-        assert self._spec().manager == "rebalance-monthly"
+        assert self._spec().manager == "equal-weight"
 
     def test_dividends(self):
         assert self._spec().dividends == "reinvest"
@@ -203,7 +203,7 @@ class TestGoldenCrossDCA:
         spec = self._spec()
         assert spec.universe == "sp500"
         assert spec.selector == "golden-cross"
-        assert spec.manager == "trailing-stop"
+        assert spec.manager == "equal-weight"
 
 
 class TestGoldenCrossLump:
@@ -217,7 +217,7 @@ class TestGoldenCrossLump:
         spec = self._spec()
         assert spec.universe == "sp500"
         assert spec.selector == "golden-cross"
-        assert spec.manager == "trailing-stop"
+        assert spec.manager == "equal-weight"
 
 
 class TestBaselineVOOHold:

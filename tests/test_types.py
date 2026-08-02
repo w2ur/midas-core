@@ -21,6 +21,7 @@ from engine.types import (
 # Trade
 # ---------------------------------------------------------------------------
 
+
 class TestTrade:
     def test_buy_trade_creation(self):
         t = Trade(
@@ -63,6 +64,7 @@ class TestTrade:
 # ---------------------------------------------------------------------------
 # Position
 # ---------------------------------------------------------------------------
+
 
 class TestPosition:
     def test_position_creation(self):
@@ -123,6 +125,7 @@ class TestPosition:
 # BenchmarkValues
 # ---------------------------------------------------------------------------
 
+
 class TestBenchmarkValues:
     def test_benchmark_creation(self):
         b = BenchmarkValues(sp500=5000.0, msci_world=3200.0, gold=2100.0, btc=65000.0)
@@ -136,9 +139,12 @@ class TestBenchmarkValues:
 # DailySnapshot
 # ---------------------------------------------------------------------------
 
+
 class TestDailySnapshot:
     def test_daily_snapshot_creation(self):
-        benchmarks = BenchmarkValues(sp500=5000.0, msci_world=3200.0, gold=2100.0, btc=65000.0)
+        benchmarks = BenchmarkValues(
+            sp500=5000.0, msci_world=3200.0, gold=2100.0, btc=65000.0
+        )
         snap = DailySnapshot(
             date=date(2024, 1, 15),
             portfolio_value=12000.0,
@@ -154,6 +160,7 @@ class TestDailySnapshot:
 # ---------------------------------------------------------------------------
 # FundingConfig
 # ---------------------------------------------------------------------------
+
 
 class TestFundingConfig:
     def test_defaults(self):
@@ -173,6 +180,7 @@ class TestFundingConfig:
 # StrategyRules
 # ---------------------------------------------------------------------------
 
+
 class TestStrategyRules:
     def test_defaults(self):
         sr = StrategyRules()
@@ -189,13 +197,24 @@ class TestStrategyRules:
 # Portfolio
 # ---------------------------------------------------------------------------
 
+
 class TestPortfolio:
     def _make_positions(self):
         return [
-            Position(ticker="AAPL", shares=10.0, avg_cost=185.0,
-                     date_opened=date(2024, 1, 15), grid_level=0),
-            Position(ticker="MSFT", shares=5.0, avg_cost=400.0,
-                     date_opened=date(2024, 1, 20), grid_level=0),
+            Position(
+                ticker="AAPL",
+                shares=10.0,
+                avg_cost=185.0,
+                date_opened=date(2024, 1, 15),
+                grid_level=0,
+            ),
+            Position(
+                ticker="MSFT",
+                shares=5.0,
+                avg_cost=400.0,
+                date_opened=date(2024, 1, 20),
+                grid_level=0,
+            ),
         ]
 
     def test_portfolio_with_positions(self):
@@ -216,7 +235,9 @@ class TestPortfolio:
 
     def test_to_dict_roundtrip(self):
         positions = self._make_positions()
-        original = Portfolio(cash=3000.0, positions=positions, last_updated=date(2024, 2, 1))
+        original = Portfolio(
+            cash=3000.0, positions=positions, last_updated=date(2024, 2, 1)
+        )
         d = original.to_dict()
         restored = Portfolio.from_dict(d)
 
@@ -319,6 +340,7 @@ class TestStrategySpec:
 
     def test_all_valid_universes_accepted(self):
         from engine.types import VALID_UNIVERSES
+
         for universe in VALID_UNIVERSES:
             d = {**VALID_SPEC_DICT, "universe": universe}
             spec = StrategySpec.from_dict(d)
@@ -326,6 +348,7 @@ class TestStrategySpec:
 
     def test_all_valid_selectors_accepted(self):
         from engine.types import VALID_SELECTORS
+
         for selector in VALID_SELECTORS:
             d = {**VALID_SPEC_DICT, "selector": selector}
             spec = StrategySpec.from_dict(d)
@@ -333,7 +356,25 @@ class TestStrategySpec:
 
     def test_all_valid_managers_accepted(self):
         from engine.types import VALID_MANAGERS
+
         for manager in VALID_MANAGERS:
             d = {**VALID_SPEC_DICT, "manager": manager}
             spec = StrategySpec.from_dict(d)
             assert spec.manager == manager
+
+    def test_removed_alias_managers_rejected(self):
+        """grid-conservative, trailing-stop, scaled-exit, time-boxed, and
+        rebalance-monthly were removed from VALID_MANAGERS 2026-07-27 — they
+        never had distinct behavior and used to silently resolve to
+        equal-weight (see engine/adapter.py). A spec naming one must now fail
+        validation instead of silently resolving."""
+        for manager in (
+            "grid-conservative",
+            "trailing-stop",
+            "scaled-exit",
+            "time-boxed",
+            "rebalance-monthly",
+        ):
+            d = {**VALID_SPEC_DICT, "manager": manager}
+            with pytest.raises(ValueError, match="manager"):
+                StrategySpec.from_dict(d)

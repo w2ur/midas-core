@@ -3,7 +3,7 @@
   "name": "RSI Contrarian — S&P 500",
   "universe": "sp500",
   "selector": "rsi-oversold",
-  "manager": "scaled-exit",
+  "manager": "equal-weight",
   "funding": {
     "initial": 10000,
     "monthly_addition": 500

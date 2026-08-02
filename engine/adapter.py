@@ -220,19 +220,29 @@ def _manager_equal_weight(
 
 
 # NOTE: the five managers below (grid-conservative, trailing-stop, scaled-exit,
-# time-boxed, rebalance-monthly) are ALIASES for equal-weight — their distinct
-# position-management behavior is NOT yet implemented. They are kept registered
-# (rather than raising) only because committed strategy specs and the backtester
-# API still reference them; removing them requires rewriting those specs. The
-# default factor-research grid no longer advertises them (see run_all_combos
-# _DEFAULT_MANAGERS), and the README axis list marks them as aspirational.
-# Making them raise instead of silently equal-weighting is DEFERRED.
+# time-boxed, rebalance-monthly) never had distinct position-management
+# behavior — they used to silently fall back to equal-weight while claiming to
+# do something else. That silent fallback is no longer acceptable: each one now
+# raises NotImplementedError so a spec naming it fails loudly instead of
+# quietly running equal-weight under a different label. Committed strategy
+# specs that used to name one of these were migrated to "equal-weight" (the
+# behavior they were already getting) — see data/strategies/. They remain
+# registered (rather than removed from MANAGER_REGISTRY) purely so the error
+# message below is reachable; VALID_MANAGERS in engine/types.py no longer
+# accepts these names, so a spec naming one fails schema validation first.
+def _unimplemented_manager(name: str, spec: StrategySpec) -> list[bt.Algo]:
+    raise NotImplementedError(
+        f"Manager {name!r} (used by strategy {spec.id!r}) was never "
+        f"implemented — it used to silently fall back to equal-weight. Use "
+        f"'equal-weight' instead, which is the behavior it was actually running."
+    )
+
+
 @register_manager("grid-conservative")
 def _manager_grid_conservative(
     spec: StrategySpec, price_data: pd.DataFrame
 ) -> list[bt.Algo]:
-    """ALIAS for equal-weight — grid scaling is not implemented."""
-    return [bt.algos.WeighEqually()]
+    return _unimplemented_manager("grid-conservative", spec)
 
 
 @register_manager("grid-aggressive")
@@ -247,28 +257,24 @@ def _manager_grid_aggressive(
 def _manager_trailing_stop(
     spec: StrategySpec, price_data: pd.DataFrame
 ) -> list[bt.Algo]:
-    """ALIAS for equal-weight — trailing-stop exits are not implemented."""
-    return [bt.algos.WeighEqually()]
+    return _unimplemented_manager("trailing-stop", spec)
 
 
 @register_manager("scaled-exit")
 def _manager_scaled_exit(spec: StrategySpec, price_data: pd.DataFrame) -> list[bt.Algo]:
-    """ALIAS for equal-weight — scaled exits are not implemented."""
-    return [bt.algos.WeighEqually()]
+    return _unimplemented_manager("scaled-exit", spec)
 
 
 @register_manager("time-boxed")
 def _manager_time_boxed(spec: StrategySpec, price_data: pd.DataFrame) -> list[bt.Algo]:
-    """ALIAS for equal-weight — time-boxed holding is not implemented."""
-    return [bt.algos.WeighEqually()]
+    return _unimplemented_manager("time-boxed", spec)
 
 
 @register_manager("rebalance-monthly")
 def _manager_rebalance_monthly(
     spec: StrategySpec, price_data: pd.DataFrame
 ) -> list[bt.Algo]:
-    """ALIAS for equal-weight — monthly-only rebalance is not implemented."""
-    return [bt.algos.WeighEqually()]
+    return _unimplemented_manager("rebalance-monthly", spec)
 
 
 @register_manager("volatility-sized")
