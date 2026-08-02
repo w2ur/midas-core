@@ -2,7 +2,29 @@
 name = "midas-core"
 version = "0.1.0"
 description = "Midas — open multi-agent fund-manager engine (Brain/Hands, honest controls)"
+readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "William Revah" }]
+keywords = [
+    "trading",
+    "backtesting",
+    "portfolio",
+    "paper-trading",
+    "quantitative-finance",
+    "multi-agent",
+    "llm",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
 dependencies = [
     "bt>=1.1.0",
     "yfinance>=0.2.30",
@@ -17,14 +39,48 @@ dependencies = [
 # requirements.in). These loose constraints are the core runtime subset of
 # requirements.in (a curated subset, not a full mirror) for `pip install -e .`.
 
+[project.urls]
+Homepage = "https://midas.revah.paris"
+Source = "https://github.com/w2ur/midas-core"
+Issues = "https://github.com/w2ur/midas-core/issues"
+
 [project.scripts]
 midas = "engine.cli:main"
 
-[tool.setuptools.packages.find]
-include = ["engine*", "scripts*"]
+# Explicit package list, NOT auto-discovery: examples/demo-desk has to reach
+# site-packages under an importable name so `midas init-demo` can materialise it
+# through importlib.resources. tests/test_packaging_manifest.py guards the
+# engine/scripts half of this list against drift when a subpackage is added.
+[tool.setuptools]
+packages = [
+    "engine",
+    "engine.managers",
+    "engine.selectors",
+    "engine.universes",
+    "scripts",
+    "midas_demo_desk",
+]
+package-dir = { midas_demo_desk = "examples/demo-desk" }
+# Off deliberately: with manifest-driven inclusion on, setuptools treats every
+# identifier-named subdirectory holding data as an undeclared package and warns
+# ("midas_demo_desk.data.universes is absent from packages"). Declaring those
+# directories as packages would silence it but break `pip install -e .` in
+# midas-live, where the demo desk's data/ fixture does not exist. The globs
+# below are the whole contract instead.
+include-package-data = false
+
+[tool.setuptools.package-data]
+# Literal path prefixes, not a recursive `**`: glob() skips dot-directories for
+# wildcard segments, so a recursive pattern silently drops .claude/agents/*.md.
+midas_demo_desk = [
+    "README.md",
+    "roster.yaml",
+    ".claude/agents/*.md",
+    "data/universes/*.json",
+]
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
