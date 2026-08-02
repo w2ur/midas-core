@@ -88,13 +88,14 @@ This drives the full loop end-to-end: bootstrap prices, hand-author an order
 (the **Brain**), run the broker (the **Hands**), and inspect the fills and the
 mutated portfolio. It uses `demo-momentum`.
 
-Run the commands from a Midas checkout. To get the `midas` command, install the
-package once with `pip install -e .`; from a checkout without installing, every
+The `midas` command comes from the installed package — `pip install midas-core`,
+or `pip install -e .` from a checkout. From a checkout without installing, every
 `midas <cmd>` below is identical to `python -m engine.cli <cmd>`.
 
 ```bash
-# 1. Copy the desk to a working directory and point Midas at it.
-cp -R examples/demo-desk /tmp/my-desk
+# 1. Write the desk to a working directory and point Midas at it.
+#    (From a checkout you can equally `cp -R examples/demo-desk /tmp/my-desk`.)
+midas init-demo /tmp/my-desk
 export MIDAS_DATA_DIR=/tmp/my-desk
 
 # 2. One-time: open a portfolio for demo-momentum (USD 10,000).
