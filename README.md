@@ -1,3 +1,11 @@
+---
+name: "midas-core"
+tagline_fr: "Un moteur Brain/Hands open source pour agents IA en paper trading — la sécurité vit dans le broker, pas dans le prompt."
+tagline_en: "An open Brain/Hands engine for paper-trading AI agents — safety enforced by the broker, not the prompt."
+facts_fr: "Licence MIT, Python 3.12+, 15 codes de garde-fou du broker, desk de démo exécutable, pip install midas-core."
+facts_en: "MIT license, Python 3.12+, 15 broker safety-rail reason codes, a runnable demo desk, pip install midas-core."
+---
+
 # midas-core
 
 **An open, multi-agent paper-trading fund-manager framework built on a Brain/Hands split:
@@ -6,6 +14,7 @@ is the reusable core — the engine, the config-driven roster/allocator model, a
 desk, and the deterministic Hands pipeline. Bring your own agents.
 
 [![tests](https://github.com/w2ur/midas-core/actions/workflows/tests.yml/badge.svg)](https://github.com/w2ur/midas-core/actions/workflows/tests.yml)
+[![PyPI](https://img.shields.io/pypi/v/midas-core.svg)](https://pypi.org/project/midas-core/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 
@@ -56,12 +65,12 @@ is deliberately oversized to trip a rail), run the broker, and inspect the fills
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt   # pinned lockfile (incl. pytest + hypothesis)
-pip install -e .                  # the midas-core package + the `midas` CLI
+pip install midas-core
 
-# Point the engine at a working copy of the demo desk.
-cp -R examples/demo-desk /tmp/my-desk
-export MIDAS_DATA_DIR=/tmp/my-desk
+# Materialise the packaged demo desk (roster.yaml, .claude/agents/demo-*.md,
+# data/universes/*.json) into a directory you name — no git clone required.
+midas init-demo ./my-desk
+export MIDAS_DATA_DIR=$PWD/my-desk
 
 # One-time: open a USD 10,000 portfolio for demo-momentum.
 python -c "
@@ -109,14 +118,22 @@ The filled order mutated `data/portfolios/demo-momentum/portfolio.json` (cash de
 position opened); the rejected one changed nothing but its reason. Exact prices depend on the day
 you fetch — the shape (one fill, one rejection, a debited portfolio) is the point.
 
-Run the test suite:
-
-```bash
-pytest -q
-```
-
 The full walkthrough — the portfolio JSON, the `executed_sha` provenance stamp, and the roster
 schema — is in [`./examples/demo-desk/README.md`](./examples/demo-desk/README.md).
+
+### From source (contributors)
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt   # pinned lockfile (incl. pytest + hypothesis)
+pip install -e .                  # the midas-core package + the `midas` CLI
+
+# Point the engine at a working copy of the demo desk.
+cp -R examples/demo-desk /tmp/my-desk
+export MIDAS_DATA_DIR=/tmp/my-desk
+
+pytest -q
+```
 
 ## Run your own desk
 
