@@ -1,0 +1,58 @@
+# Publishes midas-core to PyPI on a version tag (v*) or manual dispatch.
+#
+# One-time owner setup this depends on: a PyPI "pending publisher" configured
+# at https://pypi.org/manage/account/publishing/ for owner `w2ur`, repo
+# `midas-core`, workflow filename `publish.yml`, environment `pypi`. Until
+# that pending publisher exists, the `publish` job's OIDC exchange with PyPI
+# fails with a 403.
+name: publish
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install build backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+      - name: Tag must match the version in pyproject.toml
+        # A PyPI version number can never be reused, so a tag/metadata mismatch
+        # burns it permanently. Fail before building rather than after uploading.
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          declared=$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          tagged="${GITHUB_REF_NAME#v}"
+          echo "pyproject: $declared / tag: $tagged"
+          test "$declared" = "$tagged"
+      - name: Build sdist and wheel
+        run: python -m build
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
