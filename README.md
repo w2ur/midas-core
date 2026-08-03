@@ -18,6 +18,12 @@ desk, and the deterministic Hands pipeline. Bring your own agents.
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 
+![A terminal session: pip install midas-core, midas init-demo, then midas fill-day reporting one order filled and one rejected with reason MAX_ORDER_NOTIONAL](./docs/images/demo-fill-day.png)
+
+*The whole thesis in one command. Two orders, same agent, same instant: the broker fills the
+3-share clip and refuses the 10-share one against a `$5,000` notional cap it enforces itself.
+Reproduce it with the [quickstart](#quickstart--reach-a-real-fill) below — nothing above is mocked.*
+
 > **Paper-trading by default.** This is a framework, not a service: it never executes against
 > your broker keys, never pools funds, never gives per-user advice. See [DISCLAIMER.md](./DISCLAIMER.md).
 
