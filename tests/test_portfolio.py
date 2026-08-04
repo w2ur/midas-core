@@ -345,6 +345,116 @@ class TestSnapshots:
         assert len(snapshots) == 1
         assert snapshots[0]["portfolio_value"] == pytest.approx(10_500.0)
 
+    def test_same_session_rerun_corrects_its_own_row(
+        self, initialized_manager: PortfolioManager
+    ) -> None:
+        """Idempotency: a resumed session may overwrite the row it just wrote."""
+        for value in (float("nan"), 10_500.0):
+            written = initialized_manager.add_snapshot(
+                "test-strategy",
+                snapshot_date=date(2024, 6, 1),
+                portfolio_value=value,
+                cash=3_000.0,
+                positions_value=7_500.0,
+                benchmarks={"sp500": 5200.0},
+                session_date=date(2024, 6, 3),
+            )
+            assert written is True
+
+        snapshots = initialized_manager.load_snapshots("test-strategy")
+        assert len(snapshots) == 1
+        assert snapshots[0]["portfolio_value"] == pytest.approx(10_500.0)
+        assert snapshots[0]["date"] == "2024-06-01"
+        assert snapshots[0]["session_date"] == "2024-06-03"
+
+    def test_later_session_refuses_to_rewrite_earlier_row(
+        self, initialized_manager: PortfolioManager
+    ) -> None:
+        """Regression: 0da774525 — the 2026-08-03 session rewrote the weekend
+        refresh's 2026-08-02 row because the OHLCV store had not advanced, so a
+        published equity-curve point silently gained trades made a day later."""
+        initialized_manager.add_snapshot(
+            "test-strategy",
+            snapshot_date=date(2024, 6, 1),
+            portfolio_value=10_500.0,
+            cash=3_000.0,
+            positions_value=7_500.0,
+            benchmarks={"sp500": 5200.0},
+            session_date=date(2024, 6, 1),
+        )
+        written = initialized_manager.add_snapshot(
+            "test-strategy",
+            snapshot_date=date(2024, 6, 1),
+            portfolio_value=99_999.0,
+            cash=1.0,
+            positions_value=99_998.0,
+            benchmarks={"sp500": 5200.0},
+            session_date=date(2024, 6, 2),
+        )
+
+        assert written is False
+        snapshots = initialized_manager.load_snapshots("test-strategy")
+        assert len(snapshots) == 1
+        assert snapshots[0]["portfolio_value"] == pytest.approx(10_500.0)
+        assert snapshots[0]["session_date"] == "2024-06-01"
+
+    def test_legacy_row_without_session_date_is_not_overwritten(
+        self, initialized_manager: PortfolioManager
+    ) -> None:
+        """Rows written before session_date existed fail closed, not open."""
+        initialized_manager._write_json(
+            initialized_manager._snapshots_path("test-strategy"),
+            [
+                {
+                    "date": "2024-06-01",
+                    "portfolio_value": 10_500.0,
+                    "cash": 3_000.0,
+                    "positions_value": 7_500.0,
+                    "benchmarks": {"sp500": 5200.0},
+                }
+            ],
+        )
+        written = initialized_manager.add_snapshot(
+            "test-strategy",
+            snapshot_date=date(2024, 6, 1),
+            portfolio_value=99_999.0,
+            cash=1.0,
+            positions_value=99_998.0,
+            benchmarks={"sp500": 5200.0},
+            session_date=date(2024, 6, 2),
+        )
+
+        assert written is False
+        snapshots = initialized_manager.load_snapshots("test-strategy")
+        assert snapshots[0]["portfolio_value"] == pytest.approx(10_500.0)
+
+    def test_new_market_date_still_appends(
+        self, initialized_manager: PortfolioManager
+    ) -> None:
+        """The refusal is scoped to a contested date — the curve keeps growing."""
+        initialized_manager.add_snapshot(
+            "test-strategy",
+            snapshot_date=date(2024, 6, 1),
+            portfolio_value=10_500.0,
+            cash=3_000.0,
+            positions_value=7_500.0,
+            benchmarks={"sp500": 5200.0},
+            session_date=date(2024, 6, 1),
+        )
+        written = initialized_manager.add_snapshot(
+            "test-strategy",
+            snapshot_date=date(2024, 6, 2),
+            portfolio_value=10_600.0,
+            cash=3_000.0,
+            positions_value=7_600.0,
+            benchmarks={"sp500": 5250.0},
+            session_date=date(2024, 6, 3),
+        )
+
+        assert written is True
+        snapshots = initialized_manager.load_snapshots("test-strategy")
+        assert [s["date"] for s in snapshots] == ["2024-06-01", "2024-06-02"]
+
 
 class TestBudgetGuard:
     """Verify that apply_trade rejects BUY trades exceeding available cash."""

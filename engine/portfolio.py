@@ -230,15 +230,34 @@ class PortfolioManager:
         cash: float,
         positions_value: float,
         benchmarks: dict,
-    ) -> None:
-        """Append a daily snapshot to snapshots.json.
+        session_date: date | None = None,
+    ) -> bool:
+        """Append a daily snapshot to snapshots.json. History is immutable.
+
+        The equity curve is keyed on ``snapshot_date`` — the *market* date the
+        valuation was priced at — because that is the axis the baseline series
+        lives on (``engine.baselines`` dates every point from the price series,
+        so a session-dated agent curve would drift off its own benchmark).
+
+        ``session_date`` records *when the row was observed*, which is a
+        different thing and the reason this is not a plain upsert. A resumed or
+        re-run session must be able to correct its own row; a *later* session
+        must never rewrite an earlier one's. Without that distinction a Monday
+        session whose OHLCV store has not advanced past Friday silently
+        overwrites the weekend's already-published value with a composition that
+        includes trades made days afterwards.
+
+        The write is therefore append-or-refuse: an existing row is replaced
+        only when it carries the *same* ``session_date``. Anything else — an
+        older session, a newer one, or a legacy row predating this field — is
+        refused rather than clobbered, so the failure is loud and history stands.
 
         Parameters
         ----------
         strategy_id:
             Target portfolio.
         snapshot_date:
-            Date of the snapshot.
+            Market date the valuation was priced at. Keys the row.
         portfolio_value:
             Total portfolio value (cash + positions_value).
         cash:
@@ -247,9 +266,22 @@ class PortfolioManager:
             Market value of all open positions.
         benchmarks:
             Dict of benchmark values, e.g. {"sp500": 5200.0, "btc": 65000.0}.
+        session_date:
+            The session that observed this valuation. Defaults to
+            ``snapshot_date``, which is the honest reading for a backfill
+            replaying history one market day at a time.
+
+        Returns
+        -------
+        bool
+            True if the snapshot was written, False if it was refused because
+            an earlier session already owns that market date. Callers should
+            surface a refusal rather than swallow it.
         """
+        observed = session_date or snapshot_date
         snapshot = {
             "date": snapshot_date.isoformat(),
+            "session_date": observed.isoformat(),
             "portfolio_value": portfolio_value,
             "cash": cash,
             "positions_value": positions_value,
@@ -258,12 +290,16 @@ class PortfolioManager:
         path = self._snapshots_path(strategy_id)
         records: list[dict] = self._read_json(path)  # type: ignore[assignment]
         date_key = snapshot["date"]
-        replaced = False
         for i, existing in enumerate(records):
-            if existing.get("date") == date_key:
-                records[i] = snapshot
-                replaced = True
-                break
-        if not replaced:
-            records.append(snapshot)
+            if existing.get("date") != date_key:
+                continue
+            # Same session correcting itself is the one legitimate overwrite.
+            # A missing session_date is a legacy row: never equal, so refused.
+            if existing.get("session_date") != snapshot["session_date"]:
+                return False
+            records[i] = snapshot
+            self._write_json(path, records)
+            return True
+        records.append(snapshot)
         self._write_json(path, records)
+        return True

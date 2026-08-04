@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from engine.agent_memory import format_oracle_digest
+from engine.agent_memory import format_oracle_digest, truncate as _truncate
 from engine.config import get_config
 from engine.posts import display_name as _display_name, PostPayload
 
@@ -17,13 +17,6 @@ from engine.posts import display_name as _display_name, PostPayload
 # the Oracle needs — the trades show actions, the leaderboard shows outcomes.
 _ORACLE_COMMENTARY_CAP = 240
 _ORACLE_TRADE_REASONING_CAP = 100
-
-
-def _truncate(text: str, cap: int) -> str:
-    text = text.strip()
-    if len(text) <= cap:
-        return text
-    return text[: cap - 1].rstrip() + "…"
 
 
 def _slugify(text: str) -> str:

@@ -56,6 +56,7 @@ from scripts.session_state import mark_done as _mark_done
 
 from engine.agent_memory import (
     build_memory_update_prompt,
+    build_narrator_memory_update_prompt,
     load_journal,
     save_journal,
 )
@@ -1080,9 +1081,11 @@ def step_load_memories(agent_ids: list[str]) -> dict[str, str]:
 
 def step_build_memory_update_prompts(
     agent_results: dict[str, dict],
-    agent_posts: dict[str, list[dict]],
+    agent_posts: dict[str, list],
     portfolio_summaries: dict[str, dict],
     day_number: int | None = None,
+    leaderboard: list[dict] | None = None,
+    oracle_posts: list | None = None,
 ) -> dict[str, str]:
     """Step 7a — build session-end journal-rewrite prompts for every agent.
 
@@ -1100,6 +1103,11 @@ def step_build_memory_update_prompts(
     ``get_day_number()`` when not supplied. The trigger-doc call omits this
     argument (the production contract); callers that already hold the day number
     may still pass it explicitly to avoid the extra I/O.
+
+    ``leaderboard`` and ``oracle_posts`` feed the narrator's prompt only. Pass
+    the same values given to ``step_build_oracle_prompt`` / ``step_save_content``
+    — without them the Oracle gets no session facts at all and narrates an empty
+    desk. ``agent_posts`` accepts PostPayload objects or plain dicts.
     """
     if day_number is None:
         day_number = get_day_number()
@@ -1115,14 +1123,17 @@ def step_build_memory_update_prompts(
             posts_today=agent_posts.get(agent_id, []),
             portfolio_summary=portfolio_summaries.get(agent_id, {}),
         )
-    # The Oracle doesn't trade; its journal update prompt has no trades.
-    prompts["the-oracle"] = build_memory_update_prompt(
+    # The Oracle narrates; it holds no book, so the trader template's fact slots
+    # are all empty for it and its posts are never in `agent_posts` (they live
+    # under bundle["narrator"]["posts"]). Fed that template it wrote about a
+    # dark desk on sessions that filled orders — see the narrator builder.
+    prompts["the-oracle"] = build_narrator_memory_update_prompt(
         agent_id="the-oracle",
         day_number=day_number,
         current_journal=load_journal("the-oracle"),
-        trades_today=[],
-        posts_today=agent_posts.get("the-oracle", []),
-        portfolio_summary={"currency": "EUR"},
+        agent_results=agent_results,
+        leaderboard=leaderboard or [],
+        posts_today=oracle_posts or [],
     )
     print(f"  Built {len(prompts)} memory-update prompts")
     return prompts
@@ -1270,10 +1281,15 @@ def step_update_snapshots(market_payload: dict) -> list[str]:
         return []
 
     manager = PortfolioManager(base_dir=portfolios_dir)
+    # Rows are keyed on the market date (the axis the baselines live on), but
+    # stamped with the session that observed them so a session whose OHLCV
+    # store has not advanced cannot rewrite a previous session's published row.
     snapshot_date = date.fromisoformat(market_payload["date"])
+    session_date = date.today()
     benchmarks = market_payload["benchmarks"]
 
     snapshotted: list[str] = []
+    refused: list[str] = []
 
     for portfolio_dir in sorted(portfolios_dir.iterdir()):
         if not portfolio_dir.is_dir():
@@ -1293,20 +1309,35 @@ def step_update_snapshots(market_payload: dict) -> list[str]:
         positions_value = _compute_positions_value(portfolio, snapshot_date)
         portfolio_value = portfolio.cash + positions_value
 
-        manager.add_snapshot(
+        written = manager.add_snapshot(
             strategy_id=strategy_id,
             snapshot_date=snapshot_date,
             portfolio_value=portfolio_value,
             cash=portfolio.cash,
             positions_value=positions_value,
             benchmarks=benchmarks,
+            session_date=session_date,
         )
+
+        if not written:
+            refused.append(strategy_id)
+            print(
+                f"  [WARN] {strategy_id}: {snapshot_date} already snapshotted by an "
+                f"earlier session — not overwriting. This valuation lands on the "
+                f"next market date."
+            )
+            continue
 
         print(
             f"  Snapshotted {strategy_id}: value={portfolio_value:.2f}, cash={portfolio.cash:.2f}"
         )
         snapshotted.append(strategy_id)
 
+    if refused:
+        print(
+            f"  [WARN] {len(refused)} portfolio(s) refused: the OHLCV store has not "
+            f"advanced past {snapshot_date} since it was last snapshotted."
+        )
     if not snapshotted:
         print("  No active portfolios found.")
 

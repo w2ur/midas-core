@@ -99,3 +99,90 @@ class TestStepSaveMemories:
         step_save_memories({"satoshi": "Day 1 satoshi.", "goldfinger": ""})
         assert "Day 1 satoshi" in agent_memory.load_journal("satoshi")
         assert "Day 0 goldfinger" in agent_memory.load_journal("goldfinger")
+
+
+class TestNarratorPrompt:
+    """Regression: 0da774525 — the Oracle was fed the trader journal template,
+    whose three fact slots (trades, posts, portfolio value) are all structurally
+    empty for a narrator. Its own posts are never in `agent_posts` either. The
+    prompt therefore carried zero session facts and the Oracle narrated a dark
+    desk across sessions that placed 1-27 orders, compounding daily off its own
+    prior journal (a fabricated "blank streak", Day 79 to Day 85).
+    """
+
+    def _prompts(self, **overrides):
+        kwargs = dict(
+            agent_results={
+                "satoshi": {
+                    "trades": [
+                        {
+                            "action": "BUY",
+                            "shares": 3,
+                            "ticker": "BTC-EUR",
+                            "reasoning": "Box broke the wrong way; adding.",
+                        }
+                    ],
+                    "commentary": "Re-armed the peel rungs.",
+                },
+                "goldfinger": {"trades": [], "commentary": "Waiting on yields."},
+            },
+            agent_posts={"satoshi": [{"text": "See you at 68k."}]},
+            portfolio_summaries={"satoshi": {"portfolio_value_base": 10_000.0}},
+            day_number=85,
+            leaderboard=[
+                {"rank": 1, "agent": "satoshi", "return_pct": -9.73},
+                {"rank": 2, "agent": "goldfinger", "return_pct": -18.30},
+            ],
+            oracle_posts=[{"text": "Scoreboard: the twins are 15 points apart."}],
+        )
+        kwargs.update(overrides)
+        return step_build_memory_update_prompts(**kwargs)
+
+    def test_oracle_prompt_carries_the_desks_activity(self, tmp_journals: Path) -> None:
+        from engine.posts import display_name
+
+        oracle = self._prompts()["the-oracle"]
+
+        assert "BTC-EUR" in oracle
+        assert "Re-armed the peel rungs" in oracle
+        # Resolved at runtime, not hardcoded: the demo desk in midas-core has a
+        # different cast, so a literal "Satoshi" would fail there.
+        assert display_name("satoshi") in oracle
+
+    def test_oracle_prompt_carries_leaderboard_and_own_posts(
+        self, tmp_journals: Path
+    ) -> None:
+        oracle = self._prompts()["the-oracle"]
+
+        assert "-9.7%" in oracle
+        assert "-18.3%" in oracle
+        assert "the twins are 15 points apart" in oracle
+
+    def test_oracle_prompt_never_claims_an_empty_desk(self, tmp_journals: Path) -> None:
+        """The exact strings that produced the fabricated blank streak."""
+        oracle = self._prompts()["the-oracle"]
+
+        assert "(no trades today)" not in oracle
+        assert "(no posts today)" not in oracle
+        # The narrator holds no book; a 0.00 PV line invited "no PV today".
+        assert "PORTFOLIO VALUE TODAY" not in oracle
+
+    def test_oracle_prompt_accepts_postpayload_objects(
+        self, tmp_journals: Path
+    ) -> None:
+        """`step_save_content` types posts as PostPayload; the same variable
+        must be able to feed this step without an AttributeError."""
+        from engine.posts import PostPayload
+
+        payload = PostPayload(
+            agent_id="the-oracle",
+            text="Scoreboard: the twins are 15 points apart.",
+            mentions=[],
+            kind="scoreboard",
+            parent_id=None,
+            refs={},
+            post_at="2026-08-03T20:00:00Z",
+        )
+        oracle = self._prompts(oracle_posts=[payload])["the-oracle"]
+
+        assert "the twins are 15 points apart" in oracle
