@@ -15,6 +15,7 @@ import json
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+from engine.corporate_actions import apply_split as _apply_split_positions
 from engine.types import Portfolio, Position, Trade
 
 
@@ -217,6 +218,49 @@ class PortfolioManager:
             "reasoning": trade.reasoning,
         }
         self._append_json_list(self._trades_path(strategy_id), trade_record)
+
+    # ------------------------------------------------------------------
+    # Corporate actions
+    # ------------------------------------------------------------------
+
+    def apply_split(self, strategy_id: str, ticker: str, ratio: float) -> bool:
+        """Adjust a held position's shares/avg_cost for a detected stock split.
+
+        Delegates the pure shares/avg_cost arithmetic to
+        ``engine.corporate_actions.apply_split`` — cost basis
+        (``shares × avg_cost``) is preserved by construction there — then
+        persists ``portfolio.json`` only if the ticker was actually held.
+        Same read-mutate-write shape as ``apply_trade``, the only other
+        writer of ``portfolio.json``; unlike a trade, a split leaves cash
+        and every other position untouched, so nothing is appended to
+        ``trades.json``.
+
+        Parameters
+        ----------
+        strategy_id:
+            Target portfolio.
+        ticker:
+            The split-affected ticker.
+        ratio:
+            ``stored_close / fetched_close`` for the overlapping pre-split
+            rows, as returned by ``engine.corporate_actions.detect_split``.
+
+        Returns
+        -------
+        bool
+            True if the agent held ``ticker`` and its position was
+            adjusted. False if it doesn't hold that ticker — a no-op, since
+            most agents won't hold every split-affected ticker.
+        """
+        path = self._portfolio_path(strategy_id)
+        data = self._read_json(path)
+        positions: list[dict] = data.get("positions", [])  # type: ignore[assignment]
+        if not any(p["ticker"] == ticker for p in positions):
+            return False
+
+        data["positions"] = _apply_split_positions(positions, ticker, ratio)  # type: ignore[index]
+        self._write_json(path, data)
+        return True
 
     # ------------------------------------------------------------------
     # Snapshots

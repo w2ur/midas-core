@@ -199,28 +199,127 @@ def _write_json(path: Path, data: list[dict]) -> None:
     path.write_text(json.dumps(data, indent=2) + "\n")
 
 
+def merge_baseline_series(
+    path: Path, computed: list[dict], *, restate: bool = False
+) -> tuple[int, int]:
+    """Append-or-refuse merge of a freshly computed series onto a baseline file.
+
+    Reaches the same outcome as ``PortfolioManager.add_snapshot`` on the other
+    curve plotted on the same dossier chart — a published point is immutable
+    to a later run — by a simpler mechanism than that function's, and safely
+    so: ``add_snapshot`` keys replacement on ``session_date`` identity because
+    a trading day's valuation can be legitimately re-run intraday; a baseline
+    date has no such concept, it is a deterministic function of a
+    same-day-immutable OHLCV store, so any value mismatch on an already-
+    published date is itself the signal that the upstream store changed
+    retroactively — refusing on any mismatch is therefore equivalent to
+    ``add_snapshot``'s session-identity check, not a looser stand-in for it.
+    A date not yet on disk is appended; a date already on disk is refused —
+    the on-disk row is kept exactly as published, even if ``computed`` now
+    disagrees with it because an OHLCV price was revised upstream.
+    ``restate=True`` is the explicit, one-time escape hatch: every date in
+    ``computed`` overwrites its on-disk counterpart, used only for a
+    deliberate, publicly logged restatement.
+
+    Refusals are printed, not raised — a session that dies because one
+    benchmark point drifted is worse than one that surfaces it. The same
+    posture covers the case where ``computed`` is empty but the file already
+    holds history: within-range gaps are already forward-filled (see
+    ``compute_passive_benchmark`` above), so an empty ``computed`` against an
+    established baseline means a whole ticker file is missing — a persistent
+    condition, not a blip — and silently freezing the file without a word
+    would look identical to success. That case is a no-op merge (nothing to
+    append, nothing to refuse) but still prints, unlike a brand-new agent's
+    first-ever build, where an empty ``computed`` against no prior file is
+    the ordinary "no data yet" case and stays silent.
+
+    Parameters
+    ----------
+    path:
+        Target baseline file (created if it does not exist yet).
+    computed:
+        Freshly computed series for the full [from_date, to_date] window.
+    restate:
+        When True, every date overwrites the on-disk row instead of being
+        refused. Reserved for a deliberate restatement.
+
+    Returns
+    -------
+    tuple[int, int]
+        (appended, refused) counts.
+    """
+    existing: list[dict] = json.loads(path.read_text()) if path.exists() else []
+    if not computed and existing:
+        print(
+            f"  [WARN] {path.name}: computed series is empty against "
+            f"{len(existing)} published row(s) — likely a missing OHLCV "
+            f"ticker file (within-range gaps are already forward-filled), "
+            f"not a transient blip. Keeping the published file as-is."
+        )
+        return 0, 0
+    by_date = {row["date"]: row for row in existing}
+    appended = 0
+    refused = 0
+    for row in computed:
+        date_key = row["date"]
+        if date_key not in by_date:
+            by_date[date_key] = row
+            appended += 1
+            continue
+        if restate:
+            by_date[date_key] = row
+            continue
+        if by_date[date_key] != row:
+            refused += 1
+            print(
+                f"  [WARN] {path.name}: {date_key} already published — "
+                f"refusing to overwrite with a revised value."
+            )
+    merged = [by_date[d] for d in sorted(by_date)]
+    _write_json(path, merged)
+    return appended, refused
+
+
 def build_all_baselines(
     universes_by_agent: dict[str, list[str]],
     from_date: date,
     to_date: date,
     max_positions_by_agent: dict[str, int] | None = None,
+    *,
+    restate: bool = False,
 ) -> None:
     """Produce all per-agent baseline files + the global reference file.
 
     Iterates get_config().trading_roster; agents whose benchmark is None are
-    skipped. Idempotent: always full-rewrites. Missing OHLCV data yields an
-    empty series; callers are expected to surface that as "no line to draw".
+    skipped. Append-or-refuse: an already-published date is kept as-is
+    unless ``restate=True``. Missing OHLCV data for a brand-new agent (no
+    prior file) yields an empty file — "no line to draw" for the site.
+    Missing OHLCV data against an *established* baseline is not empty: the
+    old file is kept frozen and a [WARN] is printed by
+    ``merge_baseline_series`` (see its docstring for why those two cases
+    differ). Per-date refusal warnings print as they occur; this function
+    also prints one aggregated (appended, refused) summary across every
+    file it merges, mirroring the shape of
+    ``scripts.daily_session.step_update_snapshots``'s aggregate line, so a
+    session with refusals scattered across many agents surfaces one count
+    instead of dozens of individual prints.
     """
     cfg = get_config()
     max_positions_by_agent = max_positions_by_agent or {}
     baselines_dir = cfg.baselines_dir
+    total_appended = 0
+    total_refused = 0
     for agent_id in cfg.trading_roster:
         spec = cfg.roster[agent_id].benchmark
         if spec is None:
             continue
         agent_dir = baselines_dir / agent_id
         bench = compute_passive_benchmark(spec, from_date, to_date)
-        _write_json(agent_dir / "benchmark.json", bench)
+        appended, refused = merge_baseline_series(
+            agent_dir / "benchmark.json", bench, restate=restate
+        )
+        total_appended += appended
+        total_refused += refused
 
         tickers = universes_by_agent.get(agent_id, [])
         max_pos = max_positions_by_agent.get(agent_id, 5)
@@ -232,9 +331,24 @@ def build_all_baselines(
             from_date=from_date,
             to_date=to_date,
         )
-        _write_json(agent_dir / "coinflip.json", coin)
+        appended, refused = merge_baseline_series(
+            agent_dir / "coinflip.json", coin, restate=restate
+        )
+        total_appended += appended
+        total_refused += refused
 
-    _write_json(
+    appended, refused = merge_baseline_series(
         baselines_dir / "global" / "msci_world.json",
         compute_global_reference(from_date, to_date),
+        restate=restate,
     )
+    total_appended += appended
+    total_refused += refused
+
+    if total_refused:
+        print(
+            f"  [WARN] baselines: {total_refused} published point(s) refused, "
+            f"{total_appended} new point(s) appended, across the baseline "
+            f"files this build touched — an OHLCV price likely changed "
+            f"since it was last published; the published values were kept."
+        )

@@ -29,6 +29,7 @@ import pandas as pd
 import yfinance as yf
 
 from engine.config import get_config
+from engine.corporate_actions import detect_split
 from engine.ohlcv_ingest import (
     existing_dates as _existing_dates,
     fetch_window_start,
@@ -241,6 +242,75 @@ def _write_rows(
     return merge_rows(path, df, revise_from)
 
 
+def _read_store_rows(path: Path) -> list[dict]:
+    """Read every row of a {SYMBOL}.jsonl store file as dicts, pre-write.
+
+    Missing file, blank lines, and unparseable lines are skipped rather than
+    raising — mirrors engine.ohlcv_ingest.existing_dates' defensive parsing,
+    so one corrupt line never aborts the run.
+    """
+    if not path.exists():
+        return []
+    rows: list[dict] = []
+    with path.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return rows
+
+
+def _apply_split_to_holders(symbol: str, ratio: float) -> list[str]:
+    """Adjust every portfolio currently holding `symbol` for a detected split.
+
+    Prints one loud, clearly-marked line per adjusted agent — ticker, ratio,
+    agent, and before/after share count — so a detected split is visible in
+    the session/workflow log, not just a silent JSON mutation. No
+    confirmation step: safety here is the detector's own conservative
+    thresholds (engine.corporate_actions.detect_split), matching this
+    engine's existing "rails in code, not prompts" design — see the
+    Brain/Hands principle in CLAUDE.md.
+
+    Delayed import — engine.portfolio is not otherwise needed on this
+    script's hot path, and importing it at call time keeps test
+    monkeypatching of get_config().portfolios_dir respected.
+
+    Returns the agent_ids whose position was actually adjusted (a no-op for
+    any agent not holding the ticker).
+    """
+    from engine.portfolio import PortfolioManager
+
+    portfolios_dir = get_config().portfolios_dir
+    if not portfolios_dir.exists():
+        return []
+    manager = PortfolioManager(base_dir=portfolios_dir)
+    adjusted: list[str] = []
+    for portfolio_dir in sorted(portfolios_dir.iterdir()):
+        if not (portfolio_dir / "portfolio.json").exists():
+            continue
+        agent_id = portfolio_dir.name
+        before = next(
+            (p for p in manager.load(agent_id).positions if p.ticker == symbol), None
+        )
+        if before is None:
+            continue
+        if not manager.apply_split(agent_id, symbol, ratio):
+            continue
+        after = next(p for p in manager.load(agent_id).positions if p.ticker == symbol)
+        print(
+            f"    [SPLIT ADJUSTED] agent={agent_id} ticker={symbol} "
+            f"ratio={ratio:.4f} shares {before.shares:.4f} -> {after.shares:.4f} "
+            f"avg_cost {before.avg_cost:.4f} -> {after.avg_cost:.4f}",
+            file=sys.stderr,
+        )
+        adjusted.append(agent_id)
+    return adjusted
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -274,6 +344,33 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--resweep",
+        action="store_true",
+        help=(
+            "Re-fetch the full --history-days window AND allow every row in it to "
+            "be revised. Corrects partial bars frozen anywhere in history, unlike "
+            "--backfill which re-fetches but writes append-only. Requires an "
+            "explicit --symbols list: it rewrites committed history. Also the "
+            "path that runs corporate-action (stock split) detection — see "
+            "engine.corporate_actions — since that needs a genuine historical "
+            "overlap the 1-day incremental revision window can't provide."
+        ),
+    )
+    parser.add_argument(
+        "--resweep-held",
+        action="store_true",
+        help=(
+            "Convenience form of --resweep, scoped automatically to every "
+            "ticker currently held across all portfolios (via "
+            "_collect_holdings()) instead of a hand-maintained --symbols "
+            "list. This is the scheduled trigger for split detection: a real "
+            "split only matters at all for a ticker some agent actually "
+            "holds, and that set is small (on the order of 30 symbols) — "
+            "cheap enough to resweep on a schedule. Mutually exclusive with "
+            "--symbols (it resolves its own) and --backfill."
+        ),
+    )
+    parser.add_argument(
         "--names-only",
         action="store_true",
         help=(
@@ -284,8 +381,28 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    if args.resweep and not args.symbols and not args.resweep_held:
+        parser.error("--resweep requires an explicit --symbols list")
+    if args.resweep and args.backfill:
+        parser.error("--resweep and --backfill are mutually exclusive")
+    if args.resweep_held and args.symbols:
+        parser.error(
+            "--resweep-held resolves its own --symbols list — do not pass both"
+        )
+    if args.resweep_held and args.backfill:
+        parser.error("--resweep-held and --backfill are mutually exclusive")
+
     if args.symbols:
         symbols = sorted({s.strip() for s in args.symbols.split(",") if s.strip()})
+    elif args.resweep_held:
+        symbols = sorted(_collect_holdings())
+        # Reuses the exact --resweep code path below (full-window revise_from
+        # + split detection) — the only difference is how `symbols` got
+        # resolved.
+        args.resweep = True
+        if not symbols:
+            print("No open positions across any portfolio — nothing to resweep.")
+            return 0
     elif args.crypto_only:
         symbols = _crypto_symbols()
     else:
@@ -317,12 +434,16 @@ def main() -> int:
     total_new = 0
     total_revised = 0
     failures = 0
+    splits_detected = 0
     for i, symbol in enumerate(symbols, start=1):
         if not args.names_only:
             path = get_config().ohlcv_dir / f"{symbol}.jsonl"
             revise_from: str | None = None
 
-            if args.backfill:
+            if args.resweep:
+                start = end - timedelta(days=args.history_days)
+                revise_from = start.isoformat()
+            elif args.backfill:
                 start = end - timedelta(days=args.history_days)
             else:
                 existing = _existing_dates(path) if path.exists() else set()
@@ -347,6 +468,31 @@ def main() -> int:
             if df is None:
                 failures += 1
             else:
+                # Split detection needs a genuinely historical overlap between
+                # what's already stored and what was just re-fetched — only
+                # --resweep re-requests the full history window against
+                # already-committed rows still due to be revised. The
+                # universal 1-day revision window (revise_from set below,
+                # every run) overlaps on exactly one trailing date, which
+                # detect_split's own "at least a handful of rows" gate
+                # already refuses on its own; gating on --resweep here avoids
+                # the wasted store re-read on every symbol, every night, for
+                # a comparison that structurally cannot fire.
+                if args.resweep:
+                    stored_rows = _read_store_rows(path)
+                    ratio = detect_split(stored_rows, df)
+                    if ratio is not None:
+                        splits_detected += 1
+                        print(
+                            f"  ! {symbol}: SPLIT DETECTED, ratio={ratio:.4f}",
+                            file=sys.stderr,
+                        )
+                        adjusted = _apply_split_to_holders(symbol, ratio)
+                        if not adjusted:
+                            print(
+                                f"    (no agent currently holds {symbol})",
+                                file=sys.stderr,
+                            )
                 n, r = _write_rows(symbol, df, revise_from)
                 total_new += n
                 total_revised += r
@@ -371,6 +517,7 @@ def main() -> int:
         print(
             f"\nDone. Wrote {total_new} new rows ({total_revised} revised) "
             f"across {len(symbols)} symbols. {failures} failures."
+            + (f" {splits_detected} split(s) detected." if splits_detected else "")
         )
     return 0
 

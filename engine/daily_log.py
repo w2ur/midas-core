@@ -132,6 +132,15 @@ def generate_daily_log(
     rows.sort(key=lambda r: r[3] if r[3] is not None else -1, reverse=True)
     for rank, (agent_id, currency, native_mtm, eur_mtm) in enumerate(rows, start=1):
         display = _display_name(agent_id)
+        # native_mtm can be None too now (portfolio_mtm returns None when a
+        # held position's currency can't be converted into the book's own —
+        # see engine.valuation.portfolio_mtm). eur_mtm is then also None,
+        # since portfolio_mtm_eur derives from portfolio_mtm.
+        native_str = (
+            _fmt(native_mtm, currency)
+            if native_mtm is not None
+            else "— (rate unavailable)"
+        )
         eur_str = (
             _fmt(eur_mtm, "EUR") if eur_mtm is not None else "— (rate unavailable)"
         )
@@ -140,9 +149,7 @@ def generate_daily_log(
         else:
             pnl_pct = (eur_mtm / 10_000 - 1) * 100
             pnl_str = f"{pnl_pct:+.2f}%"
-        lines.append(
-            f"| {rank} | {display} | {_fmt(native_mtm, currency)} | {eur_str} | {pnl_str} |"
-        )
+        lines.append(f"| {rank} | {display} | {native_str} | {eur_str} | {pnl_str} |")
     lines.append("")
 
     # Footer

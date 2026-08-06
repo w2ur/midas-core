@@ -542,3 +542,89 @@ class TestBudgetGuard:
         portfolio = pm.load("test")
         assert portfolio.cash == 400.0
         assert len(portfolio.positions) == 1
+
+
+class TestApplySplit:
+    """PortfolioManager.apply_split — corporate-action share adjustment.
+
+    Same read-mutate-write shape as apply_trade, but scoped to a single
+    position's shares/avg_cost — cash and every other position are left
+    untouched, and (unlike a trade) nothing is appended to trades.json.
+    """
+
+    def test_holder_gets_shares_scaled_and_cost_basis_preserved(
+        self, tmp_path: Path
+    ) -> None:
+        pm = PortfolioManager(base_dir=tmp_path)
+        pm.initialize("test", initial_capital=2000.0)
+        pm.apply_trade(
+            "test",
+            Trade(
+                id="t001",
+                timestamp=datetime(2026, 4, 14, 22, 0),
+                action="BUY",
+                ticker="CRWD",
+                shares=3,
+                price=400.0,
+                total=1200.0,
+                fees=0.0,
+                reasoning="Pre-split buy",
+            ),
+        )
+
+        assert pm.apply_split("test", "CRWD", 4.0) is True
+
+        portfolio = pm.load("test")
+        position = next(p for p in portfolio.positions if p.ticker == "CRWD")
+        assert position.shares == pytest.approx(12.0)
+        assert position.avg_cost == pytest.approx(100.0)
+        assert position.shares * position.avg_cost == pytest.approx(1200.0)
+        assert portfolio.cash == pytest.approx(2000.0 - 1200.0)  # cash untouched
+
+    def test_non_holder_is_untouched_and_returns_false(self, tmp_path: Path) -> None:
+        pm = PortfolioManager(base_dir=tmp_path)
+        pm.initialize("test", initial_capital=1000.0)
+        pm.apply_trade(
+            "test",
+            Trade(
+                id="t001",
+                timestamp=datetime(2026, 4, 14, 22, 0),
+                action="BUY",
+                ticker="AAPL",
+                shares=5,
+                price=100.0,
+                total=500.0,
+                fees=0.0,
+                reasoning="Unrelated position",
+            ),
+        )
+
+        assert pm.apply_split("test", "CRWD", 4.0) is False
+
+        portfolio = pm.load("test")
+        position = next(p for p in portfolio.positions if p.ticker == "AAPL")
+        assert position.shares == 5.0
+        assert position.avg_cost == 100.0
+
+    def test_split_does_not_touch_the_trade_log(self, tmp_path: Path) -> None:
+        pm = PortfolioManager(base_dir=tmp_path)
+        pm.initialize("test", initial_capital=2000.0)
+        pm.apply_trade(
+            "test",
+            Trade(
+                id="t001",
+                timestamp=datetime(2026, 4, 14, 22, 0),
+                action="BUY",
+                ticker="CRWD",
+                shares=3,
+                price=400.0,
+                total=1200.0,
+                fees=0.0,
+                reasoning="Pre-split buy",
+            ),
+        )
+        before = pm.load_trades("test")
+
+        pm.apply_split("test", "CRWD", 4.0)
+
+        assert pm.load_trades("test") == before

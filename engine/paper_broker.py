@@ -184,7 +184,14 @@ def _drawdown_pct(
 ) -> float:
     """Drawdown % from the most recent snapshot, in the portfolio's base currency.
 
-    Returns 0.0 if no snapshot exists yet (first day of experiment).
+    Returns 0.0 if no snapshot exists yet (first day of experiment), or if
+    today's value can't be computed because a held position's currency
+    differs from the book's own and the FX rate needed to convert it is
+    unavailable (`mtm_base_currency` returns `None` in that case — see
+    `engine.valuation.portfolio_mtm`). Same "can't determine it, don't halt
+    on unknown data" fallback already used two lines above for the
+    no-prior-snapshot case; this rail's other batch-level counterpart
+    (MAX_ORDERS_PER_DAY) is unaffected either way.
     """
     snaps = portfolio_manager.load_snapshots(agent_id)
     if not snaps:
@@ -192,6 +199,8 @@ def _drawdown_pct(
     portfolio = portfolio_manager.load(agent_id)
     summary = portfolio.to_dict()
     today_value = mtm_base_currency(summary, today)
+    if today_value is None:
+        return 0.0
     prev_value = snaps[-1]["portfolio_value"]
     if prev_value == 0:
         return 0.0

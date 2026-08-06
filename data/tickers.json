@@ -920,7 +920,7 @@
     "type": "etf"
   },
   "CL=F": {
-    "name": "Crude Oil Jun 26",
+    "name": "Crude Oil Sep 26",
     "type": "unknown"
   },
   "CLN.SW": {
@@ -1136,7 +1136,7 @@
     "type": "equity"
   },
   "DCC.L": {
-    "name": "DCC plc",
+    "name": "DCC Energy plc",
     "type": "equity"
   },
   "DD": {
@@ -1280,7 +1280,7 @@
     "type": "unknown"
   },
   "DSP5.PA": {
-    "name": "Amundi MSCI USA Daily (-1x) Inverse ETF Acc",
+    "name": "Amundi Nasdaq-100 Daily (-1x) Inverse UCITS ETF Acc",
     "type": "etf"
   },
   "DSY.PA": {
@@ -1768,7 +1768,7 @@
     "type": "forex"
   },
   "GC=F": {
-    "name": "Gold Jun 26",
+    "name": "Gold Dec 26",
     "type": "unknown"
   },
   "GD": {
@@ -1956,7 +1956,7 @@
     "type": "equity"
   },
   "HG=F": {
-    "name": "Copper Jul 26",
+    "name": "Copper Sep 26",
     "type": "unknown"
   },
   "HIG": {
@@ -3164,7 +3164,7 @@
     "type": "equity"
   },
   "PL=F": {
-    "name": "Platinum Jul 26",
+    "name": "Platinum Oct 26",
     "type": "unknown"
   },
   "PLD": {
@@ -3668,7 +3668,7 @@
     "type": "equity"
   },
   "SI=F": {
-    "name": "Silver Jul 26",
+    "name": "Silver Sep 26",
     "type": "unknown"
   },
   "SIE.DE": {

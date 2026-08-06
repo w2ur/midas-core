@@ -109,13 +109,20 @@ def test_mtm_eur_with_fx_fixture(midas_data_root) -> None:
 
 
 def test_mtm_eur_native_eur_needs_no_fx(midas_data_root) -> None:
-    _seed_ohlcv("SGLN.L", 50.0)
+    # Regression fix: this test previously used "SGLN.L" — but
+    # engine.paper_broker._ticker_currency maps the ".L" suffix to GBP, not
+    # EUR, so the ticker actually contradicted the test's own stated intent
+    # ("no FX conversion needed"). It only passed pre-fix because
+    # portfolio_mtm did no per-position currency resolution at all — exactly
+    # the bug this module now fixes. Swapped for "AIR.PA" (".PA" → EUR),
+    # which genuinely needs no conversion in a EUR book.
+    _seed_ohlcv("AIR.PA", 50.0)
     summary = {
         "cash": 250.0,
         "currency": "EUR",
-        "positions": [{"ticker": "SGLN.L", "shares": 2}],  # 100
+        "positions": [{"ticker": "AIR.PA", "shares": 2}],  # 100
     }
-    # EUR portfolio: no FX conversion, EUR mtm == native mtm.
+    # EUR portfolio, EUR-native position: no FX conversion, EUR mtm == native mtm.
     assert portfolio_mtm_eur(summary, date(2026, 6, 1)) == pytest.approx(350.0)
 
 
@@ -128,6 +135,63 @@ def test_mtm_eur_returns_none_without_fx_rate(midas_data_root) -> None:
         "positions": [{"ticker": "MSFT", "shares": 1}],
     }
     assert portfolio_mtm_eur(summary, date(2026, 6, 1)) is None
+
+
+# ---------------------------------------------------------------------------
+# Per-position FX conversion (a cross-currency position inside the book)
+#
+# Regression: portfolio_mtm summed `shares * price` with no per-position FX
+# conversion, so a EUR book holding a GBP-listed ticker was mispriced as if
+# the GBP close were a EUR close. engine.restatement.revalue_snapshot and
+# scripts/daily_session._compute_positions_value already convert correctly
+# via the same two helpers (engine.paper_broker._ticker_currency +
+# engine.fx.convert); this was the third, un-fixed occurrence.
+# ---------------------------------------------------------------------------
+
+
+def test_mtm_converts_non_native_currency_position(midas_data_root) -> None:
+    # EUR book holding a GBP-listed (".L" suffix) ticker.
+    _seed_ohlcv("TSCO.L", 5.0)
+    # Stored EURGBP=X close is EUR→GBP; GBP→EUR = 1/close.
+    _seed_ohlcv("EURGBP=X", 0.85)
+    summary = {
+        "cash": 1000.0,
+        "currency": "EUR",
+        "positions": [{"ticker": "TSCO.L", "shares": 10}],  # 50 GBP native
+    }
+    # Native GBP value = 50; converted to EUR at 1/0.85 = 58.823529...
+    expected = 1000.0 + 50.0 / 0.85
+    assert portfolio_mtm(summary, date(2026, 6, 1)) == pytest.approx(expected)
+
+
+def test_mtm_returns_none_when_position_fx_rate_unavailable(midas_data_root) -> None:
+    # EUR book holding a GBP-listed ticker, but no EURGBP=X rate seeded —
+    # the book cannot be accurately valued, so the whole result is None
+    # (never a partial total that silently drops the unconvertible position).
+    _seed_ohlcv("TSCO.L", 5.0)
+    summary = {
+        "cash": 1000.0,
+        "currency": "EUR",
+        "positions": [{"ticker": "TSCO.L", "shares": 10}],
+    }
+    assert portfolio_mtm(summary, date(2026, 6, 1)) is None
+
+
+def test_mtm_single_currency_book_unaffected_by_fx_fix(midas_data_root) -> None:
+    # Control: a book whose every position is already in its own currency
+    # must price identically to the pre-fix behaviour — no FX lookup should
+    # even be attempted.
+    _seed_ohlcv("MSFT", 300.0)
+    _seed_ohlcv("AAPL", 150.0)
+    summary = {
+        "cash": 1000.0,
+        "currency": "USD",
+        "positions": [
+            {"ticker": "MSFT", "shares": 10},
+            {"ticker": "AAPL", "shares": 4},
+        ],
+    }
+    assert portfolio_mtm(summary, date(2026, 6, 1)) == pytest.approx(4600.0)
 
 
 # ---------------------------------------------------------------------------

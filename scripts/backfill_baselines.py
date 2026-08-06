@@ -1,6 +1,10 @@
-"""Rebuild data/baselines/ for Day 1 → today.
+"""Refresh data/baselines/ for Day 1 → today.
 
-Idempotent: always overwrites. Universe ticker lists and max_positions are
+Append-or-refuse (engine.baselines.merge_baseline_series): an already-
+published date is kept as-is, new dates are appended. Pass restate=True to
+build_all_baselines directly for a deliberate, publicly logged restatement —
+this script does not expose that flag on the CLI, it is a Python-level
+escape hatch, not a routine one. Universe ticker lists and max_positions are
 derived from the roster config at call time via resolve_agent_universe —
 no hardcoded dicts.
 """

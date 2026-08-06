@@ -69,6 +69,7 @@ from engine.baseline_manager import (
     rebalance,
 )
 from engine.blog import build_oracle_prompt, save_daily_blog_draft
+from engine.fx import convert as fx_convert
 from engine.ohlcv_store import latest_close_on_or_before
 from engine.orders import (
     DroppedTrade,
@@ -89,8 +90,9 @@ from engine.output_bundle import (
     get_day_number,
     save_output_bundle,
 )
-from engine.paper_broker import fill_day
+from engine.paper_broker import _ticker_currency, fill_day
 from engine.portfolio import PortfolioManager
+from engine.restatement import MissingPriceError
 from engine.config import AgentSpec, AllocatorSpec, get_config
 from engine.posts import (
     PostPayload,
@@ -1241,13 +1243,41 @@ def _compute_positions_value(
     European tickers forward when their same-day close hasn't landed yet —
     avoids the NaN portfolio_value bug where pandas left-joined a pricing
     DataFrame whose `iloc[-1]` row contained NaN for lagging markets.
+
+    A position priced in a currency other than the portfolio's own is
+    converted before being summed, via the same pair of helpers the fill
+    path (`engine.paper_broker`) and the restatement engine
+    (`engine.restatement.revalue_snapshot`) use:
+    `engine.paper_broker._ticker_currency` to resolve the ticker's native
+    currency and `engine.fx.convert` to convert its native-currency value
+    into the book's currency. Reusing these, rather than reimplementing FX
+    lookup here, is what keeps all three pricing paths in agreement.
+
+    If the FX rate needed for that conversion is unavailable, this raises
+    `engine.restatement.MissingPriceError` (`what="FX rate"`) instead of
+    silently summing the unconverted native-currency value — that silent
+    sum was the defect this fix removes, and adding a second silent
+    fallback here would just reintroduce it under a different name. The
+    caller, `step_update_snapshots`, catches this per portfolio so one
+    book's missing FX rate skips only that book's snapshot for the day
+    rather than aborting the whole session.
     """
     total = 0.0
     for p in portfolio.positions:
         price = latest_close_on_or_before(p.ticker, on, store=store)
         if price is None:
             price = p.avg_cost
-        total += p.shares * price
+        native_value = p.shares * price
+        ticker_ccy = _ticker_currency(p.ticker)
+        if ticker_ccy == portfolio.currency:
+            total += native_value
+        else:
+            converted = fx_convert(native_value, ticker_ccy, portfolio.currency, on)
+            if converted is None:
+                raise MissingPriceError(
+                    f"{ticker_ccy}->{portfolio.currency}", on, what="FX rate"
+                )
+            total += converted
     return total
 
 
@@ -1261,6 +1291,12 @@ def step_update_snapshots(market_payload: dict) -> list[str]:
     `baseline-manager` books accrue committed snapshots here. That is intentional
     private valuation tracking — both are excluded from every public surface by
     the ``trading_roster`` role filter (role != trader), so this is not a leak.
+
+    A portfolio holding a foreign-currency position whose FX rate is
+    unavailable is skipped for the day (loud `[WARN]`, not published) rather
+    than either aborting the whole run or publishing an unconverted
+    valuation — see `_compute_positions_value`. That valuation lands on the
+    next market date, same as the existing "already snapshotted" refusal.
 
     Parameters
     ----------
@@ -1290,6 +1326,7 @@ def step_update_snapshots(market_payload: dict) -> list[str]:
 
     snapshotted: list[str] = []
     refused: list[str] = []
+    fx_gaps: list[str] = []
 
     for portfolio_dir in sorted(portfolios_dir.iterdir()):
         if not portfolio_dir.is_dir():
@@ -1306,7 +1343,15 @@ def step_update_snapshots(market_payload: dict) -> list[str]:
             print(f"  [WARN] Could not load {strategy_id}: {exc}")
             continue
 
-        positions_value = _compute_positions_value(portfolio, snapshot_date)
+        try:
+            positions_value = _compute_positions_value(portfolio, snapshot_date)
+        except MissingPriceError as exc:
+            fx_gaps.append(strategy_id)
+            print(
+                f"  [WARN] {strategy_id}: {exc} — skipping today's snapshot "
+                f"rather than publishing an unconverted valuation."
+            )
+            continue
         portfolio_value = portfolio.cash + positions_value
 
         written = manager.add_snapshot(
@@ -1338,6 +1383,11 @@ def step_update_snapshots(market_payload: dict) -> list[str]:
             f"  [WARN] {len(refused)} portfolio(s) refused: the OHLCV store has not "
             f"advanced past {snapshot_date} since it was last snapshotted."
         )
+    if fx_gaps:
+        print(
+            f"  [WARN] {len(fx_gaps)} portfolio(s) skipped: missing FX rate for a "
+            f"held position — {fx_gaps}."
+        )
     if not snapshotted:
         print("  No active portfolios found.")
 
@@ -1348,8 +1398,10 @@ def step_update_snapshots(market_payload: dict) -> list[str]:
 def step_build_baselines() -> None:
     """Step 9a — Baselines.
 
-    Recomputes data/baselines/ for Day 1 → today, full-rewrite and idempotent.
-    Runs AFTER portfolio mutations so the benchmark window matches the
+    Recomputes data/baselines/ for Day 1 → today, append-or-refuse per date
+    (engine.baselines.merge_baseline_series) — the same mutability contract
+    as PortfolioManager.add_snapshot on the agent curve it shares a chart
+    with. Runs AFTER portfolio mutations so the benchmark window matches the
     freshly-appended agent snapshots. Uses backfill_baselines constants as
     the single source of truth for universes + max_positions.
     """
