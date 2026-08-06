@@ -19,6 +19,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from engine import ohlcv_ingest
 from engine.ohlcv_ingest import (
     append_new_rows,
     build_new_rows,
@@ -127,6 +128,21 @@ def test_existing_dates_skips_blank_and_malformed_lines(tmp_path: Path) -> None:
         '{"date": "2026-04-15", "close": 1.0}\n'
         "\n"
         "not-json\n"
+        '{"date": "2026-04-16", "close": 2.0}\n',
+        encoding="utf-8",
+    )
+    assert existing_dates(path) == {"2026-04-15", "2026-04-16"}
+
+
+def test_existing_dates_skips_valid_json_that_is_not_an_object(tmp_path: Path) -> None:
+    # `42` and `["a"]` parse fine, but `.get` on them raises AttributeError.
+    # Uncaught, one corrupt line would abort the whole ~1,150-symbol nightly
+    # run — the opposite of the graceful degradation the docstring promises.
+    path = tmp_path / "AAPL.jsonl"
+    path.write_text(
+        '{"date": "2026-04-15", "close": 1.0}\n'
+        "42\n"
+        '["not", "a", "dict"]\n'
         '{"date": "2026-04-16", "close": 2.0}\n',
         encoding="utf-8",
     )
@@ -494,3 +510,53 @@ def test_merge_rows_refuses_to_rewrite_a_store_with_unparseable_lines(
 
     assert merge_rows(path, df, revise_from="2026-08-04") == (0, 0)
     assert "not json at all" in path.read_text()
+
+
+def test_merge_rows_treats_a_non_object_json_line_as_unparseable(
+    tmp_path: Path,
+) -> None:
+    # Same defence as existing_dates: `42` is valid JSON, so json.loads succeeds
+    # and `.get` raises AttributeError. merge_rows must degrade to append-only
+    # rather than crash the run on one corrupt line.
+    path = tmp_path / "BTC-EUR.jsonl"
+    path.write_text(
+        json.dumps(_rec("2026-08-04", 55649.74)) + "\n42\n",
+        encoding="utf-8",
+    )
+    df = _yf_frame({"2026-08-04": [1, 2, 0.5, 55545.09, 55545.09, 100]})
+
+    assert merge_rows(path, df, revise_from="2026-08-04") == (0, 0)
+    assert path.read_text().splitlines()[1] == "42"
+
+
+def test_merge_rows_leaves_no_tmp_file_behind_when_the_write_crashes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # fetch-ohlcv.yml does a blanket `git add data/market/ohlcv/`, so a stray
+    # `{SYMBOL}.jsonl.tmp` from a crashed rewrite would be committed into the
+    # store permanently (.gitignore is the second line of defence, not the
+    # first). Crash the rewrite mid-flight and assert nothing is left behind.
+    path = tmp_path / "BTC-EUR.jsonl"
+    original = json.dumps(_rec("2026-08-04", 55649.74)) + "\n"
+    path.write_text(original, encoding="utf-8")
+    df = _yf_frame({"2026-08-04": [1, 2, 0.5, 55545.09, 55545.09, 100]})
+
+    def boom(fd: int) -> None:
+        raise OSError("disk went away")
+
+    monkeypatch.setattr(ohlcv_ingest.os, "fsync", boom)
+
+    with pytest.raises(OSError):
+        merge_rows(path, df, revise_from="2026-08-04")
+
+    assert list(tmp_path.glob("*.tmp")) == []
+    assert path.read_text(encoding="utf-8") == original  # store never truncated
+
+
+def test_merge_rows_leaves_no_tmp_file_behind_on_success(tmp_path: Path) -> None:
+    path = tmp_path / "BTC-EUR.jsonl"
+    path.write_text(json.dumps(_rec("2026-08-04", 55649.74)) + "\n", encoding="utf-8")
+    df = _yf_frame({"2026-08-04": [1, 2, 0.5, 55545.09, 55545.09, 100]})
+
+    assert merge_rows(path, df, revise_from="2026-08-04") == (0, 1)
+    assert list(tmp_path.glob("*.tmp")) == []

@@ -13,6 +13,7 @@ sandboxed agent — preserving it exactly is a hard requirement.
 from __future__ import annotations
 
 import json
+import os
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -61,7 +62,10 @@ def existing_dates(path: Path) -> set[str]:
     """Return the set of ISO dates already present in a ``{SYMBOL}.jsonl`` store file.
 
     Missing file → empty set. Blank and unparseable lines are skipped so a
-    partially-written file never aborts a refresh.
+    partially-written file never aborts a refresh. A line that is valid JSON but
+    not an object (e.g. ``42``) counts as unparseable — ``.get`` on it raises
+    ``AttributeError``, and an uncaught raise here would abort the whole
+    ~1,150-symbol nightly run over one corrupt line.
     """
     if not path.exists():
         return set()
@@ -72,10 +76,9 @@ def existing_dates(path: Path) -> set[str]:
             if not line:
                 continue
             try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
+                d = json.loads(line).get("date")
+            except (json.JSONDecodeError, AttributeError):
                 continue
-            d = row.get("date")
             if d:
                 dates.add(d)
     return dates
@@ -96,9 +99,9 @@ def fetch_window_start(
     skipped.
 
     ``revise_days`` re-requests that many already-stored trailing days so a bar
-    that was still forming when it was first written (24/7 crypto) can be
-    corrected by its final value. It has no effect on an empty store, which
-    fetches the full ``history_days`` window regardless.
+    that was still forming when it was first written can be corrected by its
+    final value. It has no effect on an empty store, which fetches the full
+    ``history_days`` window regardless.
     """
     if last is None:
         return end - timedelta(days=history_days)
@@ -169,9 +172,12 @@ def merge_rows(
     are appended, stored dates are never touched.
 
     With ``revise_from`` set to an ISO date, an already-stored row on or after
-    that date is *replaced* when the fetched value differs. This exists for 24/7
-    markets: a crypto bar written before the UTC day closed is a partial bar, and
-    the store had no way to accept its final value.
+    that date is *replaced* when the fetched value differs. This exists for bars
+    that are still forming when they are first written — 24/7 crypto, commodity
+    futures whose next session has already opened, FX after its 17:00 ET roll —
+    which the store previously had no way to correct. A bar that was already
+    final re-fetches identical, so nothing is replaced and the file is not
+    rewritten at all.
 
     Revision rewrites the whole file in date order, so a store containing a line
     with no parseable date is left alone and degrades to append-only — reordering
@@ -192,7 +198,7 @@ def merge_rows(
                     continue
                 try:
                     d = json.loads(line).get("date")
-                except json.JSONDecodeError:
+                except (json.JSONDecodeError, AttributeError):
                     unparseable += 1
                     continue
                 if d:
@@ -218,8 +224,19 @@ def merge_rows(
 
     if appended or revised:
         tmp = path.with_name(path.name + ".tmp")
-        with tmp.open("w", encoding="utf-8") as f:
-            for d in sorted(stored):
-                f.write(stored[d] + "\n")
-        tmp.replace(path)
+        try:
+            with tmp.open("w", encoding="utf-8") as f:
+                for d in sorted(stored):
+                    f.write(stored[d] + "\n")
+                # os.replace is atomic w.r.t. the rename but says nothing about
+                # durability: a crash after the rename can leave the store file
+                # truncated. This is the source of truth for every valuation.
+                f.flush()
+                os.fsync(f.fileno())
+            tmp.replace(path)
+        finally:
+            # A crash between open and replace would otherwise leave an orphan
+            # `{SYMBOL}.jsonl.tmp` that the fetch-ohlcv workflow's
+            # `git add data/market/ohlcv/` would commit into the store.
+            tmp.unlink(missing_ok=True)
     return appended, revised

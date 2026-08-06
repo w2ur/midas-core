@@ -299,11 +299,15 @@ def main() -> int:
 
     end = date.today()
 
-    # 24/7 markets only: a crypto bar written before the UTC day closes is a
-    # partial bar, so re-request the last stored day and let its final value
-    # replace it. Equity and FX bars are final at fetch time (the cron runs
-    # after the close) and stay pure-append.
-    crypto = set(_crypto_symbols())
+    # Universal 1-day revision window: re-request the trailing stored day and
+    # let its final value replace it. Crypto trades 24/7; commodity futures
+    # (`=F`) have already opened the next Globex session by 22:30 UTC; FX (`=X`)
+    # rolls at 17:00 ET and drifts mildly, worst on Fridays. All three are
+    # still forming when first written. Cash equities and ETFs ARE final at
+    # fetch time — for them the re-fetched bar is identical, `merge_rows` finds
+    # nothing to replace, and the store is left byte-for-byte unchanged. So a
+    # blanket window costs nothing and needs no instrument taxonomy to maintain.
+    revise_days = 1
 
     registry_updates: dict[str, dict] = {}
 
@@ -313,7 +317,6 @@ def main() -> int:
     for i, symbol in enumerate(symbols, start=1):
         if not args.names_only:
             path = get_config().ohlcv_dir / f"{symbol}.jsonl"
-            revise_days = 1 if symbol in crypto else 0
             revise_from: str | None = None
 
             if args.backfill:

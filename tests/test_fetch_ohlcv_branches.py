@@ -1,20 +1,24 @@
 """Branch coverage for scripts.fetch_ohlcv.main() — the nightly, unattended cron
 entry point.
 
-Task 3 review flagged that only the crypto/revise branch had ever been run (a
-one-off manual probe against BTC-EUR). Nothing exercised the equity/FX
-pure-append path or the skip path through main()'s actual control flow.
-That gap matters most for the invariant that protects the store: an equity
-or FX symbol must NEVER get `revise_from` set, or ~1,100 committed files get
-silently rewritten every night.
+Every symbol now runs with a 1-day revision window — the trailing stored bar is
+re-requested and replaced when its value changed. The two halves of that
+behaviour are pinned separately:
+
+- **No churn.** A cash equity or ETF bar IS final at the 22:30 UTC fetch
+  (measured: SPY and AAPL, 0 of 23 trailing bars drifted), so the re-fetch is
+  identical, `merge_rows` finds nothing to replace, and every stored byte
+  survives. This is why widening the window to ~1,100 committed files is safe.
+- **Revision.** Crypto (24/7) and commodity futures (`=F`, whose next Globex
+  session has already opened at 22:30 UTC — GC=F drifted on 13 of the last 22
+  bars, worst +2.865%) are still forming when written, and must be corrected.
 
 All tests here drive `main()` end-to-end with `_fetch_symbol` and
 `_fetch_ticker_info` monkeypatched to synthetic, network-free responses —
 no yfinance call is ever made. `_fetch_symbol`'s replacement filters a fixed
 per-symbol time series down to the requested `[start, end]` window, mirroring
-real yfinance's window semantics, so a wrongly-widened window (e.g. the
-crypto revision gate leaking onto a non-crypto symbol) is observable as a
-byte-level diff, not just a silently-skipped branch.
+real yfinance's window semantics, so a wrongly-widened or wrongly-narrowed
+window is observable as a byte-level diff, not just a silently-skipped branch.
 """
 
 from __future__ import annotations
@@ -78,6 +82,27 @@ def _tight_line(d: str, close: float) -> str:
     )
 
 
+def _canonical_line(d: str, ohlcv: list) -> str:
+    """The exact line the store writes for a frame row.
+
+    `row_to_record` coerces every cell through `safe_float`/`safe_int`, so an
+    integer 1 in the frame lands as `1.0` on disk. Building the expectation
+    through the same coercion keeps "unchanged" meaning byte-identical.
+    """
+    o, h, low, c, adj, v = ohlcv
+    return json.dumps(
+        {
+            "date": d,
+            "open": float(o),
+            "high": float(h),
+            "low": float(low),
+            "close": float(c),
+            "adj_close": float(adj),
+            "volume": int(v),
+        }
+    )
+
+
 def _write_raw(path: Path, lines: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -88,33 +113,38 @@ def _run_main(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> int:
     return fo.main()
 
 
-# --- equity/FX pure-append (the load-bearing invariant) --------------------
+# --- equity no-churn (why the universal window is safe) --------------------
 
 
-def test_equity_stale_by_one_day_is_pure_append_byte_identical(
+def test_equity_unchanged_trailing_bar_stays_byte_identical(
     midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A non-crypto symbol must never get revise_from set, so every
-    previously-stored row survives byte-for-byte. The synthetic response for
-    "yesterday" deliberately differs from the stored value — if the equity
-    path ever leaked revise_from, this test would catch a real byte change,
-    not just an unexercised branch."""
+    """An equity now gets the revision window like everything else, and it
+    still costs nothing: a cash-equity bar is final at fetch time, so the
+    re-fetched trailing row equals the stored one and `merge_rows` finds
+    nothing to replace. Every pre-existing byte survives — including the
+    non-canonically-spaced row before the window, which proves an untouched
+    row is carried across the rewrite verbatim rather than re-serialized."""
     today = date.today()
     yesterday = today - timedelta(days=1)
     day_before = today - timedelta(days=2)
 
+    yesterday_bar = [1, 2, 0.5, 185.0, 185.0, 1]
+    today_bar = [1, 2, 0.5, 200.12, 200.12, 1]
+
     path = get_config().ohlcv_dir / "AAPL.jsonl"
     day_before_line = _tight_line(day_before.isoformat(), 180.0)
-    yesterday_line = _tight_line(yesterday.isoformat(), 185.0)
+    # Stored in the same form the fetch would produce → the re-fetch is a no-op.
+    yesterday_line = _canonical_line(yesterday.isoformat(), yesterday_bar)
     _write_raw(path, [day_before_line, yesterday_line])
     before = path.read_text(encoding="utf-8")
 
     frames = {
         "AAPL": {
-            # Differs from the stored 185.0 — would show up as a revision
-            # if the equity path ever set revise_from.
-            yesterday.isoformat(): [1, 2, 0.5, 999.99, 999.99, 1],
-            today.isoformat(): [1, 2, 0.5, 200.12, 200.12, 1],
+            # An equity close does not move after 22:30 UTC — measured over 23
+            # trading days, SPY and AAPL drifted on 0 of them.
+            yesterday.isoformat(): yesterday_bar,
+            today.isoformat(): today_bar,
         }
     }
     monkeypatch.setattr(fo, "_fetch_symbol", _make_fake_fetch_symbol(frames))
@@ -125,25 +155,63 @@ def test_equity_stale_by_one_day_is_pure_append_byte_identical(
 
     text = path.read_text(encoding="utf-8")
     assert text.startswith(before)  # nothing about the pre-existing bytes moved
-    lines = text.splitlines()
-    assert lines == [
+    assert text.splitlines() == [
         day_before_line,
-        yesterday_line,  # unchanged — no revision happened
-        json.dumps(
-            {
-                "date": today.isoformat(),
-                "open": 1.0,
-                "high": 2.0,
-                "low": 0.5,
-                "close": 200.12,
-                "adj_close": 200.12,
-                "volume": 1,
-            }
-        ),
+        yesterday_line,  # unchanged — the window found nothing to revise
+        _canonical_line(today.isoformat(), today_bar),
     ]
 
 
-# --- crypto revision (the mirror case — proves the gate discriminates) -----
+# --- futures + crypto revision (the bars that are NOT final at fetch) ------
+
+
+def test_futures_stale_by_one_day_revises_trailing_row(
+    midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: 7777b4cc3 — the revision window was gated to crypto, so a
+    commodity-futures bar was frozen at whatever partial value the 22:30 UTC
+    cron happened to catch.
+
+    `GC=F` at 22:30 UTC is mid-Globex: the next session has already opened, so
+    the bar is still forming. Measured over the store's 23 most recent bars it
+    differed from its final value on 13 of the 22 days the two records share
+    (worst +2.865% on 2026-07-29); `PL=F` (+3.365%) and `CL=F` (+2.516%) behave
+    the same way. Worse, the corrected skip condition means every run now writes
+    a same-day partial — with the crypto gate in place futures went from ~61%
+    wrong to ~100% wrong. The trailing row must be replaced by its final
+    value."""
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    day_before = today - timedelta(days=2)
+
+    path = get_config().ohlcv_dir / "GC=F.jsonl"
+    day_before_line = _tight_line(day_before.isoformat(), 3310.0)
+    partial_yesterday_line = _canonical_line(
+        yesterday.isoformat(), [3320.0, 3355.0, 3315.0, 3341.6, 3341.6, 1200]
+    )
+    _write_raw(path, [day_before_line, partial_yesterday_line])
+
+    final_yesterday_bar = [3320.0, 3372.4, 3315.0, 3437.3, 3437.3, 1850]
+    today_bar = [3437.3, 3460.0, 3430.0, 3451.9, 3451.9, 900]
+    frames = {
+        "GC=F": {
+            yesterday.isoformat(): final_yesterday_bar,
+            today.isoformat(): today_bar,
+        }
+    }
+    monkeypatch.setattr(fo, "_fetch_symbol", _make_fake_fetch_symbol(frames))
+    monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+
+    rc = _run_main(monkeypatch, ["--symbols", "GC=F"])
+    assert rc == 0
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert lines == [
+        day_before_line,  # before the window — byte-identical
+        _canonical_line(yesterday.isoformat(), final_yesterday_bar),  # revised
+        _canonical_line(today.isoformat(), today_bar),  # appended
+    ]
+    assert json.loads(lines[1])["close"] == 3437.3  # not the frozen 3341.6
 
 
 def test_crypto_stale_by_one_day_revises_trailing_row(
