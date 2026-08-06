@@ -496,11 +496,110 @@ def test_merge_rows_keeps_an_untouched_row_byte_identical_during_a_mixed_rewrite
     assert lines[0] == untouched_line
 
 
+def test_merge_rows_preserves_an_out_of_order_store(tmp_path: Path) -> None:
+    """The store is NOT in date order and must not be re-sorted by a cron.
+
+    529 of the 1,046 committed OHLCV files have an order break: a later
+    long-history backfill was appended behind the original window, so the file
+    reads recent-dates-then-an-older-block (`3EUS.L` breaks at line 513 of
+    2581, 2026-04-24 -> 2016-04-28). Now that the revision window is universal,
+    `appended >= 1` on every nightly run, so every symbol takes this rewrite
+    path — a `sorted()` here would make an unattended job emit a ~230 MB,
+    1.3-million-line reorder commit. Readers are order-insensitive;
+    canonicalising the store is a separate, deliberate decision.
+
+    Mirrors the real shape: recent block first, older block behind it, with the
+    revision landing in the middle of the file.
+    """
+    path = tmp_path / "3EUS.L.jsonl"
+    recent = ["2026-04-23", "2026-04-24"]
+    older = ["2016-04-28", "2016-04-29"]
+    original = [json.dumps(_rec(d, 100.0)) for d in recent + older]
+    path.write_text("\n".join(original) + "\n", encoding="utf-8")
+
+    # Revises 2026-04-24 (row 2 of 4 — mid-file) and appends a new trailing day.
+    df = _yf_frame(
+        {
+            "2026-04-24": [1, 2, 0.5, 111.11, 111.11, 100],
+            "2026-04-25": [1, 2, 0.5, 222.22, 222.22, 100],
+        }
+    )
+
+    appended, revised = merge_rows(path, df, revise_from="2026-04-24")
+
+    assert (appended, revised) == (1, 1)
+    dates = [json.loads(line)["date"] for line in path.read_text().splitlines()]
+    # Original order, break and all — NOT sorted. New row at the end.
+    assert dates == [
+        "2026-04-23",
+        "2026-04-24",
+        "2016-04-28",
+        "2016-04-29",
+        "2026-04-25",
+    ]
+    assert dates != sorted(dates)
+    lines = path.read_text().splitlines()
+    assert lines[0] == original[0]  # untouched rows keep their exact bytes
+    assert lines[2] == original[2]
+    assert lines[3] == original[3]
+    assert json.loads(lines[1])["close"] == 111.11  # revised in place
+
+
+def test_merge_rows_appends_multiple_new_dates_in_ascending_order(
+    tmp_path: Path,
+) -> None:
+    """New dates are the one thing that IS sorted — among themselves, so a
+    multi-day catch-up lands chronologically at the end rather than in whatever
+    order the frame happens to iterate."""
+    path = tmp_path / "3EUS.L.jsonl"
+    path.write_text(
+        json.dumps(_rec("2026-04-24", 100.0))
+        + "\n"
+        + json.dumps(_rec("2016-04-28", 100.0))
+        + "\n",
+        encoding="utf-8",
+    )
+    df = _yf_frame(
+        {
+            "2026-04-27": [1, 2, 0.5, 3.0, 3.0, 100],
+            "2026-04-25": [1, 2, 0.5, 1.0, 1.0, 100],
+            "2026-04-26": [1, 2, 0.5, 2.0, 2.0, 100],
+        }
+    )
+
+    assert merge_rows(path, df, revise_from="2026-04-24") == (3, 0)
+    dates = [json.loads(line)["date"] for line in path.read_text().splitlines()]
+    assert dates == [
+        "2026-04-24",
+        "2016-04-28",  # pre-existing break survives
+        "2026-04-25",
+        "2026-04-26",
+        "2026-04-27",
+    ]
+
+
+def test_merge_rows_writes_an_empty_store_in_ascending_order(tmp_path: Path) -> None:
+    """On a new file every row is new, so order preservation degrades to
+    ascending — a fresh store is never born out of order."""
+    path = tmp_path / "NEW.jsonl"
+    df = _yf_frame(
+        {
+            "2026-04-26": [1, 2, 0.5, 2.0, 2.0, 100],
+            "2026-04-24": [1, 2, 0.5, 0.0, 0.0, 100],
+            "2026-04-25": [1, 2, 0.5, 1.0, 1.0, 100],
+        }
+    )
+
+    assert merge_rows(path, df, revise_from="2026-04-24") == (3, 0)
+    dates = [json.loads(line)["date"] for line in path.read_text().splitlines()]
+    assert dates == sorted(dates) == ["2026-04-24", "2026-04-25", "2026-04-26"]
+
+
 def test_merge_rows_refuses_to_rewrite_a_store_with_unparseable_lines(
     tmp_path: Path,
 ) -> None:
-    # A rewrite reorders by date and would silently drop a line carrying no
-    # parseable date. Fall back to pure append instead of losing it.
+    # A rewrite is driven by a date-keyed map, so a line carrying no parseable
+    # date has no key to survive under. Fall back to pure append, not loss.
     path = tmp_path / "BTC-EUR.jsonl"
     path.write_text(
         json.dumps(_rec("2026-08-04", 55649.74)) + "\nnot json at all\n",

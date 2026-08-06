@@ -305,8 +305,11 @@ def main() -> int:
     # rolls at 17:00 ET and drifts mildly, worst on Fridays. All three are
     # still forming when first written. Cash equities and ETFs ARE final at
     # fetch time — for them the re-fetched bar is identical, `merge_rows` finds
-    # nothing to replace, and the store is left byte-for-byte unchanged. So a
-    # blanket window costs nothing and needs no instrument taxonomy to maintain.
+    # nothing to replace, and no already-stored row changes value or position.
+    # (The file is still rewritten to append the day's new bar, and a genuine
+    # revision does rewrite it — what is invariant is the stored rows, not the
+    # file's mtime.) So a blanket window adds no churn and needs no instrument
+    # taxonomy to maintain as universes grow.
     revise_days = 1
 
     registry_updates: dict[str, dict] = {}

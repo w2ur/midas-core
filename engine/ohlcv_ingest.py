@@ -176,18 +176,30 @@ def merge_rows(
     that are still forming when they are first written — 24/7 crypto, commodity
     futures whose next session has already opened, FX after its 17:00 ET roll —
     which the store previously had no way to correct. A bar that was already
-    final re-fetches identical, so nothing is replaced and the file is not
-    rewritten at all.
+    final re-fetches identical, so no stored value is replaced.
 
-    Revision rewrites the whole file in date order, so a store containing a line
-    with no parseable date is left alone and degrades to append-only — reordering
-    it would silently drop that line.
+    **The store's existing line order is preserved.** A revision overwrites its
+    row in place; new dates are appended at the end, in ascending date order
+    among themselves. The file is NOT re-sorted — 529 of the 1,046 committed
+    files are not in date order (a later long-history backfill was appended
+    behind the original window), and since the universal revision window means
+    the rewrite path runs nightly, sorting here would make a scheduled job emit
+    a ~230 MB, 1.3-million-line reorder commit. Nightly diffs stay one or two
+    lines per file. Readers are order-insensitive; canonicalising the store is a
+    deliberate, separately-reviewed decision, not a cron side effect.
+
+    Revision rewrites the whole file from a date-keyed map, so a line carrying no
+    parseable date has no key to survive under. Such a store is left alone and
+    degrades to append-only rather than losing that line.
     """
     existing = existing_dates(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if revise_from is None:
         return append_new_rows(path, df), 0
 
+    # Read top to bottom: dicts preserve insertion order, so `stored`'s order
+    # IS the file's line order, and assigning to an existing key replaces that
+    # row without moving it.
     stored: dict[str, str] = {}
     unparseable = 0
     if path.exists():
@@ -208,7 +220,8 @@ def merge_rows(
     if unparseable:
         return append_new_rows(path, df), 0
 
-    appended = revised = 0
+    new_rows: dict[str, str] = {}
+    revised = 0
     for ts, row in df.iterrows():
         d = ts.date().isoformat() if hasattr(ts, "date") else str(ts)
         record = row_to_record(d, row)
@@ -216,21 +229,30 @@ def merge_rows(
             continue
         line = json.dumps(record)
         if d not in existing:
-            stored[d] = line
-            appended += 1
+            new_rows[d] = line
         elif d >= revise_from and stored.get(d) != line:
-            stored[d] = line
+            stored[d] = line  # in place — keeps this row's position in the file
             revised += 1
+
+    # Only the NEW dates are sorted, so a multi-day catch-up lands
+    # chronologically among itself; the pre-existing order is untouched. On an
+    # empty store every row is new, so the file comes out ascending.
+    for d in sorted(new_rows):
+        stored[d] = new_rows[d]
+    appended = len(new_rows)
 
     if appended or revised:
         tmp = path.with_name(path.name + ".tmp")
         try:
             with tmp.open("w", encoding="utf-8") as f:
-                for d in sorted(stored):
+                for d in stored:
                     f.write(stored[d] + "\n")
-                # os.replace is atomic w.r.t. the rename but says nothing about
-                # durability: a crash after the rename can leave the store file
-                # truncated. This is the source of truth for every valuation.
+                # os.replace makes the rename atomic, but the bytes behind it
+                # are not durable until they reach disk — without this a crash
+                # could leave the renamed file truncated. (The directory entry
+                # is still un-fsynced, so the rename itself survives only at the
+                # filesystem's discretion.) This is the source of truth for
+                # every valuation.
                 f.flush()
                 os.fsync(f.fileno())
             tmp.replace(path)
