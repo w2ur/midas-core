@@ -30,9 +30,10 @@ import yfinance as yf
 
 from engine.config import get_config
 from engine.ohlcv_ingest import (
-    append_new_rows,
     existing_dates as _existing_dates,
+    fetch_window_start,
     flatten_columns,
+    merge_rows,
 )
 from engine.tickers import (
     load_registry,
@@ -227,15 +228,17 @@ def _fetch_symbol(symbol: str, start: date, end: date) -> pd.DataFrame | None:
     return flatten_columns(df)
 
 
-def _write_rows(symbol: str, df: pd.DataFrame) -> int:
-    """Append new daily rows to data/market/ohlcv/{SYMBOL}.jsonl.
+def _write_rows(
+    symbol: str, df: pd.DataFrame, revise_from: str | None = None
+) -> tuple[int, int]:
+    """Merge new daily rows into data/market/ohlcv/{SYMBOL}.jsonl.
 
-    Thin wrapper over engine.ohlcv_ingest.append_new_rows — resolves the
-    config-backed store path, then delegates the normalize/merge/idempotent-append
-    logic to the tested engine module.
+    Thin wrapper over engine.ohlcv_ingest.merge_rows — resolves the config-backed
+    store path, then delegates the normalize/merge/idempotent-write logic to the
+    tested engine module. Returns (appended, revised).
     """
     path = get_config().ohlcv_dir / f"{symbol}.jsonl"
-    return append_new_rows(path, df)
+    return merge_rows(path, df, revise_from)
 
 
 def main() -> int:
@@ -295,40 +298,54 @@ def main() -> int:
         return 0
 
     end = date.today()
-    default_start = end - timedelta(days=args.history_days)
+
+    # 24/7 markets only: a crypto bar written before the UTC day closes is a
+    # partial bar, so re-request the last stored day and let its final value
+    # replace it. Equity and FX bars are final at fetch time (the cron runs
+    # after the close) and stay pure-append.
+    crypto = set(_crypto_symbols())
 
     registry_updates: dict[str, dict] = {}
 
     total_new = 0
+    total_revised = 0
     failures = 0
     for i, symbol in enumerate(symbols, start=1):
         if not args.names_only:
             path = get_config().ohlcv_dir / f"{symbol}.jsonl"
+            revise_days = 1 if symbol in crypto else 0
+            revise_from: str | None = None
+
             if args.backfill:
-                start = default_start
-            elif path.exists():
-                existing = _existing_dates(path)
-                if existing:
-                    last = max(datetime.fromisoformat(d).date() for d in existing)
-                    if last >= end - timedelta(days=1):
-                        registry_updates[symbol] = resolve_name(
-                            symbol, _fetch_ticker_info(symbol)
-                        )
-                        continue  # OHLCV already up to date; still refresh name
-                    start = last + timedelta(days=1)
-                else:
-                    start = default_start
+                start = end - timedelta(days=args.history_days)
             else:
-                start = default_start
+                existing = _existing_dates(path) if path.exists() else set()
+                last = (
+                    max(datetime.fromisoformat(d).date() for d in existing)
+                    if existing
+                    else None
+                )
+                window_start = fetch_window_start(
+                    last, end, args.history_days, revise_days=revise_days
+                )
+                if window_start is None:
+                    registry_updates[symbol] = resolve_name(
+                        symbol, _fetch_ticker_info(symbol)
+                    )
+                    continue  # OHLCV already up to date; still refresh name
+                start = window_start
+                if revise_days and last is not None:
+                    revise_from = start.isoformat()
 
             df = _fetch_symbol(symbol, start, end)
             if df is None:
                 failures += 1
             else:
-                n = _write_rows(symbol, df)
+                n, r = _write_rows(symbol, df, revise_from)
                 total_new += n
-                if i % 25 == 0 or n > 0:
-                    print(f"  [{i}/{len(symbols)}] {symbol}: +{n} rows")
+                total_revised += r
+                if i % 25 == 0 or n > 0 or r > 0:
+                    print(f"  [{i}/{len(symbols)}] {symbol}: +{n} rows, ~{r} revised")
 
         registry_updates[symbol] = resolve_name(symbol, _fetch_ticker_info(symbol))
 
@@ -346,8 +363,8 @@ def main() -> int:
         print(f"\nDone (names-only).")
     else:
         print(
-            f"\nDone. Wrote {total_new} new rows across {len(symbols)} "
-            f"symbols. {failures} failures."
+            f"\nDone. Wrote {total_new} new rows ({total_revised} revised) "
+            f"across {len(symbols)} symbols. {failures} failures."
         )
     return 0
 

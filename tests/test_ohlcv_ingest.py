@@ -10,6 +10,7 @@ tests assert the exact on-disk JSON, not just row counts.
 from __future__ import annotations
 
 import json
+from datetime import date, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -22,7 +23,9 @@ from engine.ohlcv_ingest import (
     append_new_rows,
     build_new_rows,
     existing_dates,
+    fetch_window_start,
     flatten_columns,
+    merge_rows,
     row_to_record,
     safe_float,
     safe_int,
@@ -267,6 +270,47 @@ def test_append_all_null_close_frame_writes_nothing(tmp_path: Path) -> None:
     assert not path.exists()
 
 
+# --- fetch window ---------------------------------------------------------
+
+
+def test_fetch_window_start_includes_today_after_close() -> None:
+    """Regression: e98ea8cf5 — the cron runs 22:30 UTC, after the US close,
+    so a store holding yesterday must still fetch TODAY's available bar. The
+    old `last >= end - 1 day` skip dropped it, leaving every other daily
+    session on a two-market-day-old equity price."""
+    assert fetch_window_start(date(2026, 8, 3), date(2026, 8, 4), 730) == date(
+        2026, 8, 4
+    )
+
+
+def test_fetch_window_start_skips_when_today_already_stored() -> None:
+    assert fetch_window_start(date(2026, 8, 4), date(2026, 8, 4), 730) is None
+
+
+def test_fetch_window_start_skips_when_store_runs_ahead() -> None:
+    assert fetch_window_start(date(2026, 8, 6), date(2026, 8, 4), 730) is None
+
+
+def test_fetch_window_start_empty_store_uses_history_window() -> None:
+    assert fetch_window_start(None, date(2026, 8, 4), 730) == date(
+        2026, 8, 4
+    ) - timedelta(days=730)
+
+
+def test_fetch_window_start_revise_days_refetches_trailing_rows() -> None:
+    """revise_days=1 re-requests the last stored day so a partial 24/7 bar can
+    be corrected by its final value."""
+    assert fetch_window_start(
+        date(2026, 8, 4), date(2026, 8, 6), 730, revise_days=1
+    ) == date(2026, 8, 4)
+
+
+def test_fetch_window_start_revise_days_ignored_on_empty_store() -> None:
+    assert fetch_window_start(None, date(2026, 8, 4), 730, revise_days=1) == date(
+        2026, 8, 4
+    ) - timedelta(days=730)
+
+
 # --- property: idempotence of the merge -----------------------------------
 
 _iso_dates = st.lists(
@@ -293,3 +337,160 @@ def test_append_twice_is_a_no_op_property(dates: list[str], tmp_path_factory) ->
     snapshot = path.read_text(encoding="utf-8")
     assert append_new_rows(path, df) == 0
     assert path.read_text(encoding="utf-8") == snapshot
+
+
+# --- revision merge -------------------------------------------------------
+
+
+def _rec(d: str, close: float) -> dict:
+    return {
+        "date": d,
+        "open": close,
+        "high": close,
+        "low": close,
+        "close": close,
+        "adj_close": close,
+        "volume": 100,
+    }
+
+
+def test_merge_rows_revises_a_frozen_partial_bar(tmp_path: Path) -> None:
+    """Regression: 63970d933 — a 24/7 crypto bar written at ~23:44 UTC is
+    still forming, and append_new_rows keeps only UNSEEN dates, so the
+    partial value was frozen permanently. BTC-EUR 2026-08-04 was stored at
+    55649.74 against a true close of 55545.09."""
+    path = tmp_path / "BTC-EUR.jsonl"
+    _write_store(path, [_rec("2026-08-03", 55149.36), _rec("2026-08-04", 55649.74)])
+    df = _yf_frame(
+        {
+            "2026-08-04": [1, 2, 0.5, 55545.09, 55545.09, 100],
+            "2026-08-06": [1, 2, 0.5, 56241.04, 56241.04, 100],
+        }
+    )
+
+    appended, revised = merge_rows(path, df, revise_from="2026-08-04")
+
+    assert (appended, revised) == (1, 1)
+    closes = [json.loads(line)["close"] for line in path.read_text().splitlines()]
+    assert closes == [55149.36, 55545.09, 56241.04]
+
+
+def test_merge_rows_leaves_rows_before_revise_from_untouched(tmp_path: Path) -> None:
+    path = tmp_path / "BTC-EUR.jsonl"
+    _write_store(path, [_rec("2026-08-03", 55149.36), _rec("2026-08-04", 55649.74)])
+    df = _yf_frame(
+        {
+            "2026-08-03": [1, 2, 0.5, 99999.0, 99999.0, 100],
+            "2026-08-04": [1, 2, 0.5, 55545.09, 55545.09, 100],
+        }
+    )
+
+    appended, revised = merge_rows(path, df, revise_from="2026-08-04")
+
+    assert (appended, revised) == (0, 1)
+    closes = [json.loads(line)["close"] for line in path.read_text().splitlines()]
+    assert closes == [55149.36, 55545.09]
+
+
+def test_merge_rows_without_revise_from_is_pure_append(tmp_path: Path) -> None:
+    path = tmp_path / "AAPL.jsonl"
+    _write_store(path, [_rec("2026-08-03", 303.42)])
+    df = _yf_frame(
+        {
+            "2026-08-03": [1, 2, 0.5, 99999.0, 99999.0, 100],
+            "2026-08-04": [1, 2, 0.5, 309.38, 309.38, 100],
+        }
+    )
+
+    assert merge_rows(path, df) == (1, 0)
+    closes = [json.loads(line)["close"] for line in path.read_text().splitlines()]
+    assert closes == [303.42, 309.38]
+
+
+def test_merge_rows_is_idempotent(tmp_path: Path) -> None:
+    path = tmp_path / "BTC-EUR.jsonl"
+    _write_store(path, [_rec("2026-08-04", 55545.09)])
+    # The frame must reproduce the stored record field-for-field — _rec sets
+    # every OHLC field to the same value, so a frame with different open/high/low
+    # would legitimately count as a revision and this test would not be measuring
+    # idempotency at all.
+    df = _yf_frame({"2026-08-04": [55545.09] * 5 + [100]})
+
+    assert merge_rows(path, df, revise_from="2026-08-04") == (0, 0)
+    before = path.read_text()
+    assert merge_rows(path, df, revise_from="2026-08-04") == (0, 0)
+    assert path.read_text() == before
+
+
+def test_merge_rows_preserves_byte_layout_and_key_order(tmp_path: Path) -> None:
+    path = tmp_path / "BTC-EUR.jsonl"
+    _write_store(path, [_rec("2026-08-04", 55649.74)])
+    df = _yf_frame({"2026-08-04": [1.0, 2.0, 0.5, 55545.09, 55545.09, 100]})
+
+    merge_rows(path, df, revise_from="2026-08-04")
+
+    line = path.read_text().splitlines()[0]
+    assert list(json.loads(line).keys()) == [
+        "date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "adj_close",
+        "volume",
+    ]
+    assert line == json.dumps(
+        {
+            "date": "2026-08-04",
+            "open": 1.0,
+            "high": 2.0,
+            "low": 0.5,
+            "close": 55545.09,
+            "adj_close": 55545.09,
+            "volume": 100,
+        }
+    )
+    assert path.read_text().endswith("\n")
+
+
+def test_merge_rows_keeps_an_untouched_row_byte_identical_during_a_mixed_rewrite(
+    tmp_path: Path,
+) -> None:
+    """A rewrite triggered by one row revising must not reformat a row it did not
+    touch — even a lossless-looking re-serialize through json.dumps would violate
+    the load-bearing on-disk byte layout. The untouched line is deliberately
+    written with non-default JSON spacing (no space after ':' or ',') so a
+    re-serializing implementation is caught: json.dumps' default separators
+    would normalize it back to spaced form, producing a detectable diff."""
+    path = tmp_path / "BTC-EUR.jsonl"
+    untouched_line = (
+        '{"date":"2026-08-03","open":55149.36,"high":55149.36,"low":55149.36,'
+        '"close":55149.36,"adj_close":55149.36,"volume":100}'
+    )
+    path.write_text(
+        untouched_line + "\n" + json.dumps(_rec("2026-08-04", 55649.74)) + "\n",
+        encoding="utf-8",
+    )
+    df = _yf_frame({"2026-08-04": [1, 2, 0.5, 55545.09, 55545.09, 100]})
+
+    appended, revised = merge_rows(path, df, revise_from="2026-08-04")
+
+    assert (appended, revised) == (0, 1)
+    lines = path.read_text().splitlines()
+    assert lines[0] == untouched_line
+
+
+def test_merge_rows_refuses_to_rewrite_a_store_with_unparseable_lines(
+    tmp_path: Path,
+) -> None:
+    # A rewrite reorders by date and would silently drop a line carrying no
+    # parseable date. Fall back to pure append instead of losing it.
+    path = tmp_path / "BTC-EUR.jsonl"
+    path.write_text(
+        json.dumps(_rec("2026-08-04", 55649.74)) + "\nnot json at all\n",
+        encoding="utf-8",
+    )
+    df = _yf_frame({"2026-08-04": [1, 2, 0.5, 55545.09, 55545.09, 100]})
+
+    assert merge_rows(path, df, revise_from="2026-08-04") == (0, 0)
+    assert "not json at all" in path.read_text()
