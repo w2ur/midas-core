@@ -7,6 +7,34 @@ from pathlib import Path
 
 import pytest
 import yaml
+from hypothesis import HealthCheck, settings
+
+# ---------------------------------------------------------------------------
+# Hypothesis profile
+#
+# CLAUDE.md mandates >=1000 examples for financial-math property tests. Setting
+# it per-test drifted: the three that existed ran 200, 300 and 400. A profile
+# makes the mandate the default, so a new property test inherits it by writing
+# nothing.
+#
+# `deadline=None` is deliberate rather than lazy. Hypothesis's per-example
+# deadline measures wall-clock, and several of these properties touch the
+# filesystem; under CI load or a parallel local run that produced intermittent
+# DeadlineExceeded failures — a red suite caused by the machine being busy,
+# which is worse than useless because it trains people to re-run rather than
+# read. Total runtime is bounded by max_examples instead, which is a property
+# of the test rather than of the machine.
+#
+# function_scoped_fixture is suppressed because the data-root fixtures here are
+# function-scoped by design (each example wants a clean store); Hypothesis's
+# warning is about fixtures that should be reused, which these should not be.
+settings.register_profile(
+    "midas",
+    max_examples=1000,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+settings.load_profile("midas")
 
 
 @pytest.fixture

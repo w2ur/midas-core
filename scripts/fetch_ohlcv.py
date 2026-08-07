@@ -32,6 +32,7 @@ from engine.config import get_config
 from engine.corporate_actions import detect_split
 from engine.quotes import vendor_unit_scale
 from engine.ohlcv_ingest import (
+    MergeResult,
     existing_dates as _existing_dates,
     fetch_window_start,
     flatten_columns,
@@ -261,16 +262,29 @@ def _normalise_vendor_units(symbol: str, df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _write_rows(
-    symbol: str, df: pd.DataFrame, revise_from: str | None = None
-) -> tuple[int, int]:
+    symbol: str,
+    df: pd.DataFrame,
+    revise_from: str | None = None,
+    *,
+    guard_anomalies: bool = False,
+) -> MergeResult:
     """Merge new daily rows into data/market/ohlcv/{SYMBOL}.jsonl.
 
     Thin wrapper over engine.ohlcv_ingest.merge_rows — resolves the config-backed
     store path, then delegates the normalize/merge/idempotent-write logic to the
-    tested engine module. Returns (appended, revised).
+    tested engine module.
+
+    ``guard_anomalies`` turns on the ingest tripwire, quarantining a revision or
+    new row that moves implausibly far. It is on for the nightly one-day-window
+    run, where rewriting history wholesale is never legitimate, and OFF for a
+    resweep, where a real corporate action legitimately rewrites hundreds of
+    rows and ``engine.corporate_actions.detect_split`` is what adjudicates them.
     """
     path = get_config().ohlcv_dir / f"{symbol}.jsonl"
-    return merge_rows(path, df, revise_from)
+    quarantine = None
+    if guard_anomalies:
+        quarantine = get_config().data_dir / "data" / "market" / "quarantine" / f"{symbol}.jsonl"
+    return merge_rows(path, df, revise_from, quarantine=quarantine)
 
 
 def _read_store_rows(path: Path) -> list[dict]:
@@ -464,6 +478,7 @@ def main() -> int:
 
     total_new = 0
     total_revised = 0
+    total_quarantined = 0
     failures = 0
     splits_detected = 0
     for i, symbol in enumerate(symbols, start=1):
@@ -524,11 +539,22 @@ def main() -> int:
                                 f"    (no agent currently holds {symbol})",
                                 file=sys.stderr,
                             )
-                n, r = _write_rows(symbol, df, revise_from)
+                # The tripwire is off on a resweep: a real corporate action
+                # legitimately rewrites hundreds of rows there, and detect_split
+                # above is what adjudicates them. On the nightly path a
+                # wholesale rewrite of history is never legitimate.
+                n, r, q = _write_rows(
+                    symbol, df, revise_from, guard_anomalies=not args.resweep
+                )
                 total_new += n
                 total_revised += r
-                if i % 25 == 0 or n > 0 or r > 0:
-                    print(f"  [{i}/{len(symbols)}] {symbol}: +{n} rows, ~{r} revised")
+                total_quarantined += q
+                if i % 25 == 0 or n > 0 or r > 0 or q > 0:
+                    suffix = f", !{q} quarantined" if q else ""
+                    print(
+                        f"  [{i}/{len(symbols)}] {symbol}: +{n} rows, "
+                        f"~{r} revised{suffix}"
+                    )
 
         registry_updates[symbol] = resolve_name(symbol, _fetch_ticker_info(symbol))
 
@@ -549,7 +575,19 @@ def main() -> int:
             f"\nDone. Wrote {total_new} new rows ({total_revised} revised) "
             f"across {len(symbols)} symbols. {failures} failures."
             + (f" {splits_detected} split(s) detected." if splits_detected else "")
+            + (
+                f" {total_quarantined} row(s) QUARANTINED — see "
+                "data/market/quarantine/."
+                if total_quarantined
+                else ""
+            )
         )
+    # A quarantined row is a refusal to ingest something that looked like a
+    # unit flip or a bad tick. It is not a crash, but it must not scroll past
+    # in a green run either: exiting non-zero routes it to the workflow's
+    # failure-issue action, which files a persistent issue.
+    if total_quarantined:
+        return 1
     return 0
 
 

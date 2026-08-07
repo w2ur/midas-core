@@ -232,7 +232,6 @@ _amount = st.floats(
 )
 
 
-@settings(max_examples=400, suppress_health_check=[HealthCheck.function_scoped_fixture])
 @given(cash=_amount, a=_amount, b=_amount, c=_amount)
 def test_mtm_is_cash_plus_position_value(midas_data_root, cash, a, b, c) -> None:
     for ticker, price in _PRICES.items():

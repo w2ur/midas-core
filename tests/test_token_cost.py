@@ -22,7 +22,6 @@ def test_estimate_tokens_is_len_over_four() -> None:
     assert estimate_tokens("a" * 400) == 100
 
 
-@settings(max_examples=300)
 @given(text=st.text())
 def test_estimate_tokens_matches_floor_div_property(text: str) -> None:
     assert estimate_tokens(text) == len(text) // 4

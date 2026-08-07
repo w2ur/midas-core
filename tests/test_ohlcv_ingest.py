@@ -340,7 +340,6 @@ _iso_dates = st.lists(
 )
 
 
-@settings(max_examples=200)
 @given(dates=_iso_dates)
 def test_append_twice_is_a_no_op_property(dates: list[str], tmp_path_factory) -> None:
     """Property: appending a frame, then appending it again, adds zero new rows
@@ -384,7 +383,7 @@ def test_merge_rows_revises_a_frozen_partial_bar(tmp_path: Path) -> None:
         }
     )
 
-    appended, revised = merge_rows(path, df, revise_from="2026-08-04")
+    appended, revised, _quarantined = merge_rows(path, df, revise_from="2026-08-04")
 
     assert (appended, revised) == (1, 1)
     closes = [json.loads(line)["close"] for line in path.read_text().splitlines()]
@@ -401,7 +400,7 @@ def test_merge_rows_leaves_rows_before_revise_from_untouched(tmp_path: Path) -> 
         }
     )
 
-    appended, revised = merge_rows(path, df, revise_from="2026-08-04")
+    appended, revised, _quarantined = merge_rows(path, df, revise_from="2026-08-04")
 
     assert (appended, revised) == (0, 1)
     closes = [json.loads(line)["close"] for line in path.read_text().splitlines()]
@@ -418,7 +417,7 @@ def test_merge_rows_without_revise_from_is_pure_append(tmp_path: Path) -> None:
         }
     )
 
-    assert merge_rows(path, df) == (1, 0)
+    assert merge_rows(path, df) == (1, 0, 0)
     closes = [json.loads(line)["close"] for line in path.read_text().splitlines()]
     assert closes == [303.42, 309.38]
 
@@ -432,9 +431,9 @@ def test_merge_rows_is_idempotent(tmp_path: Path) -> None:
     # idempotency at all.
     df = _yf_frame({"2026-08-04": [55545.09] * 5 + [100]})
 
-    assert merge_rows(path, df, revise_from="2026-08-04") == (0, 0)
+    assert merge_rows(path, df, revise_from="2026-08-04") == (0, 0, 0)
     before = path.read_text()
-    assert merge_rows(path, df, revise_from="2026-08-04") == (0, 0)
+    assert merge_rows(path, df, revise_from="2026-08-04") == (0, 0, 0)
     assert path.read_text() == before
 
 
@@ -489,7 +488,7 @@ def test_merge_rows_keeps_an_untouched_row_byte_identical_during_a_mixed_rewrite
     )
     df = _yf_frame({"2026-08-04": [1, 2, 0.5, 55545.09, 55545.09, 100]})
 
-    appended, revised = merge_rows(path, df, revise_from="2026-08-04")
+    appended, revised, _quarantined = merge_rows(path, df, revise_from="2026-08-04")
 
     assert (appended, revised) == (0, 1)
     lines = path.read_text().splitlines()
@@ -525,7 +524,7 @@ def test_merge_rows_preserves_an_out_of_order_store(tmp_path: Path) -> None:
         }
     )
 
-    appended, revised = merge_rows(path, df, revise_from="2026-04-24")
+    appended, revised, _quarantined = merge_rows(path, df, revise_from="2026-04-24")
 
     assert (appended, revised) == (1, 1)
     dates = [json.loads(line)["date"] for line in path.read_text().splitlines()]
@@ -567,7 +566,7 @@ def test_merge_rows_appends_multiple_new_dates_in_ascending_order(
         }
     )
 
-    assert merge_rows(path, df, revise_from="2026-04-24") == (3, 0)
+    assert merge_rows(path, df, revise_from="2026-04-24") == (3, 0, 0)
     dates = [json.loads(line)["date"] for line in path.read_text().splitlines()]
     assert dates == [
         "2026-04-24",
@@ -590,7 +589,7 @@ def test_merge_rows_writes_an_empty_store_in_ascending_order(tmp_path: Path) -> 
         }
     )
 
-    assert merge_rows(path, df, revise_from="2026-04-24") == (3, 0)
+    assert merge_rows(path, df, revise_from="2026-04-24") == (3, 0, 0)
     dates = [json.loads(line)["date"] for line in path.read_text().splitlines()]
     assert dates == sorted(dates) == ["2026-04-24", "2026-04-25", "2026-04-26"]
 
@@ -607,7 +606,7 @@ def test_merge_rows_refuses_to_rewrite_a_store_with_unparseable_lines(
     )
     df = _yf_frame({"2026-08-04": [1, 2, 0.5, 55545.09, 55545.09, 100]})
 
-    assert merge_rows(path, df, revise_from="2026-08-04") == (0, 0)
+    assert merge_rows(path, df, revise_from="2026-08-04") == (0, 0, 0)
     assert "not json at all" in path.read_text()
 
 
@@ -624,7 +623,7 @@ def test_merge_rows_treats_a_non_object_json_line_as_unparseable(
     )
     df = _yf_frame({"2026-08-04": [1, 2, 0.5, 55545.09, 55545.09, 100]})
 
-    assert merge_rows(path, df, revise_from="2026-08-04") == (0, 0)
+    assert merge_rows(path, df, revise_from="2026-08-04") == (0, 0, 0)
     assert path.read_text().splitlines()[1] == "42"
 
 
@@ -657,5 +656,204 @@ def test_merge_rows_leaves_no_tmp_file_behind_on_success(tmp_path: Path) -> None
     path.write_text(json.dumps(_rec("2026-08-04", 55649.74)) + "\n", encoding="utf-8")
     df = _yf_frame({"2026-08-04": [1, 2, 0.5, 55545.09, 55545.09, 100]})
 
-    assert merge_rows(path, df, revise_from="2026-08-04") == (0, 1)
+    assert merge_rows(path, df, revise_from="2026-08-04") == (0, 1, 0)
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+# ---------------------------------------------------------------------------
+# Ingest anomaly tripwire (reliability review W5.1)
+#
+# merge_rows is the only place in the system that holds BOTH the old value and
+# the new one for the same date. That makes it the only place a vendor unit
+# flip, a re-denomination or a bad tick can be caught *before* it becomes that
+# evening's fill price. Every such defect so far was found by a human reading a
+# number that looked wrong, weeks to months later.
+#
+# The design constraint is not detection — a 100x jump is trivial to spot. It
+# is detecting that without refusing the legitimate revisions the store depends
+# on, which the universal 1-day revision window produces every single night.
+# ---------------------------------------------------------------------------
+
+
+def _store(path: Path, rows: list[tuple[str, float]]) -> None:
+    path.write_text(
+        "\n".join(json.dumps({"date": d, "close": c}) for d, c in rows) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _frame(rows: list[tuple[str, float]]) -> pd.DataFrame:
+    return pd.DataFrame(
+        {"Close": [c for _, c in rows]},
+        index=pd.to_datetime([d for d, _ in rows]),
+    )
+
+
+class TestQuarantineCatches:
+    def test_a_hundred_times_unit_flip_on_a_revision(self, tmp_path):
+        """The GBp shape: the vendor starts serving pence where it served pounds."""
+        from engine.ohlcv_ingest import merge_rows
+
+        path = tmp_path / "LLOY.L.jsonl"
+        quarantine = tmp_path / "q" / "LLOY.L.jsonl"
+        _store(path, [("2026-08-05", 1.15), ("2026-08-06", 1.16)])
+
+        result = merge_rows(
+            path,
+            _frame([("2026-08-06", 116.0)]),
+            revise_from="2026-08-06",
+            quarantine=quarantine,
+        )
+
+        assert result.quarantined == 1
+        assert result.revised == 0
+        # The store is untouched — this is the whole point. A quarantined row
+        # that still landed would be a warning, not a guard.
+        assert json.loads(path.read_text().splitlines()[-1])["close"] == 1.16
+        record = json.loads(quarantine.read_text().splitlines()[0])
+        assert record["kind"] == "revision"
+        assert record["ratio"] == pytest.approx(100.0)
+
+    def test_the_fcit_bad_tick_as_a_new_row(self, tmp_path):
+        """The real 2026-05-08 FCIT.L tick: 5,275.02 against a 320-330 range.
+
+        Named in the review as a must-catch fixture. It reached the committed
+        store and was only corrected months later by a full resweep.
+        """
+        from engine.ohlcv_ingest import merge_rows
+
+        path = tmp_path / "FCIT.L.jsonl"
+        quarantine = tmp_path / "q" / "FCIT.L.jsonl"
+        _store(path, [("2026-05-06", 322.4), ("2026-05-07", 320.8)])
+
+        result = merge_rows(
+            path,
+            _frame([("2026-05-08", 5275.02)]),
+            revise_from="2026-05-08",
+            quarantine=quarantine,
+        )
+
+        assert result.quarantined == 1
+        assert result.appended == 0
+        assert "2026-05-08" not in path.read_text()
+
+    def test_the_quarantine_record_is_diagnosable(self, tmp_path):
+        """"anomaly" is not actionable; the old value, the new one and the
+        ratio are."""
+        from engine.ohlcv_ingest import merge_rows
+
+        path = tmp_path / "AAA.jsonl"
+        quarantine = tmp_path / "q" / "AAA.jsonl"
+        _store(path, [("2026-05-06", 100.0)])
+        merge_rows(
+            path,
+            _frame([("2026-05-07", 10_000.0)]),
+            revise_from="2026-05-07",
+            quarantine=quarantine,
+        )
+
+        record = json.loads(quarantine.read_text().splitlines()[0])
+        assert record["symbol"] == "AAA"
+        assert record["stored_close"] == 100.0
+        assert record["incoming_close"] == 10_000.0
+        assert record["ratio"] == pytest.approx(100.0)
+
+
+class TestQuarantineDoesNotCatch:
+    """The half that decides whether this guard survives contact with the cron.
+
+    Thresholds were set from measured legitimate revisions: futures drift up to
+    +3.37% between the 22:30 UTC fetch and the final close, FX up to -1.56% on
+    a Friday. A guard that fires on those files an issue every night, and gets
+    turned off.
+    """
+
+    @pytest.mark.parametrize(
+        "label, stored, incoming",
+        [
+            ("commodity futures partial bar, worst measured", 100.0, 103.37),
+            ("FX Friday roll, worst measured", 100.0, 98.44),
+            ("a crypto bar still forming", 100.0, 108.0),
+            ("right at the edge, inside", 100.0, 119.0),
+        ],
+    )
+    def test_legitimate_revisions_pass(self, tmp_path, label, stored, incoming):
+        from engine.ohlcv_ingest import merge_rows
+
+        path = tmp_path / "GC=F.jsonl"
+        quarantine = tmp_path / "q" / "GC=F.jsonl"
+        _store(path, [("2026-08-05", 99.0), ("2026-08-06", stored)])
+
+        result = merge_rows(
+            path,
+            _frame([("2026-08-06", incoming)]),
+            revise_from="2026-08-06",
+            quarantine=quarantine,
+        )
+
+        assert result.quarantined == 0, label
+        assert result.revised == 1, label
+        assert not quarantine.exists()
+
+    def test_an_ordinary_new_bar_passes(self, tmp_path):
+        from engine.ohlcv_ingest import merge_rows
+
+        path = tmp_path / "AAPL.jsonl"
+        quarantine = tmp_path / "q" / "AAPL.jsonl"
+        _store(path, [("2026-08-05", 190.0)])
+
+        result = merge_rows(
+            path,
+            _frame([("2026-08-06", 193.5)]),
+            revise_from="2026-08-06",
+            quarantine=quarantine,
+        )
+
+        assert result.quarantined == 0
+        assert result.appended == 1
+
+    def test_a_first_ever_row_has_no_reference_and_passes(self, tmp_path):
+        """An empty store cannot produce an anomaly — only a bootstrap."""
+        from engine.ohlcv_ingest import merge_rows
+
+        path = tmp_path / "NEW.jsonl"
+        quarantine = tmp_path / "q" / "NEW.jsonl"
+
+        result = merge_rows(
+            path,
+            _frame([("2026-08-06", 4321.0)]),
+            revise_from="2026-08-06",
+            quarantine=quarantine,
+        )
+
+        assert result.quarantined == 0
+        assert result.appended == 1
+
+    def test_the_guard_is_off_unless_asked_for(self, tmp_path):
+        """Opt-in: the resweep path must keep rewriting history freely, because
+        that is where detect_split does the adjudicating."""
+        from engine.ohlcv_ingest import merge_rows
+
+        path = tmp_path / "LLOY.L.jsonl"
+        _store(path, [("2026-08-06", 1.16)])
+
+        result = merge_rows(path, _frame([("2026-08-06", 116.0)]), revise_from="2026-08-06")
+
+        assert result.quarantined == 0
+        assert result.revised == 1
+
+
+def test_quarantine_lives_outside_the_store_directory():
+    """A refused row must never be one glob("*.jsonl") away from being a price.
+
+    Every reader opens `{ohlcv_dir}/{TICKER}.jsonl` by name today, so a sidecar
+    inside that directory would be safe *today* — which is exactly the kind of
+    reasoning that stops being true later.
+    """
+    import inspect
+
+    from scripts import fetch_ohlcv
+
+    source = inspect.getsource(fetch_ohlcv._write_rows)
+    assert '"quarantine"' in source
+    assert "ohlcv_dir" not in source.split("quarantine")[1]

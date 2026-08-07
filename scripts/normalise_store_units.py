@@ -116,8 +116,20 @@ def main() -> int:
     store_dir = get_config().ohlcv_dir
     marker = load_marker(store_dir)
     already = set(marker.get("migrated", {}))
+    # The global completion stamp closes the one hole a per-symbol marker
+    # cannot: a pence-quoted ticker fetched for the FIRST time after the
+    # migration is ISO-denominated at ingest, and is absent from `migrated`
+    # for that reason — not because it still needs converting. Without this,
+    # re-running the script would select it and divide a pounds file by 100.
+    #
+    # Keyed on the stamp rather than on file mtime deliberately: a fresh clone
+    # or a checkout resets every mtime, so mtime would answer "everything
+    # postdates the migration" on any CI runner. The marker travels with the
+    # store in git; mtime does not.
+    completed_at = marker.get("completed_at")
 
     candidates: list[tuple[Path, str, float]] = []
+    postdating: list[str] = []
     for path in sorted(store_dir.glob("*.jsonl")):
         symbol = path.stem
         scale = vendor_unit_scale(symbol)
@@ -128,7 +140,22 @@ def main() -> int:
                 f"  = {symbol}: already migrated ({marker['migrated'][symbol]}) — skipped"
             )
             continue
+        if completed_at:
+            postdating.append(symbol)
+            print(
+                f"  = {symbol}: store file postdates the migration "
+                f"(completed {completed_at}) — already ISO at ingest, REFUSED"
+            )
+            continue
         candidates.append((path, symbol, scale))
+
+    if postdating:
+        print(
+            f"\nrefused {len(postdating)} sub-unit symbol(s) absent from the "
+            "marker but postdating the migration. Since 2026-08-07 ingest "
+            "normalises units, so these are already in their ISO currency; "
+            "scaling them would divide by 100 twice."
+        )
 
     print(f"\nsymbols to migrate: {len(candidates)}")
     total_rows = 0
@@ -154,6 +181,9 @@ def main() -> int:
         skipped_total += skipped
         migrated[symbol] = stamp
 
+    # Written on every --apply, including one that migrates nothing: the stamp
+    # records "the migration has happened here", which is what makes a
+    # later-arriving pence ticker distinguishable from an unmigrated one.
     marker_path = store_dir / MARKER_NAME
     marker_path.write_text(
         json.dumps(
@@ -165,6 +195,7 @@ def main() -> int:
                     "scripts.fetch_ohlcv._normalise_vendor_units. Do not re-run "
                     "the migration for a symbol listed here."
                 ),
+                "completed_at": marker.get("completed_at") or stamp,
                 "migrated": migrated,
             },
             indent=2,

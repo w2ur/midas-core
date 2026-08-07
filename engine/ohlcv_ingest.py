@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from datetime import date, timedelta
 from pathlib import Path
+from typing import NamedTuple
 
 import pandas as pd
 
@@ -163,9 +165,98 @@ def append_new_rows(path: Path, df: pd.DataFrame) -> int:
     return len(rows_to_append)
 
 
+
+# ---------------------------------------------------------------------------
+# Ingest anomaly tripwire
+# ---------------------------------------------------------------------------
+
+#: A *revision* — a value replacing an already-stored close for the same date —
+#: moving more than this fraction is quarantined rather than ingested.
+#:
+#: Calibrated against the measured legitimate revisions, not guessed. Commodity
+#: futures drift up to +3.37% between the 22:30 UTC fetch and the final close;
+#: FX up to -1.56% on a Friday. 20% clears both by better than 5x while sitting
+#: two orders of magnitude below a units flip (100x) or a typical split ratio.
+REVISION_LIMIT = 0.20
+
+#: A *new* row whose close is this far from the previous stored close is
+#: quarantined. Looser than the revision limit because a genuine gap in the
+#: store (a suspended ticker, a long weekend in a thin name) legitimately
+#: produces a large step, and because a single day's real move can be violent
+#: — the FCIT.L bad tick that motivated this sat at 5,275 against a 320-330
+#: range, a factor of 16.
+NEW_ROW_LIMIT = 0.40
+
+
+class QuarantinedRow(NamedTuple):
+    """A row refused at ingest, with enough context to adjudicate it by hand."""
+
+    symbol: str
+    date: str
+    kind: str  # "revision" | "new-row"
+    stored_close: float
+    incoming_close: float
+    ratio: float
+
+    def describe(self) -> str:
+        return (
+            f"{self.symbol} {self.date} {self.kind}: "
+            f"{self.stored_close} -> {self.incoming_close} "
+            f"(x{self.ratio:.4g})"
+        )
+
+
+class MergeResult(NamedTuple):
+    appended: int
+    revised: int
+    quarantined: int = 0
+
+
+def _close_of(line: str) -> float | None:
+    try:
+        value = json.loads(line).get("close")
+    except (json.JSONDecodeError, AttributeError):
+        return None
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def _out_of_band(stored: float, incoming: float, limit: float) -> float | None:
+    """The ratio when the move exceeds `limit`, else None.
+
+    Returns the ratio rather than a bool so the quarantine record can say how
+    far out it was — "x100.3" is diagnosable, "anomaly" is not.
+    """
+    if stored is None or incoming is None or stored <= 0 or incoming <= 0:
+        return None
+    ratio = incoming / stored
+    if abs(ratio - 1.0) > limit:
+        return ratio
+    return None
+
+
+def write_quarantine(path: Path, rows: list[QuarantinedRow]) -> None:
+    """Append refused rows to a sidecar so nothing is silently dropped.
+
+    Quarantine lives OUTSIDE the store directory: every reader in the engine
+    opens `{ohlcv_dir}/{TICKER}.jsonl` by name, but a stray file under that
+    directory is exactly the kind of thing a future glob picks up. A refused
+    row must never be one `glob("*.jsonl")` away from becoming a price.
+    """
+    if not rows:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row._asdict()) + "\n")
+
+
 def merge_rows(
-    path: Path, df: pd.DataFrame, revise_from: str | None = None
-) -> tuple[int, int]:
+    path: Path,
+    df: pd.DataFrame,
+    revise_from: str | None = None,
+    *,
+    quarantine: Path | None = None,
+) -> MergeResult:
     """Merge ``df`` into the store at ``path``. Returns ``(appended, revised)``.
 
     With ``revise_from=None`` this is exactly ``append_new_rows`` — unseen dates
@@ -191,11 +282,30 @@ def merge_rows(
     Revision rewrites the whole file from a date-keyed map, so a line carrying no
     parseable date has no key to survive under. Such a store is left alone and
     degrades to append-only rather than losing that line.
+
+    ``quarantine`` enables the anomaly tripwire: a revision moving a stored
+    close by more than ``REVISION_LIMIT``, or a new row more than
+    ``NEW_ROW_LIMIT`` from the previous stored close, is written to that
+    sidecar path instead of into the store.
+
+    This is the one place in the system that holds **both** the old value and
+    the new one for the same date, which is what makes it the only place a
+    vendor unit flip, a re-denomination or a bad tick can be caught *before*
+    it becomes that evening's fill price. Every such defect so far has been
+    found by a human, weeks to months later, reading a number that looked
+    wrong.
+
+    Deliberately opt-in rather than always-on: a resweep legitimately rewrites
+    hundreds of rows when a real corporate action lands, and
+    ``engine.corporate_actions.detect_split`` is the mechanism that adjudicates
+    those. Enable it on the nightly one-day-window path, where a wholesale
+    rewrite of history is never legitimate; leave it off on the resweep path,
+    where it is the expected outcome.
     """
     existing = existing_dates(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if revise_from is None:
-        return append_new_rows(path, df), 0
+        return MergeResult(append_new_rows(path, df), 0)
 
     # Read top to bottom: dicts preserve insertion order, so `stored`'s order
     # IS the file's line order, and assigning to an existing key replaces that
@@ -218,19 +328,46 @@ def merge_rows(
                 else:
                     unparseable += 1
     if unparseable:
-        return append_new_rows(path, df), 0
+        return MergeResult(append_new_rows(path, df), 0)
+
+    symbol = path.stem
+    # The newest stored close, used as the reference for a brand-new row.
+    # Taken by date rather than by file position: 529 of the committed files
+    # are not in date order, so "the last line" is not "the latest bar".
+    latest_stored_close: float | None = None
+    if stored:
+        latest_stored_close = _close_of(stored[max(stored)])
 
     new_rows: dict[str, str] = {}
     revised = 0
+    refused: list[QuarantinedRow] = []
     for ts, row in df.iterrows():
         d = ts.date().isoformat() if hasattr(ts, "date") else str(ts)
         record = row_to_record(d, row)
         if record["close"] is None:
             continue
         line = json.dumps(record)
+        incoming = record["close"]
         if d not in existing:
+            if quarantine is not None and latest_stored_close is not None:
+                ratio = _out_of_band(latest_stored_close, incoming, NEW_ROW_LIMIT)
+                if ratio is not None:
+                    refused.append(
+                        QuarantinedRow(
+                            symbol, d, "new-row", latest_stored_close, incoming, ratio
+                        )
+                    )
+                    continue
             new_rows[d] = line
         elif d >= revise_from and stored.get(d) != line:
+            if quarantine is not None:
+                previous = _close_of(stored[d])
+                ratio = _out_of_band(previous, incoming, REVISION_LIMIT)
+                if ratio is not None:
+                    refused.append(
+                        QuarantinedRow(symbol, d, "revision", previous, incoming, ratio)
+                    )
+                    continue
             stored[d] = line  # in place — keeps this row's position in the file
             revised += 1
 
@@ -261,4 +398,9 @@ def merge_rows(
             # `{SYMBOL}.jsonl.tmp` that the fetch-ohlcv workflow's
             # `git add data/market/ohlcv/` would commit into the store.
             tmp.unlink(missing_ok=True)
-    return appended, revised
+
+    if refused:
+        write_quarantine(quarantine, refused)
+        for row in refused:
+            print(f"  [QUARANTINED] {row.describe()}", file=sys.stderr)
+    return MergeResult(appended, revised, len(refused))
