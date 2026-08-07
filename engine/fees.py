@@ -23,6 +23,7 @@ Usage:
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Literal
 
 from engine.triggers import is_crypto_ticker
@@ -34,6 +35,7 @@ from engine.triggers import is_crypto_ticker
 # equity/ETF: IBIE tiered rate ~0.05% with EUR 1.25 floor per order
 _EQUITY_RATE = 0.0005  # 0.05%
 _EQUITY_FLOOR = 1.25  # EUR 1.25 minimum commission
+_EQUITY_FLOOR_CURRENCY = "EUR"  # the currency that floor is quoted in
 
 # crypto: Kraken spot taker at base tier (0.40%)
 # Note: live-broker optimization uses maker rate (0.25%) for limit orders;
@@ -65,6 +67,12 @@ def _equity_rate() -> float:
 
 def _equity_floor() -> float:
     return float(_rates().get("equity", {}).get("floor", _EQUITY_FLOOR))
+
+
+def _equity_floor_currency() -> str:
+    return str(
+        _rates().get("equity", {}).get("floor_currency", _EQUITY_FLOOR_CURRENCY)
+    )
 
 
 def _crypto_rate() -> float:
@@ -105,7 +113,12 @@ def classify_ticker(ticker: str) -> AssetClass:
     return "equity"
 
 
-def fee_for(ticker: str, notional: float) -> float:
+def fee_for(
+    ticker: str,
+    notional: float,
+    currency: str | None = None,
+    on: date | None = None,
+) -> float:
     """Compute the brokerage fee for a single fill.
 
     Parameters
@@ -114,17 +127,47 @@ def fee_for(ticker: str, notional: float) -> float:
         Ticker symbol — used to determine the asset class.
     notional:
         Trade notional in the agent's base currency (post-FX conversion).
+    currency:
+        The book's base currency. Only the equity **floor** depends on it:
+        the floor is a fixed EUR amount (IBIE's EUR 1.25 minimum), and it was
+        being charged as-is on the USD books — a dollar-denominated book paid
+        "$1.25" for a minimum that is actually EUR 1.25 (2026-08-07 review,
+        W7.4). The percentage rates are scale-free and need no conversion.
+        Omit on a book already denominated in the floor's currency.
+    on:
+        Date for the FX lookup; defaults to the latest available rate.
 
     Returns
     -------
     float
         Fee amount in the agent's base currency. Always >= 0.
+
+    Notes
+    -----
+    If the floor cannot be converted (no FX rate), the unconverted floor is
+    used rather than raising. This is deliberate and bounded: the floor binds
+    only on orders small enough for a rate-based fee to fall under ~EUR 1.25,
+    the error is cents, and on the broker path the FX rate is necessarily
+    available already — the notional itself was converted with it, and a
+    missing rate is `NO_FX_RATE` long before this is called.
     """
     asset_class = classify_ticker(ticker)
 
     if asset_class == "equity":
-        return max(_equity_floor(), _equity_rate() * notional)
+        return max(_equity_floor_in(currency, on), _equity_rate() * notional)
     elif asset_class == "crypto":
         return _crypto_rate() * notional
     else:  # fx
         return _fx_rate() * notional
+
+
+def _equity_floor_in(currency: str | None, on: date | None) -> float:
+    """The equity commission floor expressed in *currency*."""
+    floor = _equity_floor()
+    floor_ccy = _equity_floor_currency()
+    if not currency or currency.upper() == floor_ccy.upper():
+        return floor
+    from engine.fx import convert as _fx_convert
+
+    converted = _fx_convert(floor, floor_ccy, currency, on)
+    return floor if converted is None else converted

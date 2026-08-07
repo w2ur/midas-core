@@ -150,9 +150,111 @@ def step_fetch_market_data() -> dict:
 
     Not wrapped with @idempotent_step: no side effects; fresh data wanted on
     resume; return feeds snapshots.
+
+    Raises `scripts.fetch_market_data.StaleMarketDataError` when the equity
+    side of the OHLCV store has stopped advancing (W3.1). That is fatal: every
+    downstream step prices off the same store, and a snapshot written at stale
+    closes is immutable.
     """
     print("\n=== Step 1: Fetch market data ===")
     return fetch_market_data()
+
+
+def step_check_sentiment_freshness(
+    today: date, *, news_dir: Path | None = None, log_path: Path | None = None
+) -> dict:
+    """Step 1a — record which arm of the sentiment A/B this session actually ran.
+
+    The treatment agents read `data/market/news/{TICKER}.jsonl` from the
+    committed repo. If the collector's digests for *today* are not on main by
+    the time the session realigns, those agents read the previous day's
+    headlines and the treatment arm silently degrades to a lagged arm — with
+    nothing in the published record saying so. Measured over July–August 2026,
+    the collector committed at **20:08–20:39 UTC** on a 19:00 nominal cron,
+    i.e. after every 20:00 session had already realigned; the cron moved to
+    18:00 in the same change that added this check.
+
+    Deliberately **not** fatal. A missing news digest is not a reason to lose
+    a whole trading session, and the A/B's own protocol is to publish the
+    result either way. What it needs is a record, so this appends one row per
+    session date to `data/market/sentiment_arm.jsonl` (committed) rather than
+    only warning to a stdout nobody reads.
+
+    Freshness is probed dir-wide, not per ticker: a ticker with no news gets
+    no file at all ("empty news → no file"), so an absent file says nothing,
+    while the newest date across the directory answers the question that
+    matters — did the collector run before this session.
+
+    Returns ``{"arm", "latest_digest", "age_days", "agents"}``.
+    """
+    cfg = get_config()
+    news_dir = news_dir if news_dir is not None else cfg.news_dir
+    log_path = log_path if log_path is not None else cfg.sentiment_arm_log
+    treatment = cfg.sentiment_treatment
+
+    print("\n=== Step 1a: Sentiment A/B arm check ===")
+    if not treatment:
+        print("  No agent declares sentiment_arm: treatment — nothing to check.")
+        return {
+            "session_date": today.isoformat(),
+            "arm": "not-running",
+            "latest_digest": None,
+            "age_days": None,
+            "agents": [],
+        }
+
+    latest: str | None = None
+    for path in sorted(news_dir.glob("*.jsonl")) if news_dir.exists() else []:
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                d = json.loads(line).get("date")
+                if isinstance(d, str) and (latest is None or d > latest):
+                    latest = d
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"  [WARN] unreadable digest {path.name}: {exc}")
+
+    age = (today - date.fromisoformat(latest)).days if latest else None
+    fresh = latest is not None and latest >= today.isoformat()
+    record = {
+        "session_date": today.isoformat(),
+        "arm": "treatment" if fresh else "degraded-to-control",
+        "latest_digest": latest,
+        "age_days": age,
+        "agents": list(treatment),
+    }
+
+    if fresh:
+        print(f"  Treatment arm intact — newest digest {latest} (same day).")
+    else:
+        print(
+            f"  [WARN] Sentiment digests are stale (newest {latest}, "
+            f"{age if age is not None else 'n/a'} day(s) old). "
+            f"{', '.join(treatment)} will read lagged "
+            "headlines: this session's treatment arm is confounded. "
+            "Recorded, not fatal — do not abort the session."
+        )
+
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    rows = []
+    if log_path.exists():
+        for line in log_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if row.get("session_date") != record["session_date"]:
+                rows.append(row)
+    rows.append(record)
+    rows.sort(key=lambda r: r.get("session_date", ""))
+    log_path.write_text(
+        "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
+        encoding="utf-8",
+    )
+    return record
 
 
 # ---------------------------------------------------------------------------
@@ -787,14 +889,18 @@ def step_build_manager_prompt(
         for pos in portfolio.get("positions", []):
             scope.add(pos["ticker"])
 
-    price_lookup: dict[str, tuple[float, str]] = {}
+    # (close, as_of, quote currency). The currency is not decoration: the
+    # Manager's prompt renders these next to a labelled cash line, and an
+    # unlabelled foreign close reads as the book's own currency (W7.3).
+    price_lookup: dict[str, tuple[float, str, str]] = {}
     for ticker in scope:
         if resolved_store is not None:
             close = _lcob(ticker, trade_date, store=resolved_store)
         else:
             close = _lcob(ticker, trade_date)
-        if close is not None:
-            price_lookup[ticker] = (close, trade_date.isoformat())
+        ccy = ticker_currency(ticker)
+        if close is not None and ccy is not None:
+            price_lookup[ticker] = (close, trade_date.isoformat(), ccy)
 
     active_triggers = list_pending(
         pending_dir=_trigger_channel_dir(alloc.channels_prefix, "pending")

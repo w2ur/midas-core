@@ -460,3 +460,58 @@ def test_triggered_fill_insufficient_cash_includes_fee(broker_env):
     assert fill is not None
     assert fill.status == "rejected"
     assert fill.reason == "INSUFFICIENT_CASH"
+
+
+# ---------------------------------------------------------------------------
+# Fee-floor currency (2026-08-07 review, W7.4)
+# ---------------------------------------------------------------------------
+
+
+class TestEquityFloorCurrency:
+    """IBIE's minimum commission is EUR 1.25. It was being charged as a bare
+    1.25 on the USD books, i.e. as if the floor were $1.25 — about 8% light
+    on every order small enough for the floor to bind."""
+
+    def test_floor_is_converted_into_the_book_currency(self, monkeypatch) -> None:
+        import engine.fx as fx
+        from engine.fees import fee_for
+
+        monkeypatch.setattr(fx, "convert", lambda amt, src, dst, on=None: amt * 1.15)
+        # Notional small enough that the floor, not the rate, decides.
+        assert fee_for("AAPL", 10.0, "USD") == pytest.approx(1.4375)
+
+    def test_a_eur_book_is_unchanged(self) -> None:
+        """The control: no conversion when the book is already in the floor's
+        own currency — and no FX lookup either."""
+        from engine.fees import fee_for
+
+        assert fee_for("AAPL", 10.0, "EUR") == pytest.approx(1.25)
+        assert fee_for("AAPL", 10.0) == pytest.approx(1.25)
+
+    def test_only_the_floor_is_currency_sensitive(self, monkeypatch) -> None:
+        """Rates are percentages of a notional already in the book currency,
+        so converting them too would double-count."""
+        import engine.fx as fx
+        from engine.fees import fee_for
+
+        monkeypatch.setattr(fx, "convert", lambda amt, src, dst, on=None: amt * 1.15)
+        # 0.05% of 100_000 = 50.0, far above any floor.
+        assert fee_for("AAPL", 100_000.0, "USD") == pytest.approx(
+            fee_for("AAPL", 100_000.0, "EUR")
+        )
+        # Crypto and FX have no floor at all.
+        assert fee_for("BTC-EUR", 4_000.0, "USD") == pytest.approx(
+            fee_for("BTC-EUR", 4_000.0, "EUR")
+        )
+
+    def test_missing_fx_rate_falls_back_to_the_unconverted_floor(
+        self, monkeypatch
+    ) -> None:
+        """Bounded and deliberate: the error is cents on an order small enough
+        for the floor to bind, and on the broker path the rate is necessarily
+        available already (the notional was converted with it)."""
+        import engine.fx as fx
+        from engine.fees import fee_for
+
+        monkeypatch.setattr(fx, "convert", lambda amt, src, dst, on=None: None)
+        assert fee_for("AAPL", 10.0, "USD") == pytest.approx(1.25)

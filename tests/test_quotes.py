@@ -16,8 +16,14 @@ currency from a suffix heuristic alone. Two independent defects followed:
 The fix resolves the quote unit from the vendor (persisted into the
 `data/tickers.json` registry by `scripts/fetch_ohlcv.py`, which already
 fetches `.info` per symbol) and falls back to the heuristic only for
-tickers the vendor cannot answer for. `GBp` is a unit, not a currency: it
-is normalised to GBP/100 in exactly one place, `engine.quotes.normalise_quote`.
+tickers the vendor cannot answer for. `GBp` is a unit, not a currency: the
+pence→pounds division happens in exactly one place, and since 2026-08-07
+that place is **ingest** — `scripts.fetch_ohlcv._normalise_vendor_units`,
+via `engine.quotes.vendor_unit_scale`. A stored close is already ISO, so
+`store_quote` labels it and scales nothing, and no read path may scale.
+(This paragraph named `normalise_quote` until 2026-08-07; that function no
+longer exists, and a reader following the name would have re-added the
+read-side division the migration removed.)
 
 Fixtures only — no network. `.github/workflows/tests.yml` checks out with
 `fetch-depth: 1` and CI has no network guarantee.

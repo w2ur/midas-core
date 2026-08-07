@@ -370,7 +370,7 @@ def _rec(d: str, close: float) -> dict:
 
 
 def test_merge_rows_revises_a_frozen_partial_bar(tmp_path: Path) -> None:
-    """Regression: 63970d933 — a 24/7 crypto bar written at ~23:44 UTC is
+    """Regression: 0cb72052c — a 24/7 crypto bar written at ~23:44 UTC is
     still forming, and append_new_rows keeps only UNSEEN dates, so the
     partial value was frozen permanently. BTC-EUR 2026-08-04 was stored at
     55649.74 against a true close of 55545.09."""

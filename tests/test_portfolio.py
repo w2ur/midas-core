@@ -628,3 +628,169 @@ class TestApplySplit:
         pm.apply_split("test", "CRWD", 4.0)
 
         assert pm.load_trades("test") == before
+
+
+# ---------------------------------------------------------------------------
+# Dust and the SELL cash guard (2026-08-07 review, W7.4)
+# ---------------------------------------------------------------------------
+
+
+class TestFractionalPositionClosing:
+    """32 of the 227 committed trades are fractional. Closing a fractional
+    position in two legs leaves float dust, and `shares == 0` treats dust as
+    an open position forever — a phantom holding in a published book."""
+
+    def test_selling_out_in_two_legs_closes_the_position(self, tmp_path) -> None:
+        from datetime import datetime, timezone
+
+        from engine.portfolio import PortfolioManager
+        from engine.types import Trade
+
+        pm = PortfolioManager(tmp_path)
+        pm.initialize("satoshi", initial_capital=10_000.0, currency="EUR")
+
+        def _trade(action: str, shares: float, price: float, n: int) -> Trade:
+            return Trade(
+                id=f"t{n}",
+                timestamp=datetime(2026, 8, 3 + n, tzinfo=timezone.utc),
+                action=action,
+                ticker="BTC-EUR",
+                shares=shares,
+                price=price,
+                total=shares * price,
+                fees=0.0,
+                reasoning="x",
+            )
+
+        pm.apply_trade("satoshi", _trade("BUY", 0.3, 1000.0, 0))
+        pm.apply_trade("satoshi", _trade("SELL", 0.1, 1000.0, 1))
+        pm.apply_trade("satoshi", _trade("SELL", 0.2, 1000.0, 2))
+
+        # 0.3 - 0.1 - 0.2 == 5.55e-17 in IEEE 754, not 0.0.
+        assert 0.3 - 0.1 - 0.2 != 0.0  # the control: dust really is produced
+        assert pm.load("satoshi").positions == []
+
+    def test_a_real_remainder_is_still_a_position(self, tmp_path) -> None:
+        """The control for the epsilon: it must close dust, not small holdings."""
+        from datetime import datetime, timezone
+
+        from engine.portfolio import PortfolioManager
+        from engine.types import Trade
+
+        pm = PortfolioManager(tmp_path)
+        pm.initialize("satoshi", initial_capital=10_000.0, currency="EUR")
+        pm.apply_trade(
+            "satoshi",
+            Trade(
+                id="b",
+                timestamp=datetime(2026, 8, 3, tzinfo=timezone.utc),
+                action="BUY",
+                ticker="BTC-EUR",
+                shares=0.3,
+                price=1000.0,
+                total=300.0,
+                fees=0.0,
+                reasoning="x",
+            ),
+        )
+        pm.apply_trade(
+            "satoshi",
+            Trade(
+                id="s",
+                timestamp=datetime(2026, 8, 4, tzinfo=timezone.utc),
+                action="SELL",
+                ticker="BTC-EUR",
+                shares=0.29999999,
+                price=1000.0,
+                total=299.99999,
+                fees=0.0,
+                reasoning="x",
+            ),
+        )
+        assert len(pm.load("satoshi").positions) == 1
+
+
+class TestSellCashGuard:
+    def test_a_sale_cannot_drive_cash_negative(self, tmp_path) -> None:
+        """The equity fee has a floor, so a tiny disposal can cost more than
+        it raises. The broker's rails normally stop it, but restatement and
+        baseline paths call `apply_trade` directly."""
+        from datetime import datetime, timezone
+
+        import pytest as _pytest
+
+        from engine.portfolio import PortfolioManager
+        from engine.types import Trade
+
+        pm = PortfolioManager(tmp_path)
+        pm.initialize("satoshi", initial_capital=0.40, currency="EUR")
+        pm.apply_trade(
+            "satoshi",
+            Trade(
+                id="b",
+                timestamp=datetime(2026, 8, 3, tzinfo=timezone.utc),
+                action="BUY",
+                ticker="AAPL",
+                shares=1.0,
+                price=0.40,
+                total=0.40,
+                fees=0.0,
+                reasoning="x",
+            ),
+        )
+        with _pytest.raises(ValueError, match="drive cash negative"):
+            pm.apply_trade(
+                "satoshi",
+                Trade(
+                    id="s",
+                    timestamp=datetime(2026, 8, 4, tzinfo=timezone.utc),
+                    action="SELL",
+                    ticker="AAPL",
+                    shares=1.0,
+                    price=0.40,
+                    total=0.40,
+                    fees=1.25,  # the EUR 1.25 equity floor
+                    reasoning="x",
+                ),
+            )
+        assert pm.load("satoshi").cash == 0.0  # untouched
+
+    def test_an_ordinary_fee_bearing_sale_still_works(self, tmp_path) -> None:
+        """The control: the guard must bind only when proceeds are negative
+        *and* cash cannot absorb them."""
+        from datetime import datetime, timezone
+
+        from engine.portfolio import PortfolioManager
+        from engine.types import Trade
+
+        pm = PortfolioManager(tmp_path)
+        pm.initialize("satoshi", initial_capital=1_000.0, currency="EUR")
+        pm.apply_trade(
+            "satoshi",
+            Trade(
+                id="b",
+                timestamp=datetime(2026, 8, 3, tzinfo=timezone.utc),
+                action="BUY",
+                ticker="AAPL",
+                shares=1.0,
+                price=100.0,
+                total=100.0,
+                fees=1.25,
+                reasoning="x",
+            ),
+        )
+        pm.apply_trade(
+            "satoshi",
+            Trade(
+                id="s",
+                timestamp=datetime(2026, 8, 4, tzinfo=timezone.utc),
+                action="SELL",
+                ticker="AAPL",
+                shares=1.0,
+                price=105.0,
+                total=105.0,
+                fees=1.25,
+                reasoning="x",
+            ),
+        )
+        assert pm.load("satoshi").cash == pytest.approx(1002.50)

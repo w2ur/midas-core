@@ -513,3 +513,50 @@ class TestFillExecutedShaField:
         )
         back = read_inbox(d, inbox_dir=tmp_path)
         assert back[0].executed_sha is None
+
+
+# ---------------------------------------------------------------------------
+# A corrupt inbox line is a hole in the money path (W7.4)
+# ---------------------------------------------------------------------------
+
+
+class TestCorruptInboxIsLoud:
+    """`inbox_order_ids` is the only thing standing between an order
+    and a second fill. It used to skip unparseable lines silently, on the
+    reasoning that "a corrupt line cannot retroactively cause a double-fill if
+    the original write succeeded" — which confuses the write having succeeded
+    with the record being readable."""
+
+    def test_malformed_line_raises_rather_than_leaving_a_hole(
+        self, midas_data_root
+    ) -> None:
+        import pytest as _pytest
+
+        from engine.config import get_config
+        from engine.orders import inbox_order_ids
+
+        inbox = get_config().orders_dir / "inbox"
+        inbox.mkdir(parents=True, exist_ok=True)
+        (inbox / "2026-08-07.jsonl").write_text(
+            '{"order_id": "ord_a", "status": "filled"}\n'
+            "{truncated mid-writ\n",
+            encoding="utf-8",
+        )
+
+        with _pytest.raises(ValueError, match="double-fill"):
+            inbox_order_ids(inbox_dir=inbox)
+
+    def test_a_clean_inbox_still_reads(self, midas_data_root) -> None:
+        """The control — the guard must not reject well-formed ledgers."""
+        from engine.config import get_config
+        from engine.orders import inbox_order_ids
+
+        inbox = get_config().orders_dir / "inbox"
+        inbox.mkdir(parents=True, exist_ok=True)
+        (inbox / "2026-08-07.jsonl").write_text(
+            '{"order_id": "ord_a", "status": "filled"}\n'
+            "\n"
+            '{"order_id": "ord_b", "status": "rejected"}\n',
+            encoding="utf-8",
+        )
+        assert inbox_order_ids(inbox_dir=inbox) == {"ord_a", "ord_b"}

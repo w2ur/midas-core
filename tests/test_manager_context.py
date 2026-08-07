@@ -108,7 +108,7 @@ class TestConstants:
 class TestBuildManagerContextNotes:
     def test_none_notes_are_dropped(self) -> None:
         notes = [("agent-a", None), ("agent-b", _make_note(["AAPL"]))]
-        price_lookup = {"AAPL": (150.0, "2026-06-12")}
+        price_lookup = {"AAPL": (150.0, "2026-06-12", "EUR")}
         registry = {"AAPL": {"name": "Apple Inc.", "type": "equity"}}
         ctx = build_manager_context(
             notes=notes,
@@ -140,8 +140,8 @@ class TestBuildManagerContextNotes:
             ("goldfinger", _make_note(["GLD"])),
         ]
         price_lookup = {
-            "BTC-EUR": (60000.0, "2026-06-12"),
-            "GLD": (180.0, "2026-06-12"),
+            "BTC-EUR": (60000.0, "2026-06-12", "EUR"),
+            "GLD": (180.0, "2026-06-12", "EUR"),
         }
         registry: dict = {}
         ctx = build_manager_context(
@@ -167,8 +167,8 @@ class TestBuildManagerContextSnapshot:
     def test_snapshot_includes_mentioned_tickers(self) -> None:
         notes = [("agent-a", _make_note(["BTC-EUR", "ETH-EUR"]))]
         price_lookup = {
-            "BTC-EUR": (60000.0, "2026-06-12"),
-            "ETH-EUR": (3000.0, "2026-06-12"),
+            "BTC-EUR": (60000.0, "2026-06-12", "EUR"),
+            "ETH-EUR": (3000.0, "2026-06-12", "EUR"),
         }
         ctx = build_manager_context(
             notes=notes,
@@ -194,7 +194,7 @@ class TestBuildManagerContextSnapshot:
             }
         ]
         portfolio = _make_portfolio(positions=positions)
-        price_lookup = {"MSFT": (380.0, "2026-06-12")}
+        price_lookup = {"MSFT": (380.0, "2026-06-12", "EUR")}
         ctx = build_manager_context(
             notes=[],
             portfolio=portfolio,
@@ -220,8 +220,8 @@ class TestBuildManagerContextSnapshot:
         ]
         portfolio = _make_portfolio(positions=positions)
         price_lookup = {
-            "AAPL": (150.0, "2026-06-12"),
-            "MSFT": (380.0, "2026-06-12"),
+            "AAPL": (150.0, "2026-06-12", "EUR"),
+            "MSFT": (380.0, "2026-06-12", "EUR"),
         }
         ctx = build_manager_context(
             notes=notes,
@@ -256,7 +256,7 @@ class TestBuildManagerContextSnapshot:
 
     def test_known_ticker_gets_numeric_price(self) -> None:
         notes = [("agent-a", _make_note(["AAPL"]))]
-        price_lookup = {"AAPL": (150.0, "2026-06-12")}
+        price_lookup = {"AAPL": (150.0, "2026-06-12", "EUR")}
         ctx = build_manager_context(
             notes=notes,
             portfolio=_make_portfolio(),
@@ -272,7 +272,7 @@ class TestBuildManagerContextSnapshot:
 
     def test_ticker_name_from_registry(self) -> None:
         notes = [("agent-a", _make_note(["AAPL"]))]
-        price_lookup = {"AAPL": (150.0, "2026-06-12")}
+        price_lookup = {"AAPL": (150.0, "2026-06-12", "EUR")}
         registry = {"AAPL": {"name": "Apple Inc.", "type": "equity"}}
         ctx = build_manager_context(
             notes=notes,
@@ -289,7 +289,7 @@ class TestBuildManagerContextSnapshot:
 
     def test_ticker_not_in_registry_gives_none_name(self) -> None:
         notes = [("agent-a", _make_note(["AAPL"]))]
-        price_lookup = {"AAPL": (150.0, "2026-06-12")}
+        price_lookup = {"AAPL": (150.0, "2026-06-12", "EUR")}
         ctx = build_manager_context(
             notes=notes,
             portfolio=_make_portfolio(),
@@ -304,7 +304,7 @@ class TestBuildManagerContextSnapshot:
 
     def test_snapshot_entry_has_as_of_date(self) -> None:
         notes = [("agent-a", _make_note(["AAPL"]))]
-        price_lookup = {"AAPL": (150.0, "2026-06-12")}
+        price_lookup = {"AAPL": (150.0, "2026-06-12", "EUR")}
         ctx = build_manager_context(
             notes=notes,
             portfolio=_make_portfolio(),
@@ -363,7 +363,7 @@ class TestBuildManagerContextPortfolio:
             }
         ]
         portfolio = _make_portfolio(positions=positions)
-        price_lookup = {"BTC-EUR": (60000.0, "2026-06-12")}
+        price_lookup = {"BTC-EUR": (60000.0, "2026-06-12", "EUR")}
         ctx = build_manager_context(
             notes=[],
             portfolio=portfolio,
@@ -461,7 +461,7 @@ class TestBuildManagerContextOutcomeMemory:
             notes=[],
             portfolio=portfolio,
             resolved_decisions=same_ticker + other_ticker,
-            price_lookup={"BTC-EUR": (60000.0, "2026-06-12")},
+            price_lookup={"BTC-EUR": (60000.0, "2026-06-12", "EUR")},
             ticker_registry={},
             as_of=date(2026, 6, 12),
             config=_DEFAULT_CONFIG,
@@ -535,7 +535,7 @@ class TestRenderManagerContext:
 
     def _build_basic_ctx(self, resolved_decisions=None) -> ManagerContext:
         notes = [("satoshi", _make_note(["BTC-EUR"]))]
-        price_lookup = {"BTC-EUR": (60000.0, "2026-06-12")}
+        price_lookup = {"BTC-EUR": (60000.0, "2026-06-12", "EUR")}
         registry = {"BTC-EUR": {"name": "Bitcoin EUR", "type": "crypto"}}
         cfg = get_config()
         alloc = cfg.allocator_spec("the-manager")
@@ -795,7 +795,7 @@ class TestRegistryNormalization:
             notes=notes,
             portfolio=_make_portfolio(),
             resolved_decisions=[],
-            price_lookup={"AAPL": (150.0, "2026-06-12")},
+            price_lookup={"AAPL": (150.0, "2026-06-12", "EUR")},
             ticker_registry=registry,
             as_of=date(2026, 6, 12),
             config=_DEFAULT_CONFIG,
@@ -810,7 +810,7 @@ class TestRegistryNormalization:
             notes=notes,
             portfolio=_make_portfolio(),
             resolved_decisions=[],
-            price_lookup={"AAPL": (150.0, "2026-06-12")},
+            price_lookup={"AAPL": (150.0, "2026-06-12", "EUR")},
             ticker_registry=registry,
             as_of=date(2026, 6, 12),
             config=_DEFAULT_CONFIG,
@@ -825,7 +825,7 @@ class TestRegistryNormalization:
             notes=notes,
             portfolio=_make_portfolio(),
             resolved_decisions=[],
-            price_lookup={"AAPL": (150.0, "2026-06-12")},
+            price_lookup={"AAPL": (150.0, "2026-06-12", "EUR")},
             ticker_registry=registry,
             as_of=date(2026, 6, 12),
             config=_DEFAULT_CONFIG,
@@ -841,7 +841,7 @@ class TestRegistryNormalization:
             notes=notes,
             portfolio=_make_portfolio(),
             resolved_decisions=[],
-            price_lookup={"AAPL": (150.0, "2026-06-12")},
+            price_lookup={"AAPL": (150.0, "2026-06-12", "EUR")},
             ticker_registry=registry,
             as_of=date(2026, 6, 12),
             config=_DEFAULT_CONFIG,
@@ -887,7 +887,7 @@ class TestActiveTriggers:
         self, triggers: list[Order] | None = None
     ) -> ManagerContext:
         notes = [("satoshi", _make_note(["BTC-EUR"]))]
-        price_lookup = {"BTC-EUR": (58000.0, "2026-06-27")}
+        price_lookup = {"BTC-EUR": (58000.0, "2026-06-27", "EUR")}
         registry = {"BTC-EUR": {"name": "Bitcoin EUR", "type": "crypto"}}
         return build_manager_context(
             notes=notes,
@@ -949,3 +949,112 @@ class TestActiveTriggers:
         # Expect something describing "BUY if >= 60000"
         assert "BUY" in rendered
         assert ">=" in rendered
+
+
+# ---------------------------------------------------------------------------
+# Cross-currency legibility (2026-08-07 review, W7.3)
+# ---------------------------------------------------------------------------
+
+
+class TestForeignCurrencyPositions:
+    """The allocator's prompt used to print `shares * close` as a bare number
+    directly beneath a labelled cash line. For a GBP holding in a EUR book
+    that reads as euros — to the one agent on this desk whose track record is
+    meant to gate real money."""
+
+    @staticmethod
+    def _eur_book_holding_gbp() -> dict:
+        return {
+            "cash": 1000.0,
+            "currency": "EUR",
+            "positions": [
+                {
+                    "ticker": "LLOY.L",
+                    "shares": 100.0,
+                    "avg_cost": 1.10,
+                    "date_opened": "2026-06-01",
+                }
+            ],
+            "last_updated": "2026-06-12",
+        }
+
+    def test_position_value_is_converted_into_the_book_currency(
+        self, monkeypatch
+    ) -> None:
+        import engine.manager_context as mc
+
+        monkeypatch.setattr(
+            mc, "_fx_convert", lambda amt, src, dst, on=None: amt * 1.20
+        )
+        ctx = build_manager_context(
+            notes=[],
+            portfolio=self._eur_book_holding_gbp(),
+            resolved_decisions=[],
+            price_lookup={"LLOY.L": (1.20, "2026-06-12", "GBP")},
+            as_of=date(2026, 6, 12),
+            config={},
+            ticker_registry={},
+        )
+        # 100 shares x GBP 1.20 = GBP 120, converted at 1.20 -> EUR 144.
+        assert ctx.portfolio_state["positions"][0]["current_value"] == pytest.approx(
+            144.0
+        )
+
+    def test_unconvertible_position_refuses_rather_than_guessing(
+        self, monkeypatch
+    ) -> None:
+        """Same policy as `engine.valuation.value_position`: a number the
+        model cannot trust is worse than an explicit N/A."""
+        import engine.manager_context as mc
+
+        monkeypatch.setattr(mc, "_fx_convert", lambda amt, src, dst, on=None: None)
+        ctx = build_manager_context(
+            notes=[],
+            portfolio=self._eur_book_holding_gbp(),
+            resolved_decisions=[],
+            price_lookup={"LLOY.L": (1.20, "2026-06-12", "GBP")},
+            as_of=date(2026, 6, 12),
+            config={},
+            ticker_registry={},
+        )
+        assert ctx.portfolio_state["positions"][0]["current_value"] is None
+        assert "N/A" in render_manager_context(ctx)
+
+    def test_same_currency_position_is_not_converted(self) -> None:
+        """The control — a conversion applied unconditionally would pass the
+        first test and silently rescale every domestic holding."""
+        book = self._eur_book_holding_gbp()
+        book["positions"][0]["ticker"] = "SAP.DE"
+        ctx = build_manager_context(
+            notes=[],
+            portfolio=book,
+            resolved_decisions=[],
+            price_lookup={"SAP.DE": (150.0, "2026-06-12", "EUR")},
+            as_of=date(2026, 6, 12),
+            config={},
+            ticker_registry={},
+        )
+        assert ctx.portfolio_state["positions"][0]["current_value"] == pytest.approx(
+            15_000.0
+        )
+
+    def test_rendered_values_carry_their_currency(self, monkeypatch) -> None:
+        import engine.manager_context as mc
+
+        monkeypatch.setattr(
+            mc, "_fx_convert", lambda amt, src, dst, on=None: amt * 1.20
+        )
+        ctx = build_manager_context(
+            notes=[],
+            portfolio=self._eur_book_holding_gbp(),
+            resolved_decisions=[],
+            price_lookup={"LLOY.L": (1.20, "2026-06-12", "GBP")},
+            as_of=date(2026, 6, 12),
+            config={},
+            ticker_registry={},
+        )
+        rendered = render_manager_context(ctx)
+        assert "current value 144.00 EUR" in rendered
+        # And the quote itself is labelled with the currency it is quoted in,
+        # which is not the book's.
+        assert "1.2000 GBP" in rendered

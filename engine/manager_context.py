@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from engine.config import get_config
+from engine.fx import convert as _fx_convert
 from engine.market_data import no_data_sentinel
 from engine.research_note import ResearchNote
 
@@ -224,7 +225,7 @@ def build_manager_context(
     notes: list[tuple[str, ResearchNote | None]],
     portfolio: dict | None,
     resolved_decisions: list[dict],
-    price_lookup: dict[str, tuple[float, str]],
+    price_lookup: dict[str, tuple[float, str, str]],
     ticker_registry: dict[str, dict],
     as_of: date,
     config: dict[str, Any],
@@ -290,10 +291,11 @@ def build_manager_context(
         type_ = (reg_entry.get("type") or None) if reg_entry else None
 
         if ticker in price_lookup:
-            close, as_of_date = price_lookup[ticker]
+            close, as_of_date, ccy = price_lookup[ticker]
         else:
             close = no_data_sentinel(ticker)
             as_of_date = as_of.isoformat()
+            ccy = None
 
         market_snapshot.append(
             {
@@ -301,6 +303,7 @@ def build_manager_context(
                 "name": name,
                 "type": type_,
                 "close": close,
+                "currency": ccy,
                 "as_of_date": as_of_date,
             }
         )
@@ -330,7 +333,7 @@ def build_manager_context(
 
 def _build_portfolio_state(
     portfolio: dict | None,
-    price_lookup: dict[str, tuple[float, str]],
+    price_lookup: dict[str, tuple[float, str, str]],
     as_of: date,
     config: dict[str, Any],
 ) -> dict[str, Any]:
@@ -343,6 +346,8 @@ def _build_portfolio_state(
             "last_updated": as_of.isoformat(),
         }
 
+    book_currency = str(portfolio.get("currency") or config.get("currency", "EUR"))
+
     positions: list[dict[str, Any]] = []
     for pos in portfolio.get("positions", []):
         ticker = pos["ticker"]
@@ -350,11 +355,21 @@ def _build_portfolio_state(
         avg_cost = float(pos["avg_cost"])
         date_opened_str = pos.get("date_opened")
 
-        # Compute current value if price available
+        # Value the position IN THE BOOK'S CURRENCY (2026-08-07 review, W7.3).
+        # A book can hold a position quoted in another currency, and this
+        # prompt used to render `shares * close` as a bare number directly
+        # beneath a labelled cash line — so a GBP holding read as if it were
+        # euros, to the only agent on the desk whose decisions are bound for
+        # real money. Unconvertible means None, not a wrong number: the same
+        # refuse-and-report policy as `engine.valuation.value_position`.
         current_value: float | None = None
         if ticker in price_lookup:
-            close, _ = price_lookup[ticker]
-            current_value = shares * close
+            close, _, pos_ccy = price_lookup[ticker]
+            native = shares * close
+            if pos_ccy and book_currency and pos_ccy != book_currency:
+                current_value = _fx_convert(native, pos_ccy, book_currency, as_of)
+            else:
+                current_value = native
 
         # Compute holding age
         holding_days: int | None = None
@@ -472,6 +487,7 @@ def render_manager_context(ctx: ManagerContext) -> str:
         f"Cash    : {ps['cash']:.2f} {ps['currency']}",
         f"Updated : {ps.get('last_updated', ctx.as_of.isoformat())}",
     ]
+    book_ccy = ps.get("currency", "EUR")
     positions = ps.get("positions", [])
     if positions:
         portfolio_lines.append("Positions:")
@@ -488,7 +504,7 @@ def render_manager_context(ctx: ManagerContext) -> str:
             )
             portfolio_lines.append(
                 f"  {pos['ticker']:<12} {pos['shares']} shares @ avg {pos['avg_cost']:.2f} "
-                f"| current value {cv} | held {hd}"
+                f"| current value {cv} {book_ccy} | held {hd}"
             )
     else:
         portfolio_lines.append("Positions : (none — initial empty book)")
@@ -510,8 +526,12 @@ def render_manager_context(ctx: ManagerContext) -> str:
             close_str = f"{close:.4f}"
         else:
             close_str = str(close)
+        # The quote currency is part of the price. Rendering a bare number
+        # is what let a pence-quoted London line read as pounds (W7.3).
+        ccy_part = f" {entry['currency']}" if entry.get("currency") else ""
         price_lines.append(
-            f"  {entry['ticker']}{type_part}{name_part}: {close_str} (date: {entry['as_of_date']})"
+            f"  {entry['ticker']}{type_part}{name_part}: {close_str}{ccy_part} "
+            f"(date: {entry['as_of_date']})"
         )
     if not ctx.market_snapshot:
         price_lines.append("  (no tickers in scope)")

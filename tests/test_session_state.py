@@ -289,3 +289,124 @@ class TestJournalAtomicity:
 
         agent_memory.save_journal("satoshi", "hello\n")
         assert (get_config().journal_dir / "satoshi.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# Anchor scoping (2026-08-07 review, W3.3)
+# ---------------------------------------------------------------------------
+
+
+class TestAnchorScopedMarkers:
+    """A marker is valid only for the session that wrote it.
+
+    Keyed on ``(step, UTC date)`` alone, a marker written by an ad-hoc manual
+    invocation silently disabled that night's real session step — the failure
+    reports itself as a `[SKIP]` line on stdout in a cloud sandbox, i.e. not
+    at all.
+    """
+
+    @staticmethod
+    def _anchor(monkeypatch: pytest.MonkeyPatch, sha: str) -> None:
+        monkeypatch.setattr(ss, "current_base_sha", lambda: sha)
+
+    def test_marker_from_a_different_anchor_is_ignored(
+        self, today: date, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._anchor(monkeypatch, "aaaaaaa")
+        ss.mark_done("step_build_baselines", day=today)
+        assert ss.is_done("step_build_baselines", day=today) is True
+
+        # Same day, different ledger base — a different run.
+        self._anchor(monkeypatch, "bbbbbbb")
+        assert ss.is_done("step_build_baselines", day=today) is False
+
+    def test_hand_run_marker_does_not_satisfy_an_anchored_session(
+        self, today: date, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The original bug, stated directly: an operator runs a step by hand
+        at noon (no anchor); the 20:00 session must still run it."""
+        self._anchor(monkeypatch, "")  # no anchor — ad-hoc invocation
+        ss.mark_done("step_build_baselines", day=today)
+
+        self._anchor(monkeypatch, "deadbee")  # the real session
+        assert ss.is_done("step_build_baselines", day=today) is False
+
+    def test_anchored_marker_does_not_satisfy_a_later_hand_run(
+        self, today: date, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._anchor(monkeypatch, "deadbee")
+        ss.mark_done("step_build_baselines", day=today)
+
+        self._anchor(monkeypatch, "")
+        assert ss.is_done("step_build_baselines", day=today) is False
+
+    def test_same_anchor_still_resumes(
+        self, today: date, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The control: scoping must not break the resume it exists to
+        protect. Same anchor, later call → still done."""
+        self._anchor(monkeypatch, "deadbee")
+        ss.mark_done("step_fill_orders", day=today)
+        assert ss.is_done("step_fill_orders", day=today) is True
+
+    def test_rewrite_under_a_new_anchor_drops_the_old_markers(
+        self, today: date, monkeypatch: pytest.MonkeyPatch, isolated_state_dir: Path
+    ) -> None:
+        """A file must never hold markers from two runs: a mixed file would
+        let one run's marker satisfy the other's is_done."""
+        self._anchor(monkeypatch, "aaaaaaa")
+        ss.mark_done("step_fill_orders", day=today)
+
+        self._anchor(monkeypatch, "bbbbbbb")
+        ss.mark_done("step_update_snapshots", day=today)
+
+        state = json.loads((isolated_state_dir / f"{today.isoformat()}.json").read_text())
+        assert "step_fill_orders" not in state
+        assert "step_update_snapshots" in state
+        assert state[ss._ANCHOR_KEY] == "bbbbbbb"
+
+    def test_legacy_marker_without_a_base_fails_closed(
+        self, today: date, monkeypatch: pytest.MonkeyPatch, isolated_state_dir: Path
+    ) -> None:
+        """A state file written before W3.3 carries no base. An anchored
+        session must re-run its steps rather than trust it — same convention
+        as a legacy snapshot row with no ``session_date``."""
+        isolated_state_dir.mkdir(parents=True, exist_ok=True)
+        (isolated_state_dir / f"{today.isoformat()}.json").write_text(
+            json.dumps({"step_build_baselines": "2026-06-12T20:04:00+00:00"})
+        )
+        self._anchor(monkeypatch, "deadbee")
+        assert ss.is_done("step_build_baselines", day=today) is False
+
+    def test_current_base_sha_reads_the_live_anchor(self, today: date) -> None:
+        """Wire-level check: the scoping key really is the session anchor's
+        base_sha, not a value only the tests inject."""
+        from scripts.session_guard import SessionAnchor, _anchor_path
+        from datetime import datetime, timezone
+
+        assert ss.current_base_sha() == ""  # no anchor on disk yet
+
+        path = _anchor_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                SessionAnchor(
+                    session_date=today,
+                    base_sha="0123456789abcdef",
+                    started_at=datetime(2026, 6, 12, 20, 0, tzinfo=timezone.utc),
+                ).to_dict()
+            )
+        )
+        assert ss.current_base_sha() == "0123456789abcdef"
+
+    def test_unreadable_anchor_is_reported_as_no_anchor(
+        self, isolated_state_dir: Path
+    ) -> None:
+        """A corrupt anchor must not take down a marker read — the session's
+        own assert_session_fresh is where a bad anchor is fatal."""
+        from scripts.session_guard import _anchor_path
+
+        path = _anchor_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{not json")
+        assert ss.current_base_sha() == ""

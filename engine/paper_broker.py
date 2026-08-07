@@ -481,7 +481,7 @@ def _process_one(
     if notional_base > cap:
         return _reject(order.order_id, "MAX_ORDER_NOTIONAL")
 
-    fee = fee_for(order.ticker, notional_base)
+    fee = fee_for(order.ticker, notional_base, base_ccy, trade_date)
 
     if order.action == "BUY" and notional_base + fee > portfolio.cash:
         return _reject(order.order_id, "INSUFFICIENT_CASH")
@@ -805,7 +805,7 @@ def _execute_triggered_order(
         f.trigger_fired = True
         return f
 
-    fee = fee_for(order.ticker, notional_base)
+    fee = fee_for(order.ticker, notional_base, base_ccy, trade_date)
 
     if order.action == "BUY" and notional_base + fee > portfolio.cash:
         f = _reject(order.order_id, "INSUFFICIENT_CASH")

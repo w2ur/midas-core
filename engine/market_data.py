@@ -18,6 +18,7 @@ import pandas as pd
 import yfinance as yf
 
 from engine.config import get_config
+from engine.quotes import vendor_unit_scale
 
 
 # ---------------------------------------------------------------------------
@@ -55,40 +56,120 @@ def _read_store_file(ticker: str) -> list[dict] | None:
     return rows if rows else None
 
 
+def _store_series(ticker: str, start: date, end: date) -> pd.Series | None:
+    """One ticker's adjusted-close series from the store, or None if uncovered.
+
+    "Uncovered" means: absent from the store, or its earliest row postdates
+    `start`, or it has no row inside the window.
+    """
+    rows = _read_store_file(ticker)
+    if rows is None:
+        return None
+    if min(r["date"] for r in rows) > start.isoformat():
+        return None
+    # Use adj_close when present; fall back to close for instruments without splits/divs.
+    series_data = {
+        r["date"]: (
+            r.get("adj_close") if r.get("adj_close") is not None else r.get("close")
+        )
+        for r in rows
+        if start.isoformat() <= r["date"] <= end.isoformat()
+    }
+    if not series_data:
+        return None
+    idx = pd.to_datetime(sorted(series_data.keys()))
+    return pd.Series([series_data[d.strftime("%Y-%m-%d")] for d in idx], index=idx)
+
+
 def _load_prices_from_store(
     tickers: list[str], start: date, end: date
-) -> pd.DataFrame | None:
-    """Return adjusted-close DataFrame for tickers over [start, end] from the store.
+) -> tuple[dict[str, pd.Series], list[str]]:
+    """Split *tickers* into store-served series and the ones the store cannot cover.
 
-    Returns None if any ticker is missing from the store, or if the store
-    doesn't reach back to `start`. Partial coverage falls back to yfinance.
+    Per-ticker, not all-or-nothing (2026-08-07 review, W7.1). This used to
+    return `None` for the **whole request** the moment one ticker was missing
+    or short, which sent every other ticker — all of them present, all of them
+    already ISO-normalised in the store — down the raw-vendor path instead.
+    One thin or newly-listed name was enough to change the units of an entire
+    backtest.
     """
-    columns: dict[str, pd.Series] = {}
+    served: dict[str, pd.Series] = {}
+    missing: list[str] = []
     for ticker in tickers:
-        rows = _read_store_file(ticker)
-        if rows is None:
-            return (
-                None  # Missing entirely — fall back to yfinance for the whole request
-            )
-        earliest = min(r["date"] for r in rows)
-        if earliest > start.isoformat():
-            return None  # Store doesn't cover the requested range
-        # Use adj_close when present; fall back to close for instruments without splits/divs.
-        series_data = {
-            r["date"]: (
-                r.get("adj_close") if r.get("adj_close") is not None else r.get("close")
-            )
-            for r in rows
-            if start.isoformat() <= r["date"] <= end.isoformat()
-        }
-        if not series_data:
-            return None
-        idx = pd.to_datetime(sorted(series_data.keys()))
-        columns[ticker] = pd.Series(
-            [series_data[d.strftime("%Y-%m-%d")] for d in idx], index=idx
-        )
+        series = _store_series(ticker, start, end)
+        if series is None:
+            missing.append(ticker)
+        else:
+            served[ticker] = series
+    return served, missing
 
-    df = pd.DataFrame(columns)
+
+def _normalise_vendor_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """Scale a yfinance close frame from vendor units into ISO currency.
+
+    The store is ISO-denominated at ingest, so anything served from it is
+    already in the ticker's ISO currency. A yfinance fallback is **not** —
+    `LLOY.L` arrives at 116.60 meaning GBP 1.166. Mixing the two in one frame
+    put a 100x step in the middle of a price series, and the backtester is
+    the product that reads it.
+
+    Mirrors `scripts.fetch_ohlcv._normalise_vendor_units`, which does the same
+    job on the ingest path. Columns are tickers here (a close-only frame), so
+    the scale is per column rather than per price-column.
+    """
+    if df.empty:
+        return df
+    out = df.copy()
+    for ticker in out.columns:
+        scale = vendor_unit_scale(str(ticker))
+        if scale != 1.0:
+            out[ticker] = out[ticker] * scale
+    return out
+
+
+def _vendor_close(raw: pd.DataFrame) -> pd.DataFrame | None:
+    """The `Close` block of a yfinance result, or None if it served nothing.
+
+    yfinance returns MultiIndex columns regardless of ticker count — level 0
+    is the price type, level 1 the symbol. An empty response has no `Close`
+    level at all, and `raw["Close"]` raises `KeyError` on it. A vendor miss is
+    not an exception here: the store may have served every other column of the
+    request, and raising would discard those too.
+    """
+    if isinstance(raw.columns, pd.MultiIndex):
+        return raw["Close"] if "Close" in raw.columns.get_level_values(0) else None
+    return raw[["Close"]] if "Close" in raw.columns else None
+
+
+def _close_frame(tickers: list[str], start: date, end: date) -> pd.DataFrame:
+    """Close prices for *tickers* over [start, end], every column ISO-denominated.
+
+    Store first, per ticker; yfinance only for the ones the store cannot
+    cover, and normalised into ISO on the way in so the two sources cannot
+    end up in different units inside one frame. A ticker neither source can
+    serve is absent from the result rather than present and empty.
+
+    The single composition point for `fetch_prices` and `fetch_benchmarks`,
+    which previously each had their own copy of "try the store, else fetch
+    everything" — and each carried the same two defects (W7.1).
+    """
+    served, missing = _load_prices_from_store(tickers, start, end)
+    if missing:
+        raw = yf.download(
+            missing,
+            start=str(start),
+            end=str(end),
+            auto_adjust=True,
+            progress=False,
+        )
+        close = _vendor_close(raw)
+        if close is not None:
+            fetched = _normalise_vendor_frame(close)
+            for ticker in fetched.columns:
+                served[str(ticker)] = fetched[ticker]
+
+    # Preserve the caller's column order.
+    df = pd.DataFrame({t: served[t] for t in tickers if t in served})
     df.index.name = "Date"
     return df
 
@@ -211,25 +292,7 @@ class MarketDataFetcher:
         if cached is not None:
             return cached
 
-        store_df = _load_prices_from_store(tickers, start, end)
-        if store_df is not None:
-            store_df = self._normalize_index(store_df)
-            self._save_cache(cache_key, store_df)
-            return store_df
-
-        raw = yf.download(
-            tickers,
-            start=str(start),
-            end=str(end),
-            auto_adjust=True,
-            progress=False,
-        )
-
-        # yfinance always returns MultiIndex columns regardless of ticker count.
-        # Level 0 is price type (Close, Open, …), level 1 is ticker symbol.
-        df = raw["Close"]
-        df = self._normalize_index(df)
-
+        df = self._normalize_index(_close_frame(tickers, start, end))
         self._save_cache(cache_key, df)
         return df
 
@@ -244,28 +307,7 @@ class MarketDataFetcher:
         if cached is not None:
             return cached
 
-        store_df = _load_prices_from_store(tickers, start, end)
-        if store_df is not None:
-            reverse_map = {v: k for k, v in BENCHMARK_TICKERS.items()}
-            renamed = store_df.rename(columns=reverse_map)[
-                list(BENCHMARK_TICKERS.keys())
-            ]
-            renamed = self._normalize_index(renamed)
-            self._save_cache(cache_key, renamed)
-            return renamed
-
-        raw = yf.download(
-            tickers,
-            start=str(start),
-            end=str(end),
-            auto_adjust=True,
-            progress=False,
-        )
-
-        # Multiple tickers always → MultiIndex
-        close = raw["Close"]
-
-        # Rename yfinance tickers to friendly names
+        close = _close_frame(tickers, start, end)
         reverse_map = {v: k for k, v in BENCHMARK_TICKERS.items()}
         df = close.rename(columns=reverse_map)[list(BENCHMARK_TICKERS.keys())]
         df = self._normalize_index(df)
@@ -319,7 +361,10 @@ class MarketDataFetcher:
             progress=False,
         )
 
-        close = raw["Close"]
+        vendor_close = _vendor_close(raw)
+        if vendor_close is None:
+            return result
+        close = _normalise_vendor_frame(vendor_close)
         for ticker in missing:
             try:
                 series = close[ticker].dropna()

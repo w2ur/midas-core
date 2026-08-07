@@ -7,6 +7,33 @@ step name → ISO-8601 completion timestamp.
 All writes are atomic (write to a tmp file, then ``os.replace``), so a crash
 mid-write never leaves a corrupt state file.
 
+Markers are scoped to a session, not to a day (2026-08-07 review, W3.3)
+---------------------------------------------------------------------
+A marker used to be keyed on nothing but ``(function name, UTC date)``. Under
+that key an ad-hoc invocation — an operator calling ``step_build_baselines()``
+by hand at noon to check something — writes a marker that the evening's real
+session reads as "already done", and that step silently does not run. The
+guard against a skipped step is a `[SKIP]` line on stdout in a cloud sandbox,
+which is the same place the 2026-07-31 stall went unnoticed.
+
+Every marker now also records the ledger base it was written against: the
+``base_sha`` of the session anchor (``scripts.session_guard``), or ``""`` when
+there is no anchor at all — which is exactly what an ad-hoc invocation looks
+like. ``is_done`` answers True only when the stored base matches the caller's
+current one, so:
+
+- a hand-run step (no anchor) cannot satisfy an anchored session, and
+- an anchored session's markers cannot satisfy a later hand-run.
+
+A file written before this change carries no base and is treated as ``""``
+— fail-closed, the same convention as a legacy snapshot row without a
+``session_date``.
+
+Re-anchoring onto a moved base *does* discard the day's markers, and that is
+deliberate: the steps already run were computed against a ledger that no
+longer exists. ``assert_session_fresh`` aborts outright when the movement
+touched the ledger; when it did not, re-running is the conservative answer.
+
 Timezone note: State files are keyed on UTC dates (sessions fire 20:00 UTC);
 ``engine.output_bundle.get_day_number`` and commit messages use local dates —
 safe in UTC-pinned CI/sandbox runners, would drift for a local operator near
@@ -67,6 +94,30 @@ def _state_path(day: date | None = None) -> Path:
     return _state_dir() / f"{d.isoformat()}.json"
 
 
+# Reserved key holding the ledger base the markers in this file were written
+# against. Underscore-free names are step names; this one cannot collide with
+# a ``step_*`` function.
+_ANCHOR_KEY = "__base_sha__"
+
+
+def current_base_sha() -> str:
+    """The base SHA of the live session anchor, or ``""`` when unanchored.
+
+    Imported lazily: ``session_guard`` shells out to git on import-adjacent
+    paths and is irrelevant to a caller that only wants to read markers.
+    Any failure to resolve an anchor is reported as "no anchor" rather than
+    raising — an unreadable anchor must not take the session down here; the
+    session's own ``assert_session_fresh`` is where a missing anchor is fatal.
+    """
+    try:
+        from scripts.session_guard import load_anchor
+
+        anchor = load_anchor()
+    except Exception:  # noqa: BLE001 — unreadable anchor == no anchor
+        return ""
+    return anchor.base_sha if anchor is not None else ""
+
+
 def _load_state(day: date | None = None) -> dict[str, str]:
     """Read the state file for *day*. Returns {} on missing or malformed file."""
     path = _state_path(day)
@@ -107,15 +158,33 @@ def mark_done(step: str, day: date | None = None) -> None:
     """Record *step* as completed for *day* (default: today UTC).
 
     Idempotent: calling twice just updates the timestamp.
+
+    Stamps the file with the current session anchor's ``base_sha``. If the
+    file was written under a *different* base, its markers belong to another
+    run and are dropped rather than merged — keeping a mixed-provenance file
+    would let one run's marker satisfy another's ``is_done``, which is the
+    bug this scoping exists to close.
     """
+    base = current_base_sha()
     state = _load_state(day)
+    if state.get(_ANCHOR_KEY, "") != base:
+        state = {}
+    state[_ANCHOR_KEY] = base
     state[step] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     _write_state(state, day)
 
 
 def is_done(step: str, day: date | None = None) -> bool:
-    """Return True if *step* was previously marked done for *day*."""
-    return step in _load_state(day)
+    """Return True if *step* was completed for *day* by *this* session.
+
+    "This session" means: the marker was written against the same ledger base
+    the caller is anchored to. A marker from a hand-run step (no anchor) or
+    from a run anchored elsewhere answers False — see the module docstring.
+    """
+    state = _load_state(day)
+    if state.get(_ANCHOR_KEY, "") != current_base_sha():
+        return False
+    return step in state
 
 
 def clear(day: date | None = None) -> None:

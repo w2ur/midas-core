@@ -47,8 +47,6 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from engine.config import get_config
-
 # Typical weekday session runs 30-45 minutes. Three hours is generous headroom
 # for a slow agent round while still catching a suspend/resume (the 2026-07-31
 # stall was 63 hours).
@@ -104,7 +102,13 @@ class SessionAnchor:
 
 
 def _anchor_path() -> Path:
-    return Path(get_config().session_state_dir) / "anchor.json"
+    # Resolved through session_state rather than get_config() directly so the
+    # anchor and the step markers it now scopes (W3.3) can never end up in two
+    # different directories — including under the test suite's single
+    # session-state override.
+    from scripts.session_state import _state_dir
+
+    return Path(_state_dir()) / "anchor.json"
 
 
 def _git(*args: str) -> str:
@@ -216,12 +220,8 @@ def assert_session_fresh(
             f"{superseding!r}. This session is superseded. Abandon this run."
         )
 
-    changed = _git(
-        "diff", "--name-only", f"{a.base_sha}..origin/main"
-    ).splitlines()
-    touched_ledger = sorted(
-        {p for p in changed if p.startswith(LEDGER_PATHS)}
-    )
+    changed = _git("diff", "--name-only", f"{a.base_sha}..origin/main").splitlines()
+    touched_ledger = sorted({p for p in changed if p.startswith(LEDGER_PATHS)})
     if touched_ledger:
         raise StaleSessionError(
             f"[{stage}] the ledger moved on main while this session ran "

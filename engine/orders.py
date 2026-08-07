@@ -315,9 +315,25 @@ def inbox_order_ids(d: date | None = None, inbox_dir: Path | None = None) -> set
     resolved at call time through get_config() so MIDAS_DATA_DIR redirection is
     respected.
 
-    Reads raw JSONL lines and extracts the ``order_id`` field; silently skips
-    malformed lines (the idempotency check is best-effort — a corrupt line
-    cannot retroactively cause a double-fill if the original write succeeded).
+    Reads raw JSONL lines and extracts the ``order_id`` field. **A malformed
+    line raises** (2026-08-07 review, W7.4).
+
+    This used to skip silently, on the reasoning that "a corrupt line cannot
+    retroactively cause a double-fill if the original write succeeded". That
+    reasoning is wrong, and the error is instructive: it conflates the write
+    having succeeded with the record being *readable*. If the unparseable line
+    is the fill record for order X, then X is missing from this set, and the
+    only thing standing between X and a second fill is exactly this set. A
+    hole here is a hole in the money path.
+
+    So it fails loud, matching `_read_jsonl`'s contract for the same data. The
+    cost of raising is bounded and visible: the watcher goes red and files an
+    issue. The cost of continuing is paying twice.
+
+    Raises
+    ------
+    ValueError
+        If any line in any inbox file is not valid JSON.
     """
     base = inbox_dir if inbox_dir is not None else get_config().orders_dir / "inbox"
     if d is not None:
@@ -332,17 +348,22 @@ def inbox_order_ids(d: date | None = None, inbox_dir: Path | None = None) -> set
         if not path.exists():
             continue
         with path.open(encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
+            for idx, raw_line in enumerate(f, 1):
+                line = raw_line.strip()
                 if not line:
                     continue
                 try:
                     record = json.loads(line)
-                    oid = record.get("order_id")
-                    if oid:
-                        ids.add(oid)
-                except json.JSONDecodeError:
-                    pass
+                except json.JSONDecodeError as exc:
+                    raise ValueError(
+                        f"Malformed JSON on line {idx} of {path} — refusing to "
+                        f"build the already-filled set from an unreadable "
+                        f"ledger, because a missing order_id here permits a "
+                        f"double-fill: {exc}"
+                    ) from exc
+                oid = record.get("order_id")
+                if oid:
+                    ids.add(oid)
     return ids
 
 

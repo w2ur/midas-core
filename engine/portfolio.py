@@ -19,6 +19,12 @@ from engine.corporate_actions import apply_split as _apply_split_positions
 from engine.types import Portfolio, Position, Trade
 
 
+#: Below this many shares a position is float dust, not a holding. Matches
+#: the epsilon `engine.restatement` uses so the two agree on when a position
+#: is closed.
+_DUST_SHARES = 1e-9
+
+
 class PortfolioManager:
     """Manages portfolio state on disk for one or more strategies.
 
@@ -181,16 +187,40 @@ class PortfolioManager:
                 raise ValueError(
                     f"Cannot sell {trade.ticker}: no open position for strategy {strategy_id!r}"
                 )
-            if trade.shares > existing.shares:
+            # Epsilon on this comparison too, and for the mirror-image reason
+            # (2026-08-07 review, W7.4). `0.3 - 0.1` holds 0.19999999999999998
+            # shares, so an agent selling the 0.2 it believes it owns — and
+            # does own — was refused for 2e-17 of a share. Found by the dust
+            # test below, not by the review.
+            if trade.shares > existing.shares + _DUST_SHARES:
                 raise ValueError(
                     f"Cannot sell {trade.shares} shares of {trade.ticker}: "
                     f"only {existing.shares} shares held"
                 )
 
-            portfolio.cash += trade.total - trade.fees
+            # A sale can cost more than it raises: the equity fee has a floor,
+            # so a EUR 0.40 disposal nets EUR -0.85. The broker's rails would
+            # normally stop that arriving here, but `apply_trade` is also
+            # called by the restatement and baseline paths, and a portfolio
+            # with negative cash is not a state any consumer handles
+            # (2026-08-07 review, W7.4). Symmetric with the BUY guard above.
+            proceeds = trade.total - trade.fees
+            if portfolio.cash + proceeds < 0:
+                raise ValueError(
+                    f"Sale of {trade.ticker} would drive cash negative: "
+                    f"proceeds {proceeds:,.2f} (total {trade.total:,.2f} less "
+                    f"fees {trade.fees:,.2f}) against cash "
+                    f"{portfolio.cash:,.2f}"
+                )
+            portfolio.cash += proceeds
 
             existing.shares -= trade.shares
-            if existing.shares == 0:
+            # Epsilon, not `== 0`: 32 of the 227 committed trades are
+            # fractional, and selling out of a fractional position in two legs
+            # leaves float dust (1e-16 shares) that `== 0` treats as an open
+            # position forever. `engine.restatement` already used 1e-9; this
+            # path was the one place still comparing exactly.
+            if abs(existing.shares) < _DUST_SHARES:
                 portfolio.positions = [
                     p for p in portfolio.positions if p.ticker != trade.ticker
                 ]

@@ -95,6 +95,11 @@ class AgentSpec:
     role: str = "trader"
     safety: SafetyRails = field(default_factory=SafetyRails)
     allocator: "AllocatorSpec | None" = None
+    # Arm of a pre-registered feed experiment this agent belongs to, or None
+    # for the control group. Declared here rather than inferred from the
+    # persona text so the session can report which arm it actually ran without
+    # grepping prose — see `scripts.daily_session.step_check_sentiment_freshness`.
+    sentiment_arm: str | None = None
 
 
 @dataclass(frozen=True)
@@ -123,6 +128,14 @@ class MidasConfig:
     @property
     def ohlcv_dir(self) -> Path:
         return self._data / "market" / "ohlcv"
+
+    @property
+    def news_dir(self) -> Path:
+        return self._data / "market" / "news"
+
+    @property
+    def sentiment_arm_log(self) -> Path:
+        return self._data / "market" / "sentiment_arm.jsonl"
 
     @property
     def journal_dir(self) -> Path:
@@ -179,6 +192,20 @@ class MidasConfig:
     @property
     def trading_roster(self) -> tuple[str, ...]:
         return tuple(aid for aid, spec in self.roster.items() if spec.role == "trader")
+
+    @property
+    def sentiment_treatment(self) -> tuple[str, ...]:
+        """Agents in the treatment arm of the pre-registered sentiment A/B.
+
+        Empty on any desk that does not run the experiment (including the
+        demo desk), which is what makes the arm check a no-op there rather
+        than a hardcoded live-cast reference in a shared module.
+        """
+        return tuple(
+            aid
+            for aid, spec in self.roster.items()
+            if spec.sentiment_arm == "treatment"
+        )
 
     @property
     def allocators(self) -> tuple[str, ...]:
@@ -266,6 +293,7 @@ def _agent(agent_id: str, raw: dict, default_capital: float) -> AgentSpec:
         role=raw.get("role", "trader"),
         safety=_safety(raw.get("safety")),
         allocator=_allocator(raw.get("allocator")),
+        sentiment_arm=raw.get("sentiment_arm"),
     )
 
 

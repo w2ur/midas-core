@@ -114,7 +114,21 @@ def _seed_pending(broker_env, **overrides) -> Order:
 
 
 class TestBlackoutWindow:
-    @pytest.mark.parametrize("hh,mm", [(19, 55), (20, 0), (20, 15), (20, 30)])
+    @pytest.mark.parametrize(
+        "hh,mm",
+        [
+            (19, 55),
+            (20, 0),
+            (20, 15),
+            (20, 30),
+            # Extended 20:30 → 21:00 on 2026-08-07: the measured session tail
+            # (auto-merge as late as 20:45) fell outside the old window, and a
+            # fire in the tail discards the whole session via StaleSessionError.
+            (20, 31),
+            (20, 45),
+            (21, 0),
+        ],
+    )
     def test_blackout_skips_processing(self, broker_env, hh, mm) -> None:
         from scripts import check_triggers
 
@@ -124,7 +138,7 @@ class TestBlackoutWindow:
         assert result["blacked_out"] is True
         assert len(list_pending()) == 1  # untouched
 
-    @pytest.mark.parametrize("hh,mm", [(19, 54), (20, 31), (3, 0), (14, 30)])
+    @pytest.mark.parametrize("hh,mm", [(19, 54), (21, 1), (3, 0), (14, 30)])
     def test_normal_hours_do_run(self, broker_env, monkeypatch, hh, mm) -> None:
         from scripts import check_triggers
         from engine import triggers as triggers_mod

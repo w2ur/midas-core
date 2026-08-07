@@ -2,8 +2,8 @@
 
 Runs every 15 min via .github/workflows/check-triggers.yml. Walks pending
 orders, fetches current prices, fires when triggers are hit, expires old
-ones. Blackout window 19:55-20:30 UTC to avoid commit-races with the
-20:00 UTC daily session.
+ones. Blackout window 19:55-21:00 UTC to avoid commit-races with the
+20:00 UTC daily session (see BLACKOUT_END for why 21:00, not 20:30).
 
 Usage:
     python scripts/check_triggers.py            # normal run
@@ -43,7 +43,18 @@ from scripts.daily_session import (
 logger = logging.getLogger(__name__)
 
 BLACKOUT_START = time(19, 55)
-BLACKOUT_END = time(20, 30)
+# 21:00, not the original 20:30. The window has to outlast the *merge* to main,
+# not just the sandbox commit, because that is when main actually moves. Over
+# the 15 most recent weekday sessions on this repo, the session commit landed
+# 20:09-20:39 and the auto-merge 20:12-20:45 (worst: 2026-08-05, merged 20:45)
+# — two of the last five sessions were still landing after the 20:30 cutoff.
+# A watcher fire inside the tail is not a lost fire but a lost *session*: the
+# fire commits to main, and the session's own `assert_session_fresh` then sees
+# the ledger move and raises StaleSessionError, discarding a completed run.
+# 21:00 clears the measured tail with ~15 min of headroom. It does not clear
+# everything: 2026-07-29 committed at 21:46. A blackout is a race-narrower,
+# not a lock — the session guard remains the actual correctness mechanism.
+BLACKOUT_END = time(21, 0)
 
 # Type alias for the injectable committer used in process_fired_order.
 # Signature: (order_id, today, paths) -> None
