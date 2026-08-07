@@ -13,6 +13,8 @@ sandboxed agent — preserving it exactly is a hard requirement.
 from __future__ import annotations
 
 import json
+import logging
+import re
 import os
 import sys
 from datetime import date, timedelta
@@ -58,6 +60,15 @@ def safe_int(v: object) -> int | None:
     if pd.isna(v):
         return None
     return int(v)
+
+
+logger = logging.getLogger(__name__)
+
+#: Salvage a date out of a line that is not valid JSON — a run killed
+#: mid-write leaves a truncated tail, and the date is usually the first key.
+#: Used ONLY to keep that date out of the append set; the broken line is never
+#: repaired or reinterpreted as data.
+_DATE_IN_RAW = re.compile(r'"date"\s*:\s*"(\d{4}-\d{2}-\d{2})"')
 
 
 def existing_dates(path: Path) -> set[str]:
@@ -149,13 +160,20 @@ def build_new_rows(df: pd.DataFrame, existing: set[str]) -> list[tuple[str, str]
     return rows_to_append
 
 
-def append_new_rows(path: Path, df: pd.DataFrame) -> int:
+def append_new_rows(
+    path: Path, df: pd.DataFrame, *, skip_dates: set[str] | None = None
+) -> int:
     """Append every new daily row in ``df`` to the ``{SYMBOL}.jsonl`` store at ``path``.
 
     Reads the existing dates from ``path``, keeps only unseen dates (idempotent
     re-write), and appends them in date order. Returns the number of rows written.
+
+    ``skip_dates`` adds dates to treat as already present. Its one caller is
+    ``merge_rows``'s degraded path: a date carried only by an unparseable line
+    is invisible to ``existing_dates``, so without this the store would gain a
+    second row for it (2026-08-07 review, W2.5).
     """
-    existing = existing_dates(path)
+    existing = existing_dates(path) | (skip_dates or set())
     path.parent.mkdir(parents=True, exist_ok=True)
     rows_to_append = build_new_rows(df, existing)
     if rows_to_append:
@@ -312,6 +330,7 @@ def merge_rows(
     # row without moving it.
     stored: dict[str, str] = {}
     unparseable = 0
+    salvaged_dates: set[str] = set()
     if path.exists():
         with path.open(encoding="utf-8") as f:
             for line in f:
@@ -322,13 +341,33 @@ def merge_rows(
                     d = json.loads(line).get("date")
                 except (json.JSONDecodeError, AttributeError):
                     unparseable += 1
+                    salvage = _DATE_IN_RAW.search(line)
+                    if salvage:
+                        salvaged_dates.add(salvage.group(1))
                     continue
                 if d:
                     stored[d] = line
                 else:
                     unparseable += 1
     if unparseable:
-        return MergeResult(append_new_rows(path, df), 0)
+        # Degrading to append-only preserves the broken line (a rewrite from a
+        # date-keyed map would drop it), but it is not a free pass: revision is
+        # now OFF for this symbol, permanently and for every future run, and
+        # until 2026-08-07 (W2.5) that happened in total silence.
+        logger.warning(
+            "%s: %d unparseable line(s) — revision is DISABLED for this symbol "
+            "until the file is repaired. Every still-forming bar it holds will "
+            "stay frozen at its partial value.",
+            path.name,
+            unparseable,
+        )
+        # A date only the broken line carries is absent from `existing_dates`,
+        # so append_new_rows would write a SECOND row for it. Salvaging the
+        # date out of the raw text keeps the duplicate out; a date we cannot
+        # salvage is still exposed, which the warning above is the notice of.
+        return MergeResult(
+            append_new_rows(path, df, skip_dates=salvaged_dates), 0, 0
+        )
 
     symbol = path.stem
     # The newest stored close, used as the reference for a brand-new row.

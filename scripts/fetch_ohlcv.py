@@ -212,6 +212,12 @@ def _crypto_symbols() -> list[str]:
     return sorted(symbols)
 
 
+#: Fraction of symbols that may return nothing before the run is a failure
+#: rather than a set of delistings. See the exit path in `main` for why this is
+#: a rate and not a count.
+MAX_FAILURE_RATE = 0.10
+
+
 def _fetch_symbol(symbol: str, start: date, end: date) -> pd.DataFrame | None:
     """Fetch OHLCV for a single symbol. Returns None on failure."""
     try:
@@ -227,6 +233,12 @@ def _fetch_symbol(symbol: str, start: date, end: date) -> pd.DataFrame | None:
         print(f"  ! {symbol}: download error — {exc}", file=sys.stderr)
         return None
     if df is None or df.empty:
+        # Silent until 2026-08-07 (W2.5). An empty frame is how a delisting, a
+        # renamed symbol and a vendor-side outage all present, and they are
+        # indistinguishable here — but a run where hundreds of them happen at
+        # once is very distinguishable from one where two do, and that is the
+        # signal the exit code below is built on.
+        print(f"  ! {symbol}: vendor returned no rows", file=sys.stderr)
         return None
     return _normalise_vendor_units(symbol, flatten_columns(df))
 
@@ -588,6 +600,31 @@ def main() -> int:
     # failure-issue action, which files a persistent issue.
     if total_quarantined:
         return 1
+
+    # Neither must a run in which the vendor answered for almost nothing
+    # (2026-08-07 review, W2.5). This script exited 0 regardless of the
+    # failure count, so a total Yahoo outage produced a green run, "No OHLCV
+    # changes to commit", and a session pricing a stale store the next evening
+    # with nothing anywhere saying the data had not arrived.
+    #
+    # The threshold is a rate, not a count: individually dead symbols are
+    # normal and permanent here (MATIC-USD and UNI-USD have served nothing
+    # since March and April 2025), so any absolute floor would either fire
+    # every night or never. 10% of ~1,150 symbols is ~115 — two orders of
+    # magnitude above the handful of known-dead names, and far below what any
+    # real outage looks like.
+    if not args.names_only and symbols:
+        failure_rate = failures / len(symbols)
+        if failure_rate > MAX_FAILURE_RATE:
+            print(
+                f"\nFAILED: {failures} of {len(symbols)} symbols returned no "
+                f"data ({failure_rate:.0%}, limit {MAX_FAILURE_RATE:.0%}). "
+                "This is a vendor-side or network failure, not a set of "
+                "delistings. The store has NOT been refreshed; a session "
+                "running against it tonight would price at stale closes.",
+                file=sys.stderr,
+            )
+            return 1
     return 0
 
 

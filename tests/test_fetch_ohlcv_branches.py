@@ -587,7 +587,14 @@ def test_resweep_held_does_not_require_an_explicit_symbol_list(
     to run a full-window resweep WITHOUT an explicit --symbols list, since it
     resolves its own from _collect_holdings()."""
     monkeypatch.setattr(fo, "_collect_holdings", lambda: {"AAPL"})
-    monkeypatch.setattr(fo, "_fetch_symbol", lambda symbol, start, end: None)
+    # The symbol must actually resolve: since W2.5 a run where every symbol
+    # comes back empty exits 1, so stubbing `_fetch_symbol` to None would test
+    # the failure-rate guard instead of the symbol-list resolution this is about.
+    monkeypatch.setattr(
+        fo,
+        "_fetch_symbol",
+        _make_fake_fetch_symbol({"AAPL": {"2026-08-06": [1, 2, 0.5, 1.5, 1.5, 100]}}),
+    )
     monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
     rc = _run_main(monkeypatch, ["--resweep-held"])
     assert rc == 0
@@ -679,3 +686,71 @@ def test_resweep_held_detects_a_split_within_a_90_day_window(
     position = next(p for p in holder.positions if p.ticker == "CRWD")
     assert position.shares == pytest.approx(12.0)
     assert position.avg_cost == pytest.approx(100.0)
+
+
+# ---------------------------------------------------------------------------
+# Mass-failure exit code (2026-08-07 review, W2.5)
+# ---------------------------------------------------------------------------
+
+
+def _all_symbols_fail(symbol: str, start: date, end: date):
+    return None
+
+
+class TestFailureRateGate:
+    """`fetch_ohlcv.py` exited 0 regardless of the failure count, so a total
+    vendor outage produced a green run, "No OHLCV changes to commit", and a
+    session pricing a stale store the next evening — with nothing anywhere
+    saying the data had not arrived."""
+
+    def test_total_outage_exits_nonzero(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        monkeypatch.setattr(fo, "_fetch_symbol", _all_symbols_fail)
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+
+        rc = _run_main(monkeypatch, ["--symbols", "AAPL,MSFT,SAP.DE,BP.L"])
+
+        assert rc == 1
+        assert "vendor-side or network failure" in capsys.readouterr().err
+
+    def test_a_few_dead_symbols_are_not_a_failure(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The control, and the reason the threshold is a rate rather than a
+        count: `MATIC-USD` and `UNI-USD` have served nothing since March and
+        April 2025. Any absolute floor would fire every night or never."""
+        good = _make_fake_fetch_symbol(
+            {s: {"2026-08-06": [1, 2, 0.5, 1.5, 1.5, 100]} for s in _MANY[:-1]}
+        )
+        monkeypatch.setattr(fo, "_fetch_symbol", good)
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+
+        rc = _run_main(monkeypatch, ["--symbols", ",".join(_MANY)])
+        assert rc == 0  # 1 of 20 dead = 5%, under the 10% limit
+
+    def test_the_threshold_binds_just_past_the_limit(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The falsifying pair for the rate itself."""
+        # 3 of 20 = 15%, over the limit.
+        good = _make_fake_fetch_symbol(
+            {s: {"2026-08-06": [1, 2, 0.5, 1.5, 1.5, 100]} for s in _MANY[:-3]}
+        )
+        monkeypatch.setattr(fo, "_fetch_symbol", good)
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+
+        assert _run_main(monkeypatch, ["--symbols", ",".join(_MANY)]) == 1
+
+    def test_empty_vendor_frame_is_reported_on_stderr(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        """An empty frame used to return None without a word."""
+        monkeypatch.setattr(
+            fo.yf, "download", lambda *a, **k: pd.DataFrame()
+        )
+        assert fo._fetch_symbol("AAPL", date(2026, 8, 1), date(2026, 8, 6)) is None
+        assert "AAPL: vendor returned no rows" in capsys.readouterr().err
+
+
+_MANY = [f"SYM{i}" for i in range(20)]

@@ -857,3 +857,93 @@ def test_quarantine_lives_outside_the_store_directory():
     source = inspect.getsource(fetch_ohlcv._write_rows)
     assert '"quarantine"' in source
     assert "ohlcv_dir" not in source.split("quarantine")[1]
+
+
+# ---------------------------------------------------------------------------
+# Corrupt store lines: loud, and no duplicate re-append (W2.5)
+# ---------------------------------------------------------------------------
+
+
+class TestUnparseableLineDegradation:
+    """A store file with one bad line silently disabled revision for that
+    symbol — permanently, for every future run — and then re-appended the
+    date the bad line carried, because `existing_dates` could not see it."""
+
+    def test_degradation_warns(self, tmp_path: Path, caplog) -> None:
+        import logging
+
+        path = tmp_path / "BTC-EUR.jsonl"
+        path.write_text(
+            json.dumps(_rec("2026-08-03", 100.0)) + "\n" + '{"date": "2026-08-04"\n',
+            encoding="utf-8",
+        )
+        df = _yf_frame({"2026-08-05": [1, 2, 0.5, 110.0, 110.0, 100]})
+
+        with caplog.at_level(logging.WARNING, logger="engine.ohlcv_ingest"):
+            merge_rows(path, df, revise_from="2026-08-04")
+
+        assert "revision is DISABLED" in caplog.text
+        assert "BTC-EUR.jsonl" in caplog.text
+
+    def test_the_broken_lines_date_is_not_re_appended(self, tmp_path: Path) -> None:
+        """The duplicate. The bad line carries 2026-08-04; the fetched frame
+        also carries it; `existing_dates` cannot parse it, so without the
+        salvage the store gains a SECOND row for that date."""
+        path = tmp_path / "BTC-EUR.jsonl"
+        path.write_text(
+            json.dumps(_rec("2026-08-03", 100.0))
+            + "\n"
+            + '{"date": "2026-08-04", "close": 105.0, "open"\n',
+            encoding="utf-8",
+        )
+        df = _yf_frame(
+            {
+                "2026-08-04": [1, 2, 0.5, 106.0, 106.0, 100],
+                "2026-08-05": [1, 2, 0.5, 110.0, 110.0, 100],
+            }
+        )
+
+        merge_rows(path, df, revise_from="2026-08-04")
+
+        lines = [ln for ln in path.read_text().splitlines() if ln.strip()]
+        dates = []
+        for ln in lines:
+            try:
+                dates.append(json.loads(ln)["date"])
+            except json.JSONDecodeError:
+                dates.append("2026-08-04")  # the broken line, by inspection
+        assert sorted(dates) == ["2026-08-03", "2026-08-04", "2026-08-05"]
+
+    def test_the_broken_line_survives(self, tmp_path: Path) -> None:
+        """Append-only degradation exists to preserve it — a rewrite from a
+        date-keyed map would drop the line entirely."""
+        path = tmp_path / "BTC-EUR.jsonl"
+        broken = '{"date": "2026-08-04", "close": 105.0, "open"'
+        path.write_text(
+            json.dumps(_rec("2026-08-03", 100.0)) + "\n" + broken + "\n",
+            encoding="utf-8",
+        )
+        merge_rows(
+            path,
+            _yf_frame({"2026-08-05": [1, 2, 0.5, 110.0, 110.0, 100]}),
+            revise_from="2026-08-04",
+        )
+        assert broken in path.read_text()
+
+    def test_a_clean_store_still_revises(self, tmp_path: Path, caplog) -> None:
+        """The control: the warning must not fire, and revision must still
+        work, on a store with no bad lines."""
+        import logging
+
+        path = tmp_path / "BTC-EUR.jsonl"
+        _write_store(path, [_rec("2026-08-03", 100.0), _rec("2026-08-04", 105.0)])
+
+        with caplog.at_level(logging.WARNING, logger="engine.ohlcv_ingest"):
+            result = merge_rows(
+                path,
+                _yf_frame({"2026-08-04": [1, 2, 0.5, 106.0, 106.0, 100]}),
+                revise_from="2026-08-04",
+            )
+
+        assert result.revised == 1
+        assert "revision is DISABLED" not in caplog.text
