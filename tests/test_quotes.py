@@ -35,8 +35,9 @@ from engine.config import get_config
 from engine.quotes import (
     Quote,
     latest_price,
-    normalise_quote,
-    quote_currency,
+    normalise_vendor_quote,
+    store_quote,
+    vendor_quote_unit,
     ticker_currency,
 )
 
@@ -84,9 +85,9 @@ def test_lse_pence_tickers_resolve_to_gbp_at_one_hundredth(
 ) -> None:
     """Yahoo reports `GBp` for these four. GBp is pence: ISO GBP, scale 1/100."""
     _seed_registry({ticker: "GBp"})
-    assert quote_currency(ticker) == "GBp"
+    assert vendor_quote_unit(ticker) == "GBp"
     assert ticker_currency(ticker) == "GBP"
-    assert normalise_quote(ticker, 116.60) == Quote(pytest.approx(1.166), "GBP")
+    assert normalise_vendor_quote(ticker, 116.60) == Quote(pytest.approx(1.166), "GBP")
 
 
 def test_phag_l_is_usd_not_gbp(midas_data_root: Path) -> None:
@@ -97,7 +98,7 @@ def test_phag_l_is_usd_not_gbp(midas_data_root: Path) -> None:
     """
     _seed_registry({"PHAG.L": "USD"})
     assert ticker_currency("PHAG.L") == "USD"
-    assert normalise_quote("PHAG.L", 54.87) == Quote(pytest.approx(54.87), "USD")
+    assert normalise_vendor_quote("PHAG.L", 54.87) == Quote(pytest.approx(54.87), "USD")
 
 
 @pytest.mark.parametrize(
@@ -152,7 +153,7 @@ def test_heuristic_is_the_fallback_when_the_vendor_is_silent(
     assert ticker_currency("BTC-EUR") == "EUR"
     # The LSE default quoting convention is pence, so an unregistered `.L`
     # falls back to GBp rather than GBP.
-    assert quote_currency("UNKNOWN.L") == "GBp"
+    assert vendor_quote_unit("UNKNOWN.L") == "GBp"
     assert ticker_currency("UNKNOWN.L") == "GBP"
 
 
@@ -166,13 +167,13 @@ def test_the_heuristic_keys_on_the_exact_suffix_not_a_string_ending(
     made the collisions real (`OL`/`L`, `AT`/`T`, `TO`/`O`).
     """
     _seed_registry({})
-    assert quote_currency("EQNR.OL") == "NOK"
-    assert quote_currency("LLOY.L") == "GBp"
-    assert quote_currency("OPAP.AT") == "EUR"
-    assert quote_currency("7203.T") == "JPY"
-    assert quote_currency("RY.TO") == "CAD"
+    assert vendor_quote_unit("EQNR.OL") == "NOK"
+    assert vendor_quote_unit("LLOY.L") == "GBp"
+    assert vendor_quote_unit("OPAP.AT") == "EUR"
+    assert vendor_quote_unit("7203.T") == "JPY"
+    assert vendor_quote_unit("RY.TO") == "CAD"
     # An unenumerated suffix keeps the pre-existing USD default.
-    assert quote_currency("FOO.ZZ") == "USD"
+    assert vendor_quote_unit("FOO.ZZ") == "USD"
 
 
 def test_registry_entry_without_a_currency_falls_back(midas_data_root: Path) -> None:
@@ -184,16 +185,52 @@ def test_registry_entry_without_a_currency_falls_back(midas_data_root: Path) -> 
 
 
 # ---------------------------------------------------------------------------
-# 3. The /100 happens exactly once — latest_price is the single store reader
+# 3. The /100 happens exactly once — at INGEST, not on any read path
 # ---------------------------------------------------------------------------
 
 
-def test_latest_price_normalises_the_store_quote(midas_data_root: Path) -> None:
+def test_latest_price_passes_the_store_quote_through(midas_data_root: Path) -> None:
+    """The store is ISO-denominated, so the reader must NOT scale.
+
+    Since 2026-08-07 `scripts.fetch_ohlcv._normalise_vendor_units` divides on
+    the way in. A reader that scaled again would halve-by-100 every LSE price
+    — the mirror image of the defect this module was written to fix.
+    """
     _seed_registry({"LLOY.L": "GBp"})
-    _seed_ohlcv("LLOY.L", 116.60)
+    _seed_ohlcv("LLOY.L", 1.1660)
     assert latest_price("LLOY.L", date(2026, 6, 1)) == Quote(
         pytest.approx(1.166), "GBP"
     )
+
+
+def test_ingest_scales_a_vendor_pence_frame_into_the_store(
+    midas_data_root: Path,
+) -> None:
+    """The counterpart: the division exists, and it lives at ingest.
+
+    Volume is a share count and must survive unscaled — scaling it would be
+    silent and invisible in every price-based assertion.
+    """
+    import pandas as pd
+
+    from scripts.fetch_ohlcv import _normalise_vendor_units
+
+    _seed_registry({"LLOY.L": "GBp"})
+    frame = pd.DataFrame(
+        {
+            "Open": [116.0],
+            "High": [117.0],
+            "Low": [115.0],
+            "Close": [116.60],
+            "Adj Close": [116.60],
+            "Volume": [7_107_333],
+        },
+        index=[pd.Timestamp("2026-06-01")],
+    )
+    out = _normalise_vendor_units("LLOY.L", frame)
+    assert out["Close"].iloc[0] == pytest.approx(1.1660)
+    assert out["Open"].iloc[0] == pytest.approx(1.16)
+    assert out["Volume"].iloc[0] == 7_107_333
 
 
 def test_latest_price_is_none_when_the_store_has_no_row(midas_data_root: Path) -> None:
@@ -201,19 +238,19 @@ def test_latest_price_is_none_when_the_store_has_no_row(midas_data_root: Path) -
     assert latest_price("LLOY.L", date(2026, 6, 1)) is None
 
 
-def test_normalise_quote_is_idempotent_in_currency_but_not_in_price(
+def test_normalise_vendor_quote_is_idempotent_in_currency_but_not_in_price(
     midas_data_root: Path,
 ) -> None:
     """Guards against a second caller re-applying the scale.
 
-    `normalise_quote` takes a RAW store quote and returns an ISO-denominated
-    one. Feeding its own output back in divides by 100 again — which is
-    exactly the double-application this test exists to make visible if a
-    future caller pipes one into the other.
+    `normalise_vendor_quote` takes a RAW VENDOR quote and returns an
+    ISO-denominated one. Feeding its own output back in divides by 100 again
+    — exactly the double-application this test exists to make visible. It is
+    why the read path uses `store_quote`, which cannot scale at all.
     """
     _seed_registry({"LLOY.L": "GBp"})
-    once = normalise_quote("LLOY.L", 116.60)
-    twice = normalise_quote("LLOY.L", once.price)
+    once = normalise_vendor_quote("LLOY.L", 116.60)
+    twice = normalise_vendor_quote("LLOY.L", once.price)
     assert once.price == pytest.approx(1.166)
     assert twice.price == pytest.approx(0.01166)
     assert once.currency == twice.currency == "GBP"
@@ -236,7 +273,10 @@ def test_paper_broker_reexport_still_resolves(midas_data_root: Path) -> None:
 # ---------------------------------------------------------------------------
 
 _LLOY_SHARES = 8.0
+#: What the vendor serves. The store holds `_LLOY_GBP` — since 2026-08-07 the
+#: pence→pounds division happens at ingest, so nothing downstream re-applies it.
 _LLOY_PENCE = 116.60
+_LLOY_GBP = _LLOY_PENCE / 100.0
 _EURGBP = 0.85
 # 8 * 1.1660 GBP = 9.328 GBP; GBP->EUR = 1/0.85.
 _LLOY_EUR = _LLOY_SHARES * (_LLOY_PENCE / 100.0) / _EURGBP
@@ -245,7 +285,7 @@ _LLOY_EUR = _LLOY_SHARES * (_LLOY_PENCE / 100.0) / _EURGBP
 @pytest.fixture
 def _gbp_book(midas_data_root: Path) -> Path:
     _seed_registry({"LLOY.L": "GBp"})
-    _seed_ohlcv("LLOY.L", _LLOY_PENCE)
+    _seed_ohlcv("LLOY.L", _LLOY_GBP)
     _seed_ohlcv("EURGBP=X", _EURGBP)
     return midas_data_root
 
@@ -326,7 +366,7 @@ def test_fill_path_books_a_pence_order_in_pounds(_gbp_book: Path) -> None:
 
 
 def test_triggered_fire_books_a_pence_order_in_pounds(_gbp_book: Path) -> None:
-    """The watcher hands `_execute_triggered_order` a RAW quote too."""
+    """The watcher reads the store, so it hands over an ISO price already."""
     from engine.orders import Order
     from engine.paper_broker import _execute_triggered_order
     from engine.portfolio import PortfolioManager
@@ -343,10 +383,10 @@ def test_triggered_fire_books_a_pence_order_in_pounds(_gbp_book: Path) -> None:
         reasoning="pence regression",
         currency="EUR",
     )
-    fill = _execute_triggered_order(order, date(2026, 6, 1), pm, _LLOY_PENCE)
+    fill = _execute_triggered_order(order, date(2026, 6, 1), pm, _LLOY_GBP)
     assert fill is not None and fill.status == "filled"
     assert fill.fill_currency == "GBP"
-    assert fill.fill_price == pytest.approx(_LLOY_PENCE / 100.0)
+    assert fill.fill_price == pytest.approx(_LLOY_GBP)
     assert fill.notional_base == pytest.approx(_LLOY_EUR)
 
 

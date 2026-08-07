@@ -147,6 +147,22 @@ def compute_coin_flip(
     SelectN step is needed; LimitWeights stays as a safety valve for days when
     the available universe (after dropna) is smaller than max_positions, which
     would otherwise let WeighEqually allocate >1/max_positions to a single name.
+
+    **This series is NOT invariant to the scale its prices are quoted in**, and
+    that is worth knowing before any future rescaling of the store. `bt.Backtest`
+    defaults to ``integer_positions=True``, so share counts are rounded down and
+    the residue depends on absolute price: at 116 a €2,000 sleeve buys 17 shares,
+    at 1.16 it buys 1,724, and the leftover cash differs. Normalising the store
+    from pence to pounds on 2026-08-07 therefore moved this control by up to
+    **3.79%** on a single day (`goldfinger`, 2026-07-31) even though no return
+    changed — the series was restated onto the new basis rather than left with a
+    seam. The passive benchmark next door has no such exposure: it is computed
+    from price *ratios*, which cancel any constant factor.
+
+    So a stock split, a new sub-unit ticker, or any other rescaling will shift
+    this curve again. Fixing it permanently means ``integer_positions=False``,
+    which was considered and declined: a control that cannot hold a whole share
+    is less honest about what a random trader could actually have done.
     """
     import bt as _bt
 

@@ -73,7 +73,7 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 from engine.config import get_config
 from engine.fees import fee_for
 from engine.fx import convert
-from engine.quotes import quote_currency, ticker_currency
+from engine.quotes import ticker_currency, vendor_quote_unit
 from engine.restatement import replay_holdings
 
 NOTE = (
@@ -118,7 +118,7 @@ def _correction_factor(
     """
     old_ccy = _old_currency(ticker, overrides)
     new_ccy = ticker_currency(ticker)
-    unit_scale = 0.01 if quote_currency(ticker) == "GBp" else 1.0
+    unit_scale = 0.01 if vendor_quote_unit(ticker) == "GBp" else 1.0
 
     if old_ccy == new_ccy and unit_scale == 1.0:
         return 1.0, old_ccy, new_ccy
@@ -177,7 +177,7 @@ def reconcile(apply: bool) -> int:
             if factor == 1.0:
                 continue
 
-            unit_scale = 0.01 if quote_currency(trade["ticker"]) == "GBp" else 1.0
+            unit_scale = 0.01 if vendor_quote_unit(trade["ticker"]) == "GBp" else 1.0
             new_total = trade["total"] * factor
             new_price = trade["price"] * unit_scale
             # Pre-fee-model fills carry 0.0 and must not acquire a fee.
@@ -262,7 +262,7 @@ def reconcile(apply: bool) -> int:
             portfolio["cash"] = new_cash
             for pos in portfolio.get("positions", []):
                 if (
-                    quote_currency(pos["ticker"]) == "GBp"
+                    vendor_quote_unit(pos["ticker"]) == "GBp"
                     and pos.get("reconciliation_note") != NOTE
                 ):
                     pos.setdefault("originally_recorded", {}).setdefault(

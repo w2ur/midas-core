@@ -39,7 +39,7 @@ from engine.orders import Fill, Order, append_fill, inbox_order_ids
 from engine.quotes import (
     _load_ticker_currency_overrides,  # noqa: F401 — re-exported, see below
     latest_price,
-    normalise_quote,
+    store_quote,
     ticker_currency,
 )
 from engine.triggers import (
@@ -545,7 +545,7 @@ def _execute_triggered_order(
     Differences from market-order processing:
       - `fire_price` is the live price observed by the watcher, used as fill_price
         instead of a store read. It arrives as a RAW vendor quote and is
-        normalised here via `engine.quotes.normalise_quote` (pence → pounds for
+        denominated by `engine.quotes.store_quote`; the pence→pounds scaling for
         an LSE listing), so the rails (notional cap, cash check, position check)
         are evaluated in the ticker's ISO currency, exactly as on the market-fill
         path.
@@ -585,12 +585,14 @@ def _execute_triggered_order(
     config = AgentConfig.load(order.agent_id)
     portfolio = portfolio_manager.load(order.agent_id)
     base_ccy = portfolio.currency
-    # `fire_price` is a RAW vendor quote — the watcher reads it from ccxt or
-    # from the OHLCV store, both of which publish LSE prices in pence. This is
-    # the one pricing path that cannot go through latest_price (the price is
-    # handed in, not read here), so it normalises explicitly. `fire_price` is
-    # rebound so nothing downstream can use the un-normalised value.
-    fire_price, ticker_ccy = normalise_quote(order.ticker, fire_price)
+    # `fire_price` comes from the watcher, which reads it from ccxt or from the
+    # OHLCV store — both ISO-denominated since the store was normalised at
+    # ingest (2026-08-07). This is the one pricing path that cannot go through
+    # latest_price (the price is handed in, not read here), so it attaches the
+    # currency explicitly rather than pairing the raw value with
+    # `ticker_currency` by hand. It must NOT scale: doing so would divide every
+    # LSE fire price by 100 a second time.
+    fire_price, ticker_ccy = store_quote(order.ticker, fire_price)
     notional_native = order.shares * fire_price
 
     if ticker_ccy == base_ccy:

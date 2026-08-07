@@ -201,12 +201,17 @@ def _heuristic_unit(ticker: str) -> str:
     return "USD"
 
 
-def quote_currency(ticker: str) -> str:
-    """The unit the store's prices for `ticker` are denominated in.
+def vendor_quote_unit(ticker: str) -> str:
+    """The unit the VENDOR quotes `ticker` in.
 
     May be a sub-unit code (`GBp`) — this is the raw answer, not an ISO
-    code. Use `ticker_currency` for the ISO code and `normalise_quote` /
-    `latest_price` to get a price you can pass to `engine.fx.convert`.
+    code. It describes what arrives from yfinance, **not** what is in the
+    store: since 2026-08-07 the store is normalised to ISO at ingest (see
+    the module docstring), so a stored LSE close is already pounds.
+
+    Callers wanting a price to hand to `engine.fx.convert` want
+    `latest_price` (store) — this function is for the ingest path and for
+    the registry, which records the vendor's own answer verbatim.
     """
     overrides = _load_ticker_currency_overrides()
     if ticker in overrides:
@@ -234,44 +239,68 @@ def ticker_currency(ticker: str) -> str:
 
     `GBp` (pence) resolves to `GBP`: the sub-unit is a quoting convention,
     not a currency, and `engine.fx` only knows ISO codes. The 1/100 that
-    goes with it is applied to the *price*, by `normalise_quote`.
+    goes with it is applied to the *price* once, at ingest, by
+    `normalise_vendor_quote`.
     """
-    return _iso_and_scale(quote_currency(ticker))[0]
+    return _iso_and_scale(vendor_quote_unit(ticker))[0]
 
 
-def normalise_quote(ticker: str, raw_price: float) -> Quote:
-    """Convert a RAW store/vendor quote for `ticker` into its ISO currency.
+def vendor_unit_scale(ticker: str) -> float:
+    """Multiplier taking a VENDOR price for `ticker` to its ISO currency.
 
-    This is the only place the pence→pounds division exists. Every pricing
-    path (the fill path in `engine.paper_broker`, `engine.valuation`,
-    `engine.restatement`, `scripts.daily_session`) reaches a normalised
-    price through this function or through `latest_price`, which wraps it —
-    so the conversion cannot be applied by one caller and skipped by
-    another, nor applied twice by two callers each assuming the other
-    didn't.
-
-    `raw_price` must be a quote as stored (`data/market/ohlcv/*.jsonl`) or
-    as observed live by the trigger watcher — never the output of a previous
-    `normalise_quote` call.
+    `0.01` for a pence-quoted LSE line, `1.0` for everything else. This is
+    the ingest-side counterpart of `ticker_currency`, and the only reason a
+    caller should ever need it is to normalise a freshly fetched frame —
+    `scripts.fetch_ohlcv._fetch_symbol` does exactly that, which is what
+    keeps the store ISO-denominated.
     """
-    iso, scale = _iso_and_scale(quote_currency(ticker))
-    return Quote(raw_price * scale, iso)
+    return _iso_and_scale(vendor_quote_unit(ticker))[1]
+
+
+def normalise_vendor_quote(ticker: str, vendor_price: float) -> Quote:
+    """Convert a raw VENDOR quote for `ticker` into its ISO currency.
+
+    This is the only place the pence→pounds division exists, and since
+    2026-08-07 it lives on the **ingest** side of the store rather than the
+    read side. `vendor_price` must be a price as yfinance served it — never
+    a value read back from `data/market/ohlcv/*.jsonl`, which is already
+    normalised, and never the output of a previous call.
+
+    Read paths want `store_quote` / `latest_price` instead. Splitting the
+    two is what makes double-application structurally impossible: before,
+    every reader had to remember to normalise, and three of them did not.
+    """
+    iso, scale = _iso_and_scale(vendor_quote_unit(ticker))
+    return Quote(vendor_price * scale, iso)
+
+
+def store_quote(ticker: str, stored_price: float) -> Quote:
+    """Attach the ISO currency to a price read from the store.
+
+    Deliberately applies **no** scaling: the store is ISO-denominated at
+    ingest, so a stored value is already in `ticker_currency(ticker)`. This
+    exists rather than having callers pair the raw reader with
+    `ticker_currency` by hand, because that hand-pairing is exactly what
+    dropped the conversion on three pricing paths at once.
+    """
+    return Quote(stored_price, ticker_currency(ticker))
 
 
 def latest_price(
     ticker: str, on: date | None = None, store: Path | None = None
 ) -> Quote | None:
-    """Latest close on or before `on`, normalised to the ticker's ISO currency.
+    """Latest close on or before `on`, in the ticker's ISO currency.
 
     Thin composition of `engine.ohlcv_store.latest_close_on_or_before` and
-    `normalise_quote`. Returns `None` on exactly the same condition the raw
+    `store_quote`. Returns `None` on exactly the same condition the raw
     reader does — ticker absent from the store, or no row on or before `on`.
 
-    Prefer this over calling the raw reader plus `ticker_currency`
-    separately: that pair is what silently dropped the pence conversion on
-    three pricing paths at once.
+    No scaling happens here: the store is normalised at ingest. Prefer this
+    over calling the raw reader plus `ticker_currency` separately — that
+    pair is what silently dropped the pence conversion on three pricing
+    paths at once, and it would now silently reintroduce it.
     """
     raw = latest_close_on_or_before(ticker, on, store=store)
     if raw is None:
         return None
-    return normalise_quote(ticker, raw)
+    return store_quote(ticker, raw)

@@ -30,6 +30,7 @@ import yfinance as yf
 
 from engine.config import get_config
 from engine.corporate_actions import detect_split
+from engine.quotes import vendor_unit_scale
 from engine.ohlcv_ingest import (
     existing_dates as _existing_dates,
     fetch_window_start,
@@ -226,7 +227,37 @@ def _fetch_symbol(symbol: str, start: date, end: date) -> pd.DataFrame | None:
         return None
     if df is None or df.empty:
         return None
-    return flatten_columns(df)
+    return _normalise_vendor_units(symbol, flatten_columns(df))
+
+
+#: Price columns yfinance serves in the vendor's quote unit. `Volume` is a
+#: share count, not a price, and must never be scaled.
+_PRICE_COLUMNS = ("Open", "High", "Low", "Close", "Adj Close")
+
+
+def _normalise_vendor_units(symbol: str, df: pd.DataFrame) -> pd.DataFrame:
+    """Scale a fetched frame from the vendor's quote unit into ISO currency.
+
+    The LSE quotes in pence, so yfinance serves `LLOY.L` at 116.60 meaning
+    GBP 1.166. **The store is ISO-denominated**, so that division happens
+    here, once, on the way in — rather than in every one of the many places
+    that later read a price back out. Three read paths forgot it before it
+    was centralised, and centralising it on the read side still left agents
+    reading raw pence out of the store while their books were in pounds.
+
+    Applies to the freshly fetched frame only, which is also what
+    `engine.corporate_actions.detect_split` compares against the store — so
+    the two stay in the same units and a normalised store does not read as a
+    clean 100:1 "split" on every London ticker.
+    """
+    scale = vendor_unit_scale(symbol)
+    if scale == 1.0:
+        return df
+    out = df.copy()
+    for column in _PRICE_COLUMNS:
+        if column in out.columns:
+            out[column] = out[column] * scale
+    return out
 
 
 def _write_rows(

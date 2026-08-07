@@ -152,14 +152,16 @@ def test_mtm_eur_returns_none_without_fx_rate(midas_data_root) -> None:
 def test_mtm_converts_non_native_currency_position(midas_data_root) -> None:
     # EUR book holding a sterling-listed (".L" suffix) ticker.
     #
-    # The store price is 500 — five hundred PENCE, not five hundred pounds.
-    # The LSE quotes in pence and `engine.quotes` normalises that to GBP 5.00
-    # before any FX conversion happens. This fixture used to read 5.0 and
-    # assert 50 GBP native, which silently encoded the defect (a `.L` quote
-    # treated as pounds, i.e. 100x). Dedicated pence coverage lives in
-    # tests/test_quotes.py; the assertion here is unchanged because the
-    # fixture price was rescaled to keep the same real-world value.
-    _seed_ohlcv("TSCO.L", 500.0)
+    # The store price is 5.00 — five POUNDS. Since 2026-08-07 the store is
+    # ISO-denominated: the LSE's pence are divided by 100 at ingest, in
+    # scripts.fetch_ohlcv._normalise_vendor_units, so no read path scales.
+    # This fixture has now held all three values in turn — 5.0 encoding the
+    # original defect (a `.L` quote read as pounds when the store held pence),
+    # 500.0 under the read-side normalisation that replaced it, and 5.0 again
+    # now that the division moved to ingest. The assertion never changed,
+    # because the real-world position never did. Dedicated unit coverage for
+    # where the division lives is in tests/test_quotes.py.
+    _seed_ohlcv("TSCO.L", 5.0)
     # Stored EURGBP=X close is EUR→GBP; GBP→EUR = 1/close.
     _seed_ohlcv("EURGBP=X", 0.85)
     summary = {
