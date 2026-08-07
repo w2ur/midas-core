@@ -1,179 +1,228 @@
 {
   "1COV.DE": {
     "name": "Covestro AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "3EUS.L": {
     "name": "WisdomTree EURO STOXX 50 3x Daily Short",
-    "type": "etf"
+    "type": "etf",
+    "currency": "EUR"
   },
   "3UKS.L": {
     "name": "WisdomTree FTSE 100 3x Daily Short",
-    "type": "etf"
+    "type": "etf",
+    "currency": "GBp"
   },
   "3USL.L": {
     "name": "WisdomTree S&P 500 3x Daily Leveraged",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "3USS.L": {
     "name": "WisdomTree S&P 500 3x Daily Short",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "4GLD.DE": {
     "name": "Xetra-Gold",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "8TRA.DE": {
     "name": "Traton SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "A": {
     "name": "Agilent Technologies, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AAF.L": {
     "name": "Airtel Africa Plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "AAL.L": {
     "name": "Anglo American plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "AAPL": {
     "name": "Apple Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ABBN.SW": {
     "name": "ABB Ltd",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "ABBV": {
     "name": "AbbVie Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
+  },
+  "ABDN.L": {
+    "name": "Aberdeen Group Plc",
+    "type": "equity",
+    "currency": "GBp"
   },
   "ABF.L": {
     "name": "Associated British Foods plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "ABI.BR": {
     "name": "Anheuser-Busch InBev SA/NV",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ABN.AS": {
     "name": "ABN AMRO Bank N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ABNB": {
     "name": "Airbnb, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ABT": {
     "name": "Abbott Laboratories",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AC.PA": {
     "name": "Accor SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ACA.PA": {
     "name": "Crédit Agricole S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ACGL": {
     "name": "Arch Capital Group Ltd.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ACN": {
     "name": "Accenture plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ACS.MC": {
     "name": "ACS, Actividades de Construcción y Servicios, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ACX.MC": {
     "name": "Acerinox, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ADA-EUR": {
     "name": "Cardano EUR",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "EUR"
   },
   "ADA-USD": {
     "name": "Cardano USD",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "USD"
   },
   "ADBE": {
     "name": "Adobe Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ADEN.SW": {
     "name": "Adecco Group AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "ADH.OL": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "ADI": {
     "name": "Analog Devices, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ADM": {
     "name": "Archer-Daniels-Midland Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ADM.L": {
     "name": "Admiral Group plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "ADP": {
     "name": "Automatic Data Processing, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ADS.DE": {
     "name": "adidas AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ADSK": {
     "name": "Autodesk, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ADYEN.AS": {
     "name": "Adyen N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "AEE": {
     "name": "Ameren Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AENA.MC": {
     "name": "Aena S.M.E., S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "AEP": {
     "name": "American Electric Power Company, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AES": {
     "name": "The AES Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AF.PA": {
     "name": "Air France-KLM SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "AFL": {
     "name": "Aflac Incorporated",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AFX.DE": {
     "name": "Carl Zeiss Meditec AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "AGS.BR": {
     "name": "ageas SA/NV",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "AHT.L": {
     "name": null,
@@ -181,303 +230,383 @@
   },
   "AI.PA": {
     "name": "L'Air Liquide S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "AIG": {
     "name": "American International Group, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AIR.PA": {
     "name": "Airbus SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "AIRP.PA": {
     "name": "369066",
-    "type": "etf"
+    "type": "etf",
+    "currency": null
   },
   "AIXA.DE": {
     "name": "AIXTRON SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "AIZ": {
     "name": "Assurant, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AJG": {
     "name": "Arthur J. Gallagher & Co.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AKAM": {
     "name": "Akamai Technologies, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AKE.PA": {
     "name": "Arkema S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "AKERBP.OL": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "AKZA.AS": {
     "name": "Akzo Nobel N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
+  },
+  "ALAB": {
+    "name": "Astera Labs, Inc.",
+    "type": "equity",
+    "currency": "USD"
   },
   "ALB": {
     "name": "Albemarle Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ALC.SW": {
     "name": "Alcon Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "ALFA.ST": {
     "name": "Alfa Laval AB (publ)",
-    "type": "equity"
+    "type": "equity",
+    "currency": "SEK"
   },
   "ALGN": {
     "name": "Align Technology, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ALL": {
     "name": "The Allstate Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ALLE": {
     "name": "Allegion plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ALLFG.MC": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "ALNY": {
     "name": "Alnylam Pharmaceuticals, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ALO.PA": {
     "name": "Alstom SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ALV.DE": {
     "name": "Allianz SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ALW.L": {
     "name": "Alliance Witan Ord",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "AMAT": {
     "name": "Applied Materials, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AMBU B.CO": {
     "name": null,
-    "type": "equity"
+    "type": "equity",
+    "currency": null
   },
   "AMC": {
     "name": "AMC Entertainment Holdings, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AMCR": {
     "name": "Amcor plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AMD": {
     "name": "Advanced Micro Devices, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AME": {
     "name": "AMETEK, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AMGN": {
     "name": "Amgen Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AML.L": {
     "name": "Aston Martin Lagonda Global Holdings plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "AMP": {
     "name": "Ameriprise Financial, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AMS.VI": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "AMT": {
     "name": "American Tower Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AMZN": {
     "name": "Amazon.com, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ANA.MC": {
     "name": "Acciona, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ANE.MC": {
     "name": "Corporación Acciona Energías Renovables, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ANET": {
     "name": "Arista Networks, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ANTO.L": {
     "name": "Antofagasta plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "AON": {
     "name": "Aon plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AOS": {
     "name": "A. O. Smith Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "APA": {
     "name": "APA Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "APD": {
     "name": "Air Products and Chemicals, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "APH": {
     "name": "Amphenol Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "APO": {
     "name": "Apollo Global Management, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "APP": {
     "name": "AppLovin Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "APTV": {
     "name": "Aptiv PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ARE": {
     "name": "Alexandria Real Estate Equities, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ARES": {
     "name": "Ares Management Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ARGX.AS": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "ARM": {
     "name": "Arm Holdings plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ARND.DE": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "ASMI.AS": {
     "name": null,
-    "type": "etf"
+    "type": "etf",
+    "currency": null
   },
   "ASML": {
     "name": "ASML Holding N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ASML.AS": {
     "name": "ASML Holding N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ASSA B.ST": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "ATCOa.ST": {
     "name": null,
-    "type": "etf"
+    "type": "etf",
+    "currency": null
   },
   "ATO": {
     "name": "Atmos Energy Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ATOM-EUR": {
     "name": "Cosmos EUR",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "EUR"
   },
   "ATOM-USD": {
     "name": "Cosmos USD",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "USD"
   },
   "ATOS.PA": {
     "name": "391877",
-    "type": "etf"
+    "type": "etf",
+    "currency": null
   },
   "AUDUSD=X": {
     "name": "AUD/USD",
-    "type": "forex"
+    "type": "forex",
+    "currency": "USD"
   },
   "AUTO.L": {
     "name": "Autotrader Group plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "AV.L": {
     "name": "Aviva plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "AVAX-EUR": {
     "name": "Avalanche EUR",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "EUR"
   },
   "AVAX-USD": {
     "name": "Avalanche USD",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "USD"
   },
   "AVB": {
     "name": "AvalonBay Communities, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AVGO": {
     "name": "Broadcom Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AVY": {
     "name": "Avery Dennison Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AWK": {
     "name": "American Water Works Company, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AXON": {
     "name": "Axon Enterprise, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AXP": {
     "name": "American Express Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "AZE.BR": {
     "name": "Azelis Group NV",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "AZN.L": {
     "name": "AstraZeneca PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "AZO": {
     "name": "AutoZone, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "BA": {
     "name": "The Boeing Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "BA..L": {
     "name": null,
@@ -485,83 +614,103 @@
   },
   "BA.L": {
     "name": "BAE Systems plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "BAB.L": {
     "name": "Babcock International Group PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "BAC": {
     "name": "Bank of America Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "BAER.SW": {
     "name": "Julius Bär Gruppe AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "BALD B.ST": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "BALL": {
     "name": "Ball Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "BALN.SW": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "BARC.L": {
     "name": "Barclays PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "BARN.SW": {
     "name": "Barry Callebaut AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "BAS.DE": {
     "name": "BASF SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "BATS.L": {
     "name": "British American Tobacco p.l.c.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "BAX": {
     "name": "Baxter International Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "BAYN.DE": {
     "name": "Bayer Aktiengesellschaft",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "BBOX.L": {
     "name": "Tritax Big Box Ord",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "BBVA.MC": {
     "name": "Banco Bilbao Vizcaya Argentaria, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "BBWI": {
     "name": "Bath & Body Works, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "BBY": {
     "name": "Best Buy Co., Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "BBY.L": {
     "name": "Balfour Beatty plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "BCH-EUR": {
     "name": "Bitcoin Cash EUR",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "EUR"
   },
   "BCH-USD": {
     "name": "Bitcoin Cash USD",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "USD"
   },
   "BDEV.L": {
     "name": null,
@@ -569,39 +718,48 @@
   },
   "BDX": {
     "name": "Becton, Dickinson and Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "BEB.SW": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "BEI.DE": {
     "name": "Beiersdorf Aktiengesellschaft",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "BEN": {
     "name": "Franklin Resources, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "BEZ.L": {
     "name": "Beazley plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "BF-B": {
     "name": "Brown-Forman Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "BG": {
     "name": "Bunge Global SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "BGEO.L": {
     "name": "Lion Finance Group PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "BIIB": {
     "name": "Biogen Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "BK": {
     "name": "The Bank of New York Mellon Corporation",
@@ -609,83 +767,108 @@
   },
   "BKG.L": {
     "name": "The Berkeley Group Holdings plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "BKNG": {
     "name": "Booking Holdings Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "BKR": {
     "name": "Baker Hughes Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "BKT.MC": {
     "name": "Bankinter, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "BLDR": {
     "name": "Builders FirstSource, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "BLK": {
     "name": "BlackRock, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "BLND.L": {
     "name": "British Land Company PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "BME.L": {
     "name": "B&M European Value Retail plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "BMW.DE": {
     "name": "Bayerische Motoren Werke Aktiengesellschaft",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "BMY": {
     "name": "Bristol-Myers Squibb Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "BN.PA": {
     "name": "Danone S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "BNB-USD": {
     "name": "BNB USD",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "USD"
   },
   "BND": {
     "name": "Vanguard Total Bond Market Index Fund",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "BNP.PA": {
     "name": "BNP Paribas SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "BNPP.PA": {
     "name": "3734810",
-    "type": "etf"
+    "type": "etf",
+    "currency": null
   },
   "BNR.DE": {
     "name": "Brenntag SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
+  },
+  "BNY": {
+    "name": "The Bank of New York Mellon Cor",
+    "type": "equity",
+    "currency": "USD"
   },
   "BNZL.L": {
     "name": "Bunzl plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "BOL.PA": {
     "name": "Bolloré SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "BOL.ST": {
     "name": "Boliden AB (publ)",
-    "type": "equity"
+    "type": "equity",
+    "currency": "SEK"
   },
   "BOSS.DE": {
     "name": "Hugo Boss AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "BOUY.PA": {
     "name": "1081128",
@@ -693,87 +876,108 @@
   },
   "BP.L": {
     "name": "BP p.l.c.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "BPOST.BR": {
     "name": "bpost NV/SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "BR": {
     "name": "Broadridge Financial Solutions, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "BRBY.L": {
     "name": "Burberry Group plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "BRK-B": {
     "name": "Berkshire Hathaway Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "BRNW.MI": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "BRO": {
     "name": "Brown & Brown, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "BSX": {
     "name": "Boston Scientific Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "BT.A.L": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "BTC-EUR": {
     "name": "Bitcoin EUR",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "EUR"
   },
   "BTC-USD": {
     "name": "Bitcoin USD",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "USD"
   },
   "BTRW.L": {
     "name": "Barratt Redrow plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "BVI.PA": {
     "name": "Bureau Veritas SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "BX": {
     "name": "Blackstone Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "BX4.PA": {
     "name": "Amundi CAC 40 Daily (-2x) Inv UCITS ETF Acc",
-    "type": "etf"
+    "type": "etf",
+    "currency": "EUR"
   },
   "BXP": {
     "name": "BXP, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "BYG.L": {
     "name": "Big Yellow Group Plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "BYND": {
     "name": "Beyond Meat, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "C": {
     "name": "Citigroup Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CA.PA": {
     "name": "Carrefour SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "CABK.MC": {
     "name": "CaixaBank, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "CAG": {
     "name": "Conagra Brands, Inc.",
@@ -781,231 +985,293 @@
   },
   "CAGR.PA": {
     "name": "4152883",
-    "type": "etf"
+    "type": "etf",
+    "currency": null
   },
   "CAH": {
     "name": "Cardinal Health, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CAP.PA": {
     "name": "Capgemini SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "CAPP.PA": {
     "name": "1682152",
-    "type": "etf"
+    "type": "etf",
+    "currency": null
   },
   "CARR": {
     "name": "Carrier Global Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CARR.PA": {
     "name": "2387079",
-    "type": "etf"
+    "type": "etf",
+    "currency": null
   },
   "CASP.ST": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "CAST.ST": {
     "name": "Castellum AB (publ)",
-    "type": "equity"
+    "type": "equity",
+    "currency": "SEK"
   },
   "CASY": {
     "name": "Casey's General Stores, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CAT": {
     "name": "Caterpillar Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CB": {
     "name": "Chubb Limited",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CBK.DE": {
     "name": "Commerzbank AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "CBOE": {
     "name": "Cboe Global Markets, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CBRE": {
     "name": "CBRE Group, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
+  },
+  "CCC.L": {
+    "name": "Computacenter plc",
+    "type": "equity",
+    "currency": "GBp"
   },
   "CCEP": {
     "name": "Coca-Cola Europacific Partners PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CCEP.L": {
     "name": "Coca-Cola Europacific Partners PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "CCH.L": {
     "name": "Coca-Cola HBC AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "CCH.SW": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "CCI": {
     "name": "Crown Castle Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CCL": {
     "name": "Carnival Corporation Ltd.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CDNS": {
     "name": "Cadence Design Systems, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CDR.WA": {
     "name": "CD Projekt S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "PLN"
   },
   "CDW": {
     "name": "CDW Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CEG": {
     "name": "Constellation Energy Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CF": {
     "name": "CF Industries Holdings, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CFG": {
     "name": "Citizens Financial Group, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CFR.SW": {
     "name": "Compagnie Financière Richemont SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "CHD": {
     "name": "Church & Dwight Co., Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CHRW": {
     "name": "C.H. Robinson Worldwide, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CHTR": {
     "name": "Charter Communications, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CI": {
     "name": "The Cigna Group",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CIEN": {
     "name": "Ciena Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CINF": {
     "name": "Cincinnati Financial Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CL": {
     "name": "Colgate-Palmolive Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CL2.PA": {
     "name": "Amundi MSCI USA Daily (2x) Leveraged UCITS ETF Acc",
-    "type": "etf"
+    "type": "etf",
+    "currency": "EUR"
   },
   "CL=F": {
     "name": "Crude Oil Sep 26",
-    "type": "unknown"
+    "type": "unknown",
+    "currency": "USD"
   },
   "CLN.SW": {
     "name": "Clariant AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "CLOV": {
     "name": "Clover Health Investments, Corp.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CLX": {
     "name": "The Clorox Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CMCSA": {
     "name": "Comcast Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CME": {
     "name": "CME Group Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CMG": {
     "name": "Chipotle Mexican Grill, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CMI": {
     "name": "Cummins Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CMS": {
     "name": "CMS Energy Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CNA.L": {
     "name": "Centrica plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "CNC": {
     "name": "Centene Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CNP": {
     "name": "CenterPoint Energy, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "COF": {
     "name": "Capital One Financial Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "COHR": {
     "name": "Coherent Corp.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "COIN": {
     "name": "Coinbase Global, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "COLR.BR": {
     "name": "Colruyt Group N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "CON.DE": {
     "name": "Continental Aktiengesellschaft",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "COO": {
     "name": "The Cooper Companies, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "COP": {
     "name": "ConocoPhillips",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "COR": {
     "name": "Cencora, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "COST": {
     "name": "Costco Wholesale Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CPAY": {
     "name": "Corpay, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CPB": {
     "name": "The Campbell's Company",
@@ -1013,71 +1279,93 @@
   },
   "CPG.L": {
     "name": "Compass Group PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CPR.MI": {
     "name": "Davide Campari-Milano N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "CPRT": {
     "name": "Copart, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CPT": {
     "name": "Camden Property Trust",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CRDA.L": {
     "name": "Croda International Plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "CRH": {
     "name": "CRH plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CRL": {
     "name": "Charles River Laboratories International, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CRM": {
     "name": "Salesforce, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CRUD.L": {
     "name": "WisdomTree WTI Crude Oil",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CRWD": {
     "name": "CrowdStrike Holdings, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
+  },
+  "CRWV": {
+    "name": "CoreWeave, Inc.",
+    "type": "equity",
+    "currency": "USD"
   },
   "CS.PA": {
     "name": "AXA SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "CSCO": {
     "name": "Cisco Systems, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CSGP": {
     "name": "CoStar Group, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CSX": {
     "name": "CSX Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CTAS": {
     "name": "Cintas Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CTEC.L": {
     "name": "Convatec Group PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "CTG.L": {
     "name": "Christie Group plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "CTRA": {
     "name": "Coterra Energy Inc.",
@@ -1085,43 +1373,53 @@
   },
   "CTS.DE": {
     "name": "AVIC International Holdings Limited",
-    "type": "etf"
+    "type": "etf",
+    "currency": null
   },
   "CTSH": {
     "name": "Cognizant Technology Solutions Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CTVA": {
     "name": "Corteva, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CVNA": {
     "name": "Carvana Co.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CVS": {
     "name": "CVS Health Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "CVX": {
     "name": "Chevron Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "D": {
     "name": "Dominion Energy, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DAL": {
     "name": "Delta Air Lines, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DANO.PA": {
     "name": "1098699",
-    "type": "etf"
+    "type": "etf",
+    "currency": null
   },
   "DASH": {
     "name": "DoorDash, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DASH.DE": {
     "name": null,
@@ -1129,267 +1427,342 @@
   },
   "DB1.DE": {
     "name": "Deutsche Börse AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "DBK.DE": {
     "name": "Deutsche Bank Aktiengesellschaft",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "DCC.L": {
     "name": "DCC Energy plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "DD": {
     "name": "DuPont de Nemours, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DDOG": {
     "name": "Datadog, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DE": {
     "name": "Deere & Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DECK": {
     "name": "Deckers Outdoor Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DELL": {
     "name": "Dell Technologies Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DEMANT.CO": {
     "name": "Demant A/S",
-    "type": "equity"
+    "type": "equity",
+    "currency": "DKK"
   },
   "DG": {
     "name": "Dollar General Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DG.PA": {
     "name": "Vinci SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "DGE.L": {
     "name": "Diageo plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "DGX": {
     "name": "Quest Diagnostics Incorporated",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DHER.DE": {
     "name": "Delivery Hero SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "DHI": {
     "name": "D.R. Horton, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DHL.DE": {
     "name": "Deutsche Post AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "DHR": {
     "name": "Danaher Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DIA": {
     "name": "State Street SPDR Dow Jones Industrial Average ETF Trust",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "DIA.MC": {
     "name": "Distribuidora Internacional de Alimentación, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "DIE.BR": {
     "name": "D'Ieteren Group SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "DIS": {
     "name": "The Walt Disney Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DLG.L": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "DLN.L": {
     "name": "Derwent London Plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "DLR": {
     "name": "Digital Realty Trust, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DLTR": {
     "name": "Dollar Tree, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DOC": {
     "name": "Healthpeak Properties, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DOCM.SW": {
     "name": "DocMorris AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "DOG": {
     "name": "ProShares Short Dow30",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "DOGE-EUR": {
     "name": "Dogecoin EUR",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "EUR"
   },
   "DOGE-USD": {
     "name": "Dogecoin USD",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "USD"
   },
   "DOT-EUR": {
     "name": "Polkadot EUR",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "EUR"
   },
   "DOT-USD": {
     "name": "Polkadot USD",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "USD"
   },
   "DOV": {
     "name": "Dover Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DOW": {
     "name": "Dow Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DPLM.L": {
     "name": "Diploma PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "DPZ": {
     "name": "Domino's Pizza, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DRI": {
     "name": "Darden Restaurants, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DSM.SW": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "DSP5.PA": {
     "name": "Amundi Nasdaq-100 Daily (-1x) Inverse UCITS ETF Acc",
-    "type": "etf"
+    "type": "etf",
+    "currency": "EUR"
   },
   "DSY.PA": {
     "name": "Dassault Systèmes SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "DTE": {
     "name": "DTE Energy Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DTE.DE": {
     "name": "Deutsche Telekom AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "DTG.DE": {
     "name": "Daimler Truck Holding AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "DUK": {
     "name": "Duke Energy Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DVA": {
     "name": "DaVita Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DVN": {
     "name": "Devon Energy Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DX-Y.NYB": {
     "name": "US Dollar Index",
-    "type": "unknown"
+    "type": "unknown",
+    "currency": "USD"
   },
   "DXCM": {
     "name": "DexCom, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "DXSN.DE": {
     "name": "Xtrackers ShortDAX Daily Swap UCITS ETF 1C",
-    "type": "etf"
+    "type": "etf",
+    "currency": "EUR"
   },
   "EA": {
     "name": "Electronic Arts Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "EBAY": {
     "name": "eBay Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "EBS.VI": {
     "name": "Erste Group Bank AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
+  },
+  "ECHO": {
+    "name": "EchoStar Corporation",
+    "type": "equity",
+    "currency": "USD"
   },
   "ECL": {
     "name": "Ecolab Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ED": {
     "name": "Consolidated Edison, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "EDEN.PA": {
     "name": "Edenred SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "EDP.LS": {
     "name": "EDP, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "EDPR.LS": {
     "name": "EDP Renewables, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "EDV.L": {
     "name": "Endeavour Mining plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "EFGI.PA": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "EFX": {
     "name": "Equifax Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "EG": {
     "name": "Everest Group, Ltd.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "EIX": {
     "name": "Edison International",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "EL": {
     "name": "The Estée Lauder Companies Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "EL.PA": {
     "name": "EssilorLuxottica Société anonyme",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ELISA.HE": {
     "name": "Elisa Oyj",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ELUX B.ST": {
     "name": null,
     "type": "unknown"
+  },
+  "ELUX-B.ST": {
+    "name": "AB Electrolux (publ)",
+    "type": "equity",
+    "currency": "SEK"
   },
   "ELUXb.ST": {
     "name": null,
@@ -1397,35 +1770,43 @@
   },
   "ELV": {
     "name": "Elevance Health, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "EME": {
     "name": "EMCOR Group, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "EMR": {
     "name": "Emerson Electric Co.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "EMSN.SW": {
     "name": "EMS-CHEMIE HOLDING AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "EN.PA": {
     "name": "Bouygues SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ENEL.MI": {
     "name": "Enel SpA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ENG.MC": {
     "name": "Enagás, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ENGI.PA": {
     "name": "Engie SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ENGIE.PA": {
     "name": null,
@@ -1433,27 +1814,33 @@
   },
   "ENI.MI": {
     "name": "Eni S.p.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ENR.DE": {
     "name": "Siemens Energy AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ENT.L": {
     "name": "Entain Plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "ENX.AS": {
     "name": "Euronext NV",
-    "type": "etf"
+    "type": "etf",
+    "currency": null
   },
   "EOAN.DE": {
     "name": "E.ON SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "EOG": {
     "name": "EOG Resources, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "EPAM": {
     "name": "EPAM Systems, Inc.",
@@ -1461,435 +1848,553 @@
   },
   "EPI A.ST": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "EQIX": {
     "name": "Equinix, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "EQR": {
     "name": "Equity Residential",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "EQT": {
     "name": "EQT Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ERF.PA": {
     "name": "Eurofins Scientific SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ERICb.ST": {
     "name": null,
-    "type": "etf"
+    "type": "etf",
+    "currency": null
   },
   "ERIE": {
     "name": "Erie Indemnity Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ES": {
     "name": "Eversource Energy",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ESLX.PA": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "ESS": {
     "name": "Essex Property Trust, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ETH-EUR": {
     "name": "Ethereum EUR",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "EUR"
   },
   "ETH-USD": {
     "name": "Ethereum USD",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "USD"
   },
   "ETN": {
     "name": "Eaton Corporation plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ETR": {
     "name": "Entergy Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "EURGBP=X": {
     "name": "EUR/GBP",
-    "type": "forex"
+    "type": "forex",
+    "currency": "GBP"
   },
   "EURJPY=X": {
     "name": "EUR/JPY",
-    "type": "forex"
+    "type": "forex",
+    "currency": "JPY"
   },
   "EURUSD=X": {
     "name": "EUR/USD",
-    "type": "forex"
+    "type": "forex",
+    "currency": "USD"
   },
   "EVK.DE": {
     "name": "Evonik Industries AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "EVR.L": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "EVRG": {
     "name": "Evergy, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "EVT.DE": {
     "name": "Evotec SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "EW": {
     "name": "Edwards Lifesciences Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "EXC": {
     "name": "Exelon Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "EXE": {
     "name": "Expand Energy Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "EXO.AS": {
     "name": "Exor N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "EXPD": {
     "name": "Expeditors International of Washington, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "EXPE": {
     "name": "Expedia Group, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "EXPN.L": {
     "name": "Experian plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "EXR": {
     "name": "Extra Space Storage Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "EZJ.L": {
     "name": "easyJet plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "F": {
     "name": "Ford Motor Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "FALK.CO": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "FANG": {
     "name": "Diamondback Energy, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "FAST": {
     "name": "Fastenal Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "FCIT.L": {
     "name": "F&C Investment Trust Ord",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "FCX": {
     "name": "Freeport-McMoRan Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "FDS": {
     "name": "FactSet Research Systems Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "FDX": {
     "name": "FedEx Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
+  },
+  "FDXF": {
+    "name": "FedEx Freight Holding Company, Inc.",
+    "type": "equity",
+    "currency": "USD"
   },
   "FE": {
     "name": "FirstEnergy Corp.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "FER": {
     "name": "Ferrovial N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "FER.AS": {
     "name": "Ferrovial N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "FERR.MI": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "FFIV": {
     "name": "F5, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "FICO": {
     "name": "Fair Isaac Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "FIL-EUR": {
     "name": "Filecoin EUR",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "EUR"
   },
   "FIL-USD": {
     "name": "Filecoin USD",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "USD"
   },
   "FIS": {
     "name": "Fidelity National Information Services, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "FISV": {
     "name": "Fiserv, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "FITB": {
     "name": "Fifth Third Bancorp",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "FIX": {
     "name": "Comfort Systems USA, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "FIZZ": {
     "name": "National Beverage Corp.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
+  },
+  "FLEX": {
+    "name": "Flex Ltd.",
+    "type": "equity",
+    "currency": "USD"
   },
   "FLOW.AS": {
     "name": "Flow Traders Ltd.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "FLTR.IR": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "FME.DE": {
     "name": "Fresenius Medical Care AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "FNTN.DE": {
     "name": "freenet AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "FOR.MC": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "FORTUM.HE": {
     "name": "Fortum Oyj",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "FOX": {
     "name": "Fox Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "FOXA": {
     "name": "Fox Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "FR.PA": {
     "name": "Valeo SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "FRA.DE": {
     "name": "Fraport AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "FRE.DE": {
     "name": "Fresenius SE & Co. KGaA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "FRES.L": {
     "name": "Fresnillo plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "FRT": {
     "name": "Federal Realty Investment Trust",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "FRVIA.PA": {
     "name": "Forvia SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "FSLR": {
     "name": "First Solar, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "FTI.L": {
     "name": "19816",
-    "type": "etf"
+    "type": "etf",
+    "currency": null
   },
   "FTNT": {
     "name": "Fortinet, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "FTV": {
     "name": "Fortive Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "FUBO": {
     "name": "FuboTV Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "G1A.DE": {
     "name": "GEA Group Aktiengesellschaft",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "G24.DE": {
     "name": "Scout24 SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "GALE.SW": {
     "name": "Galenica AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "GALP.LS": {
     "name": "Galp Energia, SGPS, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "GAW.L": {
     "name": "Games Workshop Group PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "GBPJPY=X": {
     "name": "GBP/JPY",
-    "type": "forex"
+    "type": "forex",
+    "currency": "JPY"
   },
   "GBPUSD=X": {
     "name": "GBP/USD",
-    "type": "forex"
+    "type": "forex",
+    "currency": "USD"
   },
   "GC=F": {
     "name": "Gold Dec 26",
-    "type": "unknown"
+    "type": "unknown",
+    "currency": "USD"
   },
   "GD": {
     "name": "General Dynamics Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "GDDY": {
     "name": "GoDaddy Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "GE": {
     "name": "GE Aerospace",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "GEBN.SW": {
     "name": "Geberit AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "GEHC": {
     "name": "GE HealthCare Technologies Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "GEN": {
     "name": "Gen Digital Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "GET.PA": {
     "name": "Getlink SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "GEV": {
     "name": "GE Vernova Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "GF.SW": {
     "name": "Georg Fischer AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "GFC.PA": {
     "name": "Gecina",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "GFT.IR": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "GILD": {
     "name": "Gilead Sciences, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "GIS": {
     "name": "General Mills, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "GIVN.SW": {
     "name": "Givaudan SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "GL": {
     "name": "Globe Life Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "GLB.IR": {
     "name": "Beacon Hill CBO III Ltd",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "GLD": {
     "name": "SPDR Gold Shares",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "GLE.PA": {
     "name": "Société Générale Société anonyme",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "GLEN.L": {
     "name": "Glencore plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "GLW": {
     "name": "Corning Incorporated",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "GM": {
     "name": "General Motors Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "GME": {
     "name": "GameStop Corp.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "GN.CO": {
     "name": "GN Store Nord A/S",
-    "type": "equity"
+    "type": "equity",
+    "currency": "DKK"
   },
   "GNRC": {
     "name": "Generac Holdings Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "GOOG": {
     "name": "Alphabet Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "GOOGL": {
     "name": "Alphabet Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "GPC": {
     "name": "Genuine Parts Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "GPN": {
     "name": "Global Payments Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "GREG.L": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "GRF.MC": {
     "name": "Grifols, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "GRLS.MC": {
     "name": null,
@@ -1897,83 +2402,103 @@
   },
   "GRMN": {
     "name": "Garmin Ltd.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "GS": {
     "name": "The Goldman Sachs Group, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "GSK.L": {
     "name": "GSK plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "GWI.MI": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "GWW": {
     "name": "W.W. Grainger, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "HAL": {
     "name": "Halliburton Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "HAS": {
     "name": "Hasbro, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "HAS.L": {
     "name": "Hays plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "HBAN": {
     "name": "Huntington Bancshares Incorporated",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "HBAR-USD": {
     "name": "Hedera USD",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "USD"
   },
   "HCA": {
     "name": "HCA Healthcare, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "HD": {
     "name": "The Home Depot, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "HEI.DE": {
     "name": "Heidelberg Materials AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "HELN.SW": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "HEN3.DE": {
     "name": "Henkel AG & Co. KGaA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "HG=F": {
     "name": "Copper Sep 26",
-    "type": "unknown"
+    "type": "unknown",
+    "currency": "USD"
   },
   "HIG": {
     "name": "The Hartford Insurance Group, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "HII": {
     "name": "Huntington Ingalls Industries, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "HIK.L": {
     "name": "Hikma Pharmaceuticals PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "HLI.L": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "HLM.L": {
     "name": null,
@@ -1981,211 +2506,268 @@
   },
   "HLMA.L": {
     "name": "Halma plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "HLN.L": {
     "name": "Haleon plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "HLT": {
     "name": "Hilton Worldwide Holdings Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "HMB.ST": {
     "name": null,
-    "type": "etf"
+    "type": "unknown",
+    "currency": null
   },
   "HNR.DE": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "HNR1.DE": {
     "name": "Hannover Rück SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "HO.PA": {
     "name": "Thales S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "HOLN.SW": {
     "name": "Holcim AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "HON": {
     "name": "Honeywell International Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
+  },
+  "HONA": {
+    "name": "Honeywell Aerospace Inc.",
+    "type": "equity",
+    "currency": "USD"
   },
   "HOOD": {
     "name": "Robinhood Markets, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "HPE": {
     "name": "Hewlett Packard Enterprise Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "HPQ": {
     "name": "HP Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "HRL": {
     "name": "Hormel Foods Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "HSBA.L": {
     "name": "HSBC Holdings plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "HSIC": {
     "name": "Henry Schein, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "HST": {
     "name": "Host Hotels & Resorts, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "HSX.L": {
     "name": "Hiscox Ltd",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "HSY": {
     "name": "The Hershey Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "HUBB": {
     "name": "Hubbell Incorporated",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "HUM": {
     "name": "Humana Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "HUSQ B.ST": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "HWDN.L": {
     "name": "Howden Joinery Group Plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "HWM": {
     "name": "Howmet Aerospace Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "HYG": {
     "name": "iShares iBoxx $ High Yield Corporate Bond ETF",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "IAG.L": {
     "name": "International Consolidated Airlines Group S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "IBE.MC": {
     "name": "Iberdrola, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "IBEXA.MC": {
     "name": "Amundi IBEX 35 Doble Apalancado Diario (2x) UCITS ETF",
-    "type": "etf"
+    "type": "etf",
+    "currency": "EUR"
   },
   "IBKR": {
     "name": "Interactive Brokers Group, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "IBM": {
     "name": "International Business Machines Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ICE": {
     "name": "Intercontinental Exchange, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ICG.L": {
     "name": "ICG plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "ICP-USD": {
     "name": "Internet Computer USD",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "USD"
   },
   "ICP.L": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "IDP.MI": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "IDXX": {
     "name": "IDEXX Laboratories, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "IEX": {
     "name": "IDEX Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "IFF": {
     "name": "International Flavors & Fragrances Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "IFX.DE": {
     "name": "Infineon Technologies AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "IGG.L": {
     "name": "IG Group Holdings plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "IGGI.L": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "IHG.L": {
     "name": "InterContinental Hotels Group PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "III.L": {
     "name": "3i Group Ord",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "IMB.L": {
     "name": "Imperial Brands PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "IMI.L": {
     "name": "IMI plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "INCH.L": {
     "name": "Inchcape plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "INCY": {
     "name": "Incyte Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "INDT.ST": {
     "name": "Indutrade AB (publ)",
-    "type": "equity"
+    "type": "equity",
+    "currency": "SEK"
   },
   "INDV.L": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "INF.L": {
     "name": "Informa plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "INGA.AS": {
     "name": "ING Groep N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "INP.L": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "INPST.LU": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "INSM": {
     "name": "Insmed Incorporated",
@@ -2193,471 +2775,593 @@
   },
   "INTC": {
     "name": "Intel Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "INTU": {
     "name": "Intuit Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "INVH": {
     "name": "Invitation Homes Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
+  },
+  "INVP.L": {
+    "name": "Investec Group",
+    "type": "equity",
+    "currency": "GBp"
   },
   "IP": {
     "name": "International Paper Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "IPN.PA": {
     "name": "Ipsen S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "IPX.PA": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "IQV": {
     "name": "IQVIA Holdings Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "IR": {
     "name": "Ingersoll Rand Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "IRM": {
     "name": "Iron Mountain Incorporated",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ISP.MI": {
     "name": "Intesa Sanpaolo S.p.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ISRG": {
     "name": "Intuitive Surgical, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "IT": {
     "name": "Gartner, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ITRK.L": {
     "name": "Intertek Group plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "ITV.L": {
     "name": "ITV plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "ITW": {
     "name": "Illinois Tool Works Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ITX.MC": {
     "name": "Industria de Diseño Textil, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "IVZ": {
     "name": "Invesco Ltd.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "IWM": {
     "name": "iShares Russell 2000 ETF",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "J": {
     "name": "Jacobs Solutions Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "JBHT": {
     "name": "J.B. Hunt Transport Services, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "JBL": {
     "name": "Jabil Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "JCI": {
     "name": "Johnson Controls International plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "JD.L": {
     "name": "JD Sports Fashion Plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "JKHY": {
     "name": "Jack Henry & Associates, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "JMAT.L": {
     "name": "Johnson Matthey Plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "JMT.LS": {
     "name": "Jerónimo Martins, SGPS, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "JNJ": {
     "name": "Johnson & Johnson",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "JPM": {
     "name": "JPMorgan Chase & Co.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "JUST.AS": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "KBC.BR": {
     "name": "KBC Group NV",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "KDP": {
     "name": "Keurig Dr Pepper Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "KER.PA": {
     "name": "Kering SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "KEY": {
     "name": "KeyCorp",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "KEYS": {
     "name": "Keysight Technologies, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "KGF.L": {
     "name": "Kingfisher plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "KHC": {
     "name": "The Kraft Heinz Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "KIM": {
     "name": "Kimco Realty Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "KKR": {
     "name": "KKR & Co. Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "KLAC": {
     "name": "KLA Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "KMB": {
     "name": "Kimberly-Clark Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "KMI": {
     "name": "Kinder Morgan, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "KNEBV.HE": {
     "name": "KONE Oyj",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "KNIN.SW": {
     "name": "Kuehne + Nagel International AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "KO": {
     "name": "The Coca-Cola Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "KPN.AS": {
     "name": "Koninklijke KPN N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "KR": {
     "name": "The Kroger Co.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "KSS": {
     "name": "Kohl's Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "KVUE": {
     "name": "Kenvue Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "L": {
     "name": "Loews Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "LAND.L": {
     "name": "Land Securities Group Plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "LANV.PA": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "LCID": {
     "name": "Lucid Group, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "LDO.MI": {
     "name": "Leonardo S.p.a.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "LDOS": {
     "name": "Leidos Holdings, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "LEG.DE": {
     "name": "LEG Immobilien SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "LEN": {
     "name": "Lennar Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "LGEN.L": {
     "name": "Legal & General Group Plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "LH": {
     "name": "Labcorp Holdings Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "LHA.DE": {
     "name": "Deutsche Lufthansa AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "LHX": {
     "name": "L3Harris Technologies, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "LIF.IR": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "LIGHT.AS": {
     "name": "Signify N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "LII": {
     "name": "Lennox International Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "LII.L": {
     "name": "1092567",
-    "type": "etf"
+    "type": "etf",
+    "currency": null
   },
   "LIN": {
     "name": "Linde plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "LIN.L": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "LINK-EUR": {
     "name": "Chainlink EUR",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "EUR"
   },
   "LINK-USD": {
     "name": "Chainlink USD",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "USD"
   },
   "LISN.SW": {
     "name": "Chocoladefabriken Lindt & Sprüngli AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "LITE": {
     "name": "Lumentum Holdings Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "LLOY.L": {
     "name": "Lloyds Banking Group plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "LLY": {
     "name": "Eli Lilly and Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "LMP.L": {
     "name": "LondonMetric Property Plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "LMT": {
     "name": "Lockheed Martin Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "LNT": {
     "name": "Alliant Energy Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "LOGN.SW": {
     "name": "Logitech International S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "LONN.SW": {
     "name": "Lonza Group AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "LOW": {
     "name": "Lowe's Companies, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "LPP.WA": {
     "name": "LPP SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "PLN"
   },
   "LR.PA": {
     "name": "Legrand SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "LRCX": {
     "name": "Lam Research Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "LSEG.L": {
     "name": "London Stock Exchange Group plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "LSG.OL": {
     "name": "Lerøy Seafood Group ASA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "NOK"
   },
   "LTC-EUR": {
     "name": "Litecoin EUR",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "EUR"
   },
   "LTC-USD": {
     "name": "Litecoin USD",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "USD"
   },
   "LULU": {
     "name": "lululemon athletica inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "LUMI.PA": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "LUN.ST": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "LUV": {
     "name": "Southwest Airlines Co.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "LVS": {
     "name": "Las Vegas Sands Corp.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "LXS.DE": {
     "name": "LANXESS Aktiengesellschaft",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "LYB": {
     "name": "LyondellBasell Industries N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "LYV": {
     "name": "Live Nation Entertainment, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "M": {
     "name": "Macy's, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MA": {
     "name": "Mastercard Incorporated",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MAA": {
     "name": "Mid-America Apartment Communities, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MAERSK B.CO": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "MAN.DE": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "MAR": {
     "name": "Marriott International, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MAS": {
     "name": "Masco Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MATIC-USD": {
     "name": "Polygon USD",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "USD"
   },
   "MB.MI": {
     "name": "Mediobanca Banca di Credito Finanziario S.p.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "MBG.DE": {
     "name": "Mercedes-Benz Group AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "MC.PA": {
     "name": "LVMH Moët Hennessy - Louis Vuitton, Société Européenne",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "MCD": {
     "name": "McDonald's Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MCG.L": {
     "name": "Mobico Group Plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "MCHP": {
     "name": "Microchip Technology Incorporated",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MCK": {
     "name": "McKesson Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MCO": {
     "name": "Moody's Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MDLZ": {
     "name": "Mondelez International, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MDT": {
     "name": "Medtronic plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MEL.MC": {
     "name": "Meliá Hotels International, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "MELE.BR": {
     "name": "Melexis NV",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "MELI": {
     "name": "MercadoLibre, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MET": {
     "name": "MetLife, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "META": {
     "name": "Meta Platforms, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "METSO.HE": {
     "name": "Metso Oyj",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "MGG.L": {
     "name": null,
@@ -2665,167 +3369,213 @@
   },
   "MGM": {
     "name": "MGM Resorts International",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MICP.PA": {
     "name": "742480",
-    "type": "etf"
+    "type": "etf",
+    "currency": null
   },
   "MKC": {
     "name": "McCormick & Company, Incorporated",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MKS.L": {
     "name": "Marks and Spencer Group plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "ML.PA": {
     "name": "Compagnie Générale des Établissements Michelin Société en commandite par actions",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "MLM": {
     "name": "Martin Marietta Materials, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MMM": {
     "name": "3M Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MNDI.L": {
     "name": "Mondi plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "MNG.L": {
     "name": "M&G plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "MNST": {
     "name": "Monster Beverage Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MO": {
     "name": "Altria Group, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MONC.MI": {
     "name": "Moncler S.p.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "MONY.L": {
     "name": "MONY Group plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "MOR.DE": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "MOS": {
     "name": "The Mosaic Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MPC": {
     "name": "Marathon Petroleum Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MPWR": {
     "name": "Monolithic Power Systems, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MRK": {
     "name": "Merck & Co., Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MRK.DE": {
     "name": "Merck KGaA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "MRL.MC": {
     "name": "MERLIN Properties SOCIMI, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "MRNA": {
     "name": "Moderna, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MRO.L": {
     "name": "Melrose Industries PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "MRSH": {
     "name": "Marsh & McLennan Companies, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MRVL": {
     "name": "Marvell Technology, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MRW.L": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "MS": {
     "name": "Morgan Stanley",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MSCI": {
     "name": "MSCI Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MSFT": {
     "name": "Microsoft Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MSI": {
     "name": "Motorola Solutions, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MSTR": {
     "name": "Strategy Inc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MT.AS": {
     "name": "ArcelorMittal S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "MT.LU": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "MTB": {
     "name": "M&T Bank Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MTD": {
     "name": "Mettler-Toledo International Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MTLN.L": {
     "name": "Metlen Energy & Metals PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "MTX.DE": {
     "name": "MTU Aero Engines AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "MU": {
     "name": "Micron Technology, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "MUV2.DE": {
     "name": "Münchener Rückversicherungs-Gesellschaft Aktiengesellschaft in München",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "NAB.AT": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
+  },
+  "NBIS": {
+    "name": "Nebius Group N.V.",
+    "type": "equity",
+    "currency": "USD"
   },
   "NCLH": {
     "name": "Norwegian Cruise Line Holdings Ltd.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "NDA FI.HE": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "NDA SE.HE": {
     "name": null,
@@ -2833,203 +3583,253 @@
   },
   "NDAQ": {
     "name": "Nasdaq, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "NDSN": {
     "name": "Nordson Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "NEE": {
     "name": "NextEra Energy, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "NEM": {
     "name": "Newmont Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "NEM.DE": {
     "name": "Nemetschek SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "NEOEN.PA": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "NESN.SW": {
     "name": "Nestlé S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "NEX.PA": {
     "name": "Nexans S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "NEXI.MI": {
     "name": "Nexi S.p.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "NFLX": {
     "name": "Netflix, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "NG.L": {
     "name": "National Grid plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "NGG.L": {
     "name": null,
-    "type": "etf"
+    "type": "etf",
+    "currency": null
   },
   "NHY.OL": {
     "name": "Norsk Hydro ASA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "NOK"
   },
   "NI": {
     "name": "NiSource Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "NIBE B.ST": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "NKE": {
     "name": "NIKE, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "NKLA": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "NN.AS": {
     "name": "NN Group N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "NOC": {
     "name": "Northrop Grumman Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "NOKIA.HE": {
     "name": "Nokia Oyj",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "NOV N.SW": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "NOVO B.CO": {
     "name": null,
-    "type": "equity"
+    "type": "equity",
+    "currency": null
   },
   "NOW": {
     "name": "ServiceNow, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "NRG": {
     "name": "NRG Energy, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "NSC": {
     "name": "Norfolk Southern Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "NSN.HE": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "NTAP": {
     "name": "NetApp, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "NTGY.MC": {
     "name": "Naturgy Energy Group, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "NTRS": {
     "name": "Northern Trust Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "NUE": {
     "name": "Nucor Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "NVDA": {
     "name": "NVIDIA Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "NVR": {
     "name": "NVR, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "NWG.L": {
     "name": "NatWest Group plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "NWS": {
     "name": "News Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "NWSA": {
     "name": "News Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "NXPI": {
     "name": "NXP Semiconductors N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "NXT.L": {
     "name": "NEXT plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "NZDUSD=X": {
     "name": "NZD/USD",
-    "type": "forex"
+    "type": "forex",
+    "currency": "USD"
   },
   "O": {
     "name": "Realty Income Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "OCDO.L": {
     "name": "Ocado Group plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "OCI.AS": {
     "name": "OCI N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ODFL": {
     "name": "Old Dominion Freight Line, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "OERL.SW": {
     "name": "OC Oerlikon Corporation AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "OKE": {
     "name": "ONEOK, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "OMC": {
     "name": "Omnicom Group Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "OMV.VI": {
     "name": "OMV Aktiengesellschaft",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ON": {
     "name": "ON Semiconductor Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ONT.BR": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "OR.PA": {
     "name": "L'Oréal S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ORA.PA": {
     "name": "Orange S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ORAN.PA": {
     "name": null,
@@ -3037,7 +3837,8 @@
   },
   "ORCL": {
     "name": "Oracle Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "OREP.PA": {
     "name": "1329679",
@@ -3045,111 +3846,138 @@
   },
   "ORK.OL": {
     "name": "Orkla ASA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "NOK"
   },
   "ORLY": {
     "name": "O'Reilly Automotive, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ORSTED.CO": {
     "name": "Ørsted A/S",
-    "type": "equity"
+    "type": "equity",
+    "currency": "DKK"
   },
   "OTIS": {
     "name": "Otis Worldwide Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "OXY": {
     "name": "Occidental Petroleum Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "P911.DE": {
     "name": "Dr. Ing. h.c. F. Porsche AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "PAH3.DE": {
     "name": "Porsche Automobil Holding SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "PANDORA.CO": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "PANW": {
     "name": "Palo Alto Networks, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PAYX": {
     "name": "Paychex, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PBB.DE": {
     "name": "Deutsche Pfandbriefbank AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "PCAR": {
     "name": "PACCAR Inc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PCG": {
     "name": "PG&E Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PCT.L": {
     "name": "Polar Capital Technology Ord",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "PDD": {
     "name": "PDD Holdings Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PEG": {
     "name": "Public Service Enterprise Group Incorporated",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PEP": {
     "name": "PepsiCo, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PERP.PA": {
     "name": "447355",
-    "type": "etf"
+    "type": "etf",
+    "currency": null
   },
   "PFE": {
     "name": "Pfizer Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PFG": {
     "name": "Principal Financial Group, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PG": {
     "name": "The Procter & Gamble Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PGHN.SW": {
     "name": "Partners Group Holding AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "PGR": {
     "name": "The Progressive Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PH": {
     "name": "Parker-Hannifin Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PHAG.L": {
     "name": "WisdomTree Physical Silver",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PHAU.L": {
     "name": "WisdomTree Physical Gold",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PHM": {
     "name": "PulteGroup, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PHNX.L": {
     "name": null,
@@ -3157,55 +3985,68 @@
   },
   "PIRC.MI": {
     "name": "Pirelli & C. S.p.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "PKG": {
     "name": "Packaging Corporation of America",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PL=F": {
     "name": "Platinum Oct 26",
-    "type": "unknown"
+    "type": "unknown",
+    "currency": "USD"
   },
   "PLD": {
     "name": "Prologis, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PLPH.SW": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "PLTR": {
     "name": "Palantir Technologies Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PM": {
     "name": "Philip Morris International Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PNC": {
     "name": "The PNC Financial Services Group, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PNL.AS": {
     "name": "PostNL N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "PNN.L": {
     "name": "Pennon Group Plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "PNR": {
     "name": "Pentair plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PNW": {
     "name": "Pinnacle West Capital Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PODD": {
     "name": "Insulet Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "POOL": {
     "name": "Pool Corporation",
@@ -3213,155 +4054,193 @@
   },
   "PPFB.DE": {
     "name": "iShares Physical Metals PLC   O",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "PPG": {
     "name": "PPG Industries, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PPL": {
     "name": "PPL Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PROX.BR": {
     "name": "Proximus PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "PRU": {
     "name": "Prudential Financial, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PRU.L": {
     "name": "Prudential plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "PRY.MI": {
     "name": "Prysmian S.p.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "PSA": {
     "name": "Public Storage",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PSH.L": {
     "name": "Pershing Square Holdings, Ltd.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "PSKY": {
     "name": "Paramount Skydance Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PSN.L": {
     "name": "Persimmon Plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "PSN.PA": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "PSON.L": {
     "name": "Pearson plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "PSQ": {
     "name": "ProShares Short QQQ",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "PST.MI": {
     "name": "Poste Italiane S.p.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "PSX": {
     "name": "Phillips 66",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PTC": {
     "name": "PTC Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PUB.PA": {
     "name": "Publicis Groupe S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "PUBM": {
     "name": "PubMatic, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PUM.DE": {
     "name": "PUMA SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "PWR": {
     "name": "Quanta Services, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "PYPL": {
     "name": "PayPal Holdings, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "Q": {
     "name": "Qnity Electronics, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "QCOM": {
     "name": "QUALCOMM Incorporated",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "QIA.AS": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "QIA.DE": {
     "name": "Qiagen N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "QLT.L": {
     "name": "Quilter plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "QQQ": {
     "name": "Invesco QQQ Trust",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "QQQ3.L": {
     "name": "WisdomTree NASDAQ 100 3x Daily Leveraged",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "QQQS.L": {
     "name": "WisdomTree NASDAQ 100 3x Daily Short",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "RBI.VI": {
     "name": "Raiffeisen Bank International AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "RCL": {
     "name": "Royal Caribbean Cruises Ltd.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "RCO.PA": {
     "name": "Rémy Cointreau SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "REC.MI": {
     "name": "Recordati Industria Chimica e Farmaceutica S.p.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "RED.MC": {
     "name": "Redeia Corporación, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "REG": {
     "name": "Regency Centers Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "REGN": {
     "name": "Regeneron Pharmaceuticals, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "REL.L": {
     "name": "RELX PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "RENA.PA": {
     "name": "1199153",
@@ -3369,59 +4248,78 @@
   },
   "REP.MC": {
     "name": "Repsol, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "RF": {
     "name": "Regions Financial Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "RHM.DE": {
     "name": "Rheinmetall AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "RI.PA": {
     "name": "Pernod Ricard SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "RIDE": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "RIGN.SW": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "RIO.L": {
     "name": "Rio Tinto Group",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "RIVN": {
     "name": "Rivian Automotive, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "RJF": {
     "name": "Raymond James Financial, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
+  },
+  "RKLB": {
+    "name": "Rocket Lab Corporation",
+    "type": "equity",
+    "currency": "USD"
   },
   "RKT.L": {
     "name": "Reckitt Benckiser Group plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "RL": {
     "name": "Ralph Lauren Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "RMD": {
     "name": "ResMed Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "RMS.PA": {
     "name": "Hermès International Société en commandite par actions",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "RMV.L": {
     "name": "Rightmove plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "RNL.PA": {
     "name": "Renault SA",
@@ -3429,7 +4327,8 @@
   },
   "RNO.PA": {
     "name": "Renault SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "ROG.SW": {
     "name": "Roche Holding AG",
@@ -3437,23 +4336,28 @@
   },
   "ROK": {
     "name": "Rockwell Automation, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ROL": {
     "name": "Rollins, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ROL.L": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "ROP": {
     "name": "Roper Technologies, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ROST": {
     "name": "Ross Stores, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "RR..L": {
     "name": null,
@@ -3461,75 +4365,93 @@
   },
   "RR.L": {
     "name": "Rolls-Royce Holdings plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "RSG": {
     "name": "Republic Services, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "RTO.L": {
     "name": "Rentokil Initial plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "RTX": {
     "name": "RTX Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "RVTY": {
     "name": "Revvity, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "RWE.DE": {
     "name": "RWE Aktiengesellschaft",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "RWM": {
     "name": "ProShares Short Russell2000",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "RXL.PA": {
     "name": "Rexel S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "S4.L": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "SAB.MC": {
     "name": "Banco de Sabadell, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "SAF.PA": {
     "name": "Safran SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "SALM.OL": {
     "name": "SalMar ASA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "NOK"
   },
   "SAMPO.HE": {
     "name": "Sampo Oyj",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "SAN.MC": {
     "name": "Banco Santander, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "SAN.PA": {
     "name": "Sanofi",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "SAND.ST": {
     "name": "Sandvik AB (publ)",
-    "type": "equity"
+    "type": "equity",
+    "currency": "SEK"
   },
   "SANO.HE": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "SAP.DE": {
     "name": "SAP SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "SASY.PA": {
     "name": "4586617",
@@ -3541,19 +4463,23 @@
   },
   "SBAC": {
     "name": "SBA Communications Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "SBRY.L": {
     "name": "J Sainsbury plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "SBUX": {
     "name": "Starbucks Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "SCHA.OL": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "SCHN.PA": {
     "name": "957092",
@@ -3561,55 +4487,68 @@
   },
   "SCHP.SW": {
     "name": "Schindler Holding AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "SCHW": {
     "name": "The Charles Schwab Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "SCMN.SW": {
     "name": "Swisscom AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "SCR.PA": {
     "name": "SCOR SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "SCT.L": {
     "name": "Softcat plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "SDLF.L": {
     "name": "Standard Life plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "SDR.L": {
     "name": "Schroders plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "SDS": {
     "name": "ProShares UltraShort S&P500",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "SDZ.SW": {
     "name": "Sandoz Group AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "SEB.ST": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "SECU B.ST": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "SFIX": {
     "name": "Stitch Fix, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "SGE.L": {
     "name": "The Sage Group plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "SGEF.PA": {
     "name": "563832",
@@ -3617,15 +4556,18 @@
   },
   "SGLN.L": {
     "name": "iShares Physical Gold ETC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "SGLN.MI": {
     "name": "iShares Physical Gold ETC",
-    "type": "etf"
+    "type": "etf",
+    "currency": "EUR"
   },
   "SGO.PA": {
     "name": "Compagnie de Saint-Gobain S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "SGOB.PA": {
     "name": "1391041",
@@ -3633,71 +4575,92 @@
   },
   "SGRO.L": {
     "name": "SEGRO Plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "SGSN.SW": {
     "name": "SGS SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "SH": {
     "name": "ProShares Short S&P500",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "SHB B.ST": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "SHEL.L": {
     "name": "Shell plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "SHIB-USD": {
     "name": "Shiba Inu USD",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "USD"
   },
   "SHL.DE": {
     "name": "Siemens Healthineers AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "SHOP": {
     "name": "Shopify Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "SHW": {
     "name": "The Sherwin-Williams Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "SI=F": {
     "name": "Silver Sep 26",
-    "type": "unknown"
+    "type": "unknown",
+    "currency": "USD"
   },
   "SIE.DE": {
     "name": "Siemens Aktiengesellschaft",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "SIG.SW": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "SIKA.SW": {
     "name": "Sika AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "SIX2.DE": {
     "name": "Sixt SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "SJM": {
     "name": "The J. M. Smucker Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "SKA B.ST": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "SKF B.ST": {
     "name": null,
     "type": "unknown"
+  },
+  "SKF-B.ST": {
+    "name": "AB SKF (publ)",
+    "type": "equity",
+    "currency": "SEK"
   },
   "SKFb.ST": {
     "name": null,
@@ -3705,39 +4668,48 @@
   },
   "SKG.IR": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "SKY.L": {
     "name": "Sky plc",
-    "type": "etf"
+    "type": "etf",
+    "currency": null
   },
   "SLB": {
     "name": "SLB N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "SLHN.SW": {
     "name": "Swiss Life Holding AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "SLV": {
     "name": "iShares Silver Trust",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "SMCI": {
     "name": "Super Micro Computer, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "SMDS.L": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "SMIN.L": {
     "name": "Smiths Group plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "SMT.L": {
     "name": "Scottish Mortgage Ord",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "SN..L": {
     "name": null,
@@ -3745,19 +4717,23 @@
   },
   "SN.L": {
     "name": "Smith & Nephew plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "SNA": {
     "name": "Snap-on Incorporated",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "SNDK": {
     "name": "Sandisk Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "SNPS": {
     "name": "Synopsys, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "SNY.PA": {
     "name": null,
@@ -3765,7 +4741,8 @@
   },
   "SO": {
     "name": "The Southern Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "SOGN.PA": {
     "name": "1929521",
@@ -3773,19 +4750,23 @@
   },
   "SOL-EUR": {
     "name": "Solana EUR",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "EUR"
   },
   "SOL-USD": {
     "name": "Solana USD",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "USD"
   },
   "SOLB.BR": {
     "name": "Solvay SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "SOLV": {
     "name": "Solventum Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "SON.SW": {
     "name": null,
@@ -3793,103 +4774,133 @@
   },
   "SOON.SW": {
     "name": "Sonova Holding AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "SOW.DE": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "SPCE": {
     "name": "Virgin Galactic Holdings, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
+  },
+  "SPCX": {
+    "name": "Space Exploration Technologies Corp.",
+    "type": "equity",
+    "currency": "USD"
   },
   "SPG": {
     "name": "Simon Property Group, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "SPGI": {
     "name": "S&P Global Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "SPSN.SW": {
     "name": "Swiss Prime Site AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "SPX.L": {
     "name": "Spirax Group plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "SPXS": {
     "name": "Direxion Daily S&P 500 Bear 3X Shares",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "SPXU": {
     "name": "ProShares UltraPro Short S&P500",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "SPY": {
     "name": "State Street SPDR S&P 500 ETF Trust",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "SQQQ": {
     "name": "ProShares UltraPro Short QQQ",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "SRB.OL": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "SRE": {
     "name": "Sempra",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "SRENH.SW": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "SRG.MI": {
     "name": "Snam S.p.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "SRT3.DE": {
     "name": "Sartorius Aktiengesellschaft",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "SSE.L": {
     "name": "SSE plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "STAN.L": {
     "name": "Standard Chartered PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "STE": {
     "name": "STERIS plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "STER.HE": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "STJ.L": {
     "name": "St. James's Place plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "STLAM.AS": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "STLAP.PA": {
     "name": "Stellantis N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "STLD": {
     "name": "Steel Dynamics, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "STMN.SW": {
     "name": "Straumann Holding AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "STMPA.AS": {
     "name": null,
@@ -3897,119 +4908,157 @@
   },
   "STMPA.PA": {
     "name": "STMicroelectronics N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "STMPA.SW": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "STT": {
     "name": "State Street Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "STX": {
     "name": "Seagate Technology Holdings plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "STZ": {
     "name": "Constellation Brands, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "SU.PA": {
     "name": "Schneider Electric S.E.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
+  },
+  "SUNB.L": {
+    "name": "Sunbelt Rentals Holdings, Inc.",
+    "type": "equity",
+    "currency": "GBp"
   },
   "SVT.L": {
     "name": "Severn Trent PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "SW": {
     "name": "Smurfit Westrock Plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "SW.PA": {
     "name": "Sodexo S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "SWECO B.ST": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "SWED A.ST": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "SWK": {
     "name": "Stanley Black & Decker, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "SWKS": {
     "name": "Skyworks Solutions, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "SWMA.ST": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "SXS.L": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "SY1.DE": {
     "name": "Symrise AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "SYF": {
     "name": "Synchrony Financial",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "SYK": {
     "name": "Stryker Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "SYY": {
     "name": "Sysco Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "T": {
     "name": "AT&T Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TAP": {
     "name": "Molson Coors Beverage Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TATE.L": {
     "name": "Tate & Lyle plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "TDG": {
     "name": "TransDigm Group Incorporated",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TDY": {
     "name": "Teledyne Technologies Incorporated",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TECH": {
     "name": "Bio-Techne Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TEF.MC": {
     "name": "Telefónica, S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "TEL": {
     "name": "TE Connectivity plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TEL.OL": {
     "name": "Telenor ASA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "NOK"
   },
   "TEL2 B.ST": {
     "name": null,
     "type": "unknown"
+  },
+  "TEL2-B.ST": {
+    "name": "Tele2 AB (publ)",
+    "type": "equity",
+    "currency": "SEK"
   },
   "TEL2b.ST": {
     "name": null,
@@ -4017,639 +5066,803 @@
   },
   "TELIA.ST": {
     "name": "Telia Company AB (publ)",
-    "type": "equity"
+    "type": "equity",
+    "currency": "SEK"
   },
   "TEMN.SW": {
     "name": "Temenos AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "TEN.LU": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "TEP.PA": {
     "name": "Teleperformance SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "TER": {
     "name": "Teradyne, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TEV.L": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "TFC": {
     "name": "Truist Financial Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TGS.OL": {
     "name": "TGS ASA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "NOK"
   },
   "TGT": {
     "name": "Target Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "THL.PA": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "TIGO.ST": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "TIT.MI": {
     "name": "Telecom Italia S.p.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "TJW.L": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "TJX": {
     "name": "The TJX Companies, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TKA.DE": {
     "name": "thyssenkrupp AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "TKO": {
     "name": "TKO Group Holdings, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TLT": {
     "name": "iShares 20+ Year Treasury Bond ETF",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "TLX.DE": {
     "name": "Talanx AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "TMO": {
     "name": "Thermo Fisher Scientific Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TMUS": {
     "name": "T-Mobile US, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TMV.DE": {
     "name": "TeamViewer SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "TOM.AS": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "TOM.OL": {
     "name": "Tomra Systems ASA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "NOK"
   },
   "TPG.L": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "TPK.L": {
     "name": "Travis Perkins plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "TPL": {
     "name": "Texas Pacific Land Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TPR": {
     "name": "Tapestry, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TREL B.ST": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "TRGP": {
     "name": "Targa Resources Corp.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TRI": {
     "name": "Thomson Reuters Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TRMB": {
     "name": "Trimble Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TRN.MI": {
     "name": "Terna S.p.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "TROW": {
     "name": "T. Rowe Price Group, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TRV": {
     "name": "The Travelers Companies, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TRYG.CO": {
     "name": "Tryg A/S",
-    "type": "equity"
+    "type": "equity",
+    "currency": "DKK"
   },
   "TSCO": {
     "name": "Tractor Supply Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TSCO.L": {
     "name": "Tesco PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "TSLA": {
     "name": "Tesla, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TSN": {
     "name": "Tyson Foods, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TT": {
     "name": "Trane Technologies plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TTD": {
     "name": "The Trade Desk, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TTE.PA": {
     "name": "TotalEnergies SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "TTWO": {
     "name": "Take-Two Interactive Software, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TUI.DE": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "TXN": {
     "name": "Texas Instruments Incorporated",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TXT": {
     "name": "Textron Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "TYL": {
     "name": "Tyler Technologies, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "UAL": {
     "name": "United Airlines Holdings, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "UBER": {
     "name": "Uber Technologies, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "UBI.PA": {
     "name": "Ubisoft Entertainment SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "UBSG.SW": {
     "name": "UBS Group AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "UC.MI": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "UDR": {
     "name": "UDR, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "UHR.SW": {
     "name": "The Swatch Group AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "UHS": {
     "name": "Universal Health Services, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ULTA": {
     "name": "Ulta Beauty, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "ULVR.L": {
     "name": "Unilever PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "UMG.AS": {
     "name": "Universal Music Group N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "UMI.BR": {
     "name": "Umicore SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "UN01.DE": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "UNH": {
     "name": "UnitedHealth Group Incorporated",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "UNI-USD": {
     "name": "UNICORN Token USD",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "USD"
   },
   "UNP": {
     "name": "Union Pacific Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "UPM.HE": {
     "name": "UPM-Kymmene Oyj",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "UPS": {
     "name": "United Parcel Service, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "UPW.L": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "URI": {
     "name": "United Rentals, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "URTH": {
     "name": "iShares MSCI World ETF",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "URW.PA": {
     "name": "Unibail-Rodamco-Westfield SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "USB": {
     "name": "U.S. Bancorp",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "USDCAD=X": {
     "name": "USD/CAD",
-    "type": "forex"
+    "type": "forex",
+    "currency": "CAD"
   },
   "USDCHF=X": {
     "name": "USD/CHF",
-    "type": "forex"
+    "type": "forex",
+    "currency": "CHF"
   },
   "USDJPY=X": {
     "name": "USD/JPY",
-    "type": "forex"
+    "type": "forex",
+    "currency": "JPY"
   },
   "USO": {
     "name": "United States Oil Fund, LP",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "UTG.L": {
     "name": "Unite Group PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "UU.L": {
     "name": "United Utilities Group PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "V": {
     "name": "Visa Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "VACN.SW": {
     "name": "VAT Group AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "CHF"
   },
   "VALMT.HE": {
     "name": "Valmet Oyj",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "VAR1.DE": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "VCT.PA": {
     "name": "Vicat S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "VEA": {
     "name": "Vanguard FTSE Developed Markets Index Fund ETF Shares",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
+  },
+  "VEEV": {
+    "name": "Veeva Systems Inc.",
+    "type": "equity",
+    "currency": "USD"
   },
   "VER.VI": {
     "name": "VERBUND AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "VESTAS.CO": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "VGK": {
     "name": "Vanguard FTSE Europe ETF",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "VICI": {
     "name": "VICI Properties Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "VIE.PA": {
     "name": "Veolia Environnement SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "VIG.VI": {
     "name": "Vienna Insurance Group AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "VITR.ST": {
     "name": "Vitrolife AB (publ)",
-    "type": "equity"
+    "type": "equity",
+    "currency": "SEK"
   },
   "VIV.PA": {
     "name": "Vivendi SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "VK.PA": {
     "name": "Vallourec S.A.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "VLO": {
     "name": "Valero Energy Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "VLTO": {
     "name": "Veralto Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "VMC": {
     "name": "Vulcan Materials Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "VNA.DE": {
     "name": "Vonovia SE",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "VOD.L": {
     "name": "Vodafone Group Public Limited Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "VOE.VI": {
     "name": "Voestalpine AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "VOLV B.ST": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "VOO": {
     "name": "Vanguard S&P 500 ETF",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "VOW3.DE": {
     "name": "Volkswagen AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "VPK.AS": {
     "name": "Koninklijke Vopak N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "VPLAY B.ST": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "VRSK": {
     "name": "Verisk Analytics, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "VRSN": {
     "name": "VeriSign, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "VRT": {
     "name": "Vertiv Holdings Co",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "VRTX": {
     "name": "Vertex Pharmaceuticals Incorporated",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "VST": {
     "name": "Vistra Corp.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "VTR": {
     "name": "Ventas, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "VTRS": {
     "name": "Viatris Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "VWO": {
     "name": "Vanguard Emerging Markets Stock Index Fund",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "VZ": {
     "name": "Verizon Communications Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "WAB": {
     "name": "Westinghouse Air Brake Technologies Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "WAT": {
     "name": "Waters Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "WBD": {
     "name": "Warner Bros. Discovery, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "WDAY": {
     "name": "Workday, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "WDC": {
     "name": "Western Digital Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "WDP.BR": {
     "name": "Warehouses De Pauw SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "WEC": {
     "name": "WEC Energy Group, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "WEIR.L": {
     "name": "The Weir Group PLC",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "WELL": {
     "name": "Welltower Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "WEND.PA": {
     "name": null,
-    "type": "unknown"
+    "type": "unknown",
+    "currency": null
   },
   "WFC": {
     "name": "Wells Fargo & Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "WIE.VI": {
     "name": "Wienerberger AG",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "WIHL.ST": {
     "name": "Wihlborgs Fastigheter AB (publ)",
-    "type": "equity"
+    "type": "equity",
+    "currency": "SEK"
   },
   "WISE.L": {
     "name": "Wise Group plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "WKHS": {
     "name": "Workhorse Group, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "WKL.AS": {
     "name": "Wolters Kluwer N.V.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "WLN.PA": {
     "name": "Worldline SA",
-    "type": "equity"
+    "type": "equity",
+    "currency": "EUR"
   },
   "WM": {
     "name": "Waste Management, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "WMB": {
     "name": "The Williams Companies, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "WMT": {
     "name": "Walmart Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "WPP.L": {
     "name": "WPP plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "WRB": {
     "name": "W. R. Berkley Corporation",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "WSM": {
     "name": "Williams-Sonoma, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "WST": {
     "name": "West Pharmaceutical Services, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "WTB.L": {
     "name": "Whitbread plc",
-    "type": "equity"
+    "type": "equity",
+    "currency": "GBp"
   },
   "WTW": {
     "name": "Willis Towers Watson Public Limited Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "WY": {
     "name": "Weyerhaeuser Company",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "WYNN": {
     "name": "Wynn Resorts, Limited",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "XDEB.DE": {
     "name": "Xtrackers MSCI World Minimum Volatility UCITS ETF 1C",
-    "type": "etf"
+    "type": "etf",
+    "currency": "EUR"
   },
   "XEL": {
     "name": "Xcel Energy Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "XLB": {
     "name": "State Street Materials Select Sector SPDR ETF",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "XLC": {
     "name": "State Street Communication Services Select Sector SPDR ETF",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "XLE": {
     "name": "State Street Energy Select Sector SPDR ETF",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "XLF": {
     "name": "State Street Financial Select Sector SPDR ETF",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "XLI": {
     "name": "State Street Industrial Select Sector SPDR ETF",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "XLK": {
     "name": "State Street Technology Select Sector SPDR ETF",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "XLM-EUR": {
     "name": "Stellar EUR",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "EUR"
   },
   "XLM-USD": {
     "name": "Stellar USD",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "USD"
   },
   "XLP": {
     "name": "State Street Consumer Staples Select Sector SPDR ETF",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "XLRE": {
     "name": "State Street Real Estate Select Sector SPDR ETF",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "XLU": {
     "name": "State Street Utilities Select Sector SPDR ETF",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "XLV": {
     "name": "State Street Health Care Select Sector SPDR ETF",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "XLY": {
     "name": "State Street Consumer Discretionary Select Sector SPDR ETF",
-    "type": "etf"
+    "type": "etf",
+    "currency": "USD"
   },
   "XOM": {
-    "name": "Exxon Mobil Corporation",
-    "type": "equity"
+    "name": "ExxonMobil Holdings Corporation",
+    "type": "equity",
+    "currency": "USD"
   },
   "XRP-EUR": {
     "name": "XRP EUR",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "EUR"
   },
   "XRP-USD": {
     "name": "XRP USD",
-    "type": "crypto"
+    "type": "crypto",
+    "currency": "USD"
   },
   "XYL": {
     "name": "Xylem Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "XYZ": {
     "name": "Block, Inc.",
-    "type": "equity"
+    "type": "equity",
+    "currency": "USD"
   },
   "YAR.OL": {
     "name": "Yara International ASA",

@@ -70,7 +70,7 @@ from engine.baseline_manager import (
 )
 from engine.blog import build_oracle_prompt, save_daily_blog_draft
 from engine.fx import convert as fx_convert
-from engine.ohlcv_store import latest_close_on_or_before
+from engine.quotes import latest_price, ticker_currency
 from engine.orders import (
     DroppedTrade,
     Order,
@@ -90,7 +90,7 @@ from engine.output_bundle import (
     get_day_number,
     save_output_bundle,
 )
-from engine.paper_broker import _ticker_currency, fill_day
+from engine.paper_broker import fill_day
 from engine.portfolio import PortfolioManager
 from engine.restatement import MissingPriceError
 from engine.config import AgentSpec, AllocatorSpec, get_config
@@ -856,7 +856,7 @@ def step_apply_manager_decision(
     """
     from engine.manager_decision import parse_manager_decision, render_manager_decision
     from engine.manager_orders import manager_decision_to_orders
-    from engine.ohlcv_store import latest_close_on_or_before as _lcob
+    from engine.quotes import latest_price as _latest_price
     from engine.orders import allocator_channel_dir as _order_channel_dir
     from engine.triggers import allocator_channel_dir as _trigger_channel_dir
 
@@ -917,9 +917,14 @@ def step_apply_manager_decision(
 
     # --- Convert non-HOLD positions to orders (skip unpriceable). ---
     def _price(ticker: str) -> float | None:
-        if ohlcv_store is not None:
-            return _lcob(ticker, trade_date, store=ohlcv_store)
-        return _lcob(ticker, trade_date)
+        # Normalised out of any vendor sub-unit: manager_decision_to_orders
+        # sizes with `shares = size_eur / price`, so a raw pence quote would
+        # size the position 100x. (That expression still carries a separate,
+        # pre-existing gap — it does no FX conversion at all, so a non-EUR
+        # ticker is sized by the FX rate. Out of scope here; see the task-14
+        # report.)
+        quote = _latest_price(ticker, trade_date, store=ohlcv_store)
+        return quote.price if quote is not None else None
 
     orders = manager_decision_to_orders(
         decision, trade_date, _price, agent_id=aid, currency=spec.home_currency
@@ -1248,10 +1253,16 @@ def _compute_positions_value(
     converted before being summed, via the same pair of helpers the fill
     path (`engine.paper_broker`) and the restatement engine
     (`engine.restatement.revalue_snapshot`) use:
-    `engine.paper_broker._ticker_currency` to resolve the ticker's native
-    currency and `engine.fx.convert` to convert its native-currency value
-    into the book's currency. Reusing these, rather than reimplementing FX
-    lookup here, is what keeps all three pricing paths in agreement.
+    `engine.quotes.latest_price` to read the close already denominated in
+    the ticker's ISO currency (pence → pounds for an LSE listing) and
+    `engine.fx.convert` to convert that value into the book's currency.
+    Reusing these, rather than reimplementing the store read and FX lookup
+    here, is what keeps all three pricing paths in agreement.
+
+    The `avg_cost` fallback is used UNCONVERTED: `avg_cost` is written by
+    `PortfolioManager.apply_trade` from `Trade.price`, which the broker
+    already normalised out of any sub-unit, so it is in the ticker's ISO
+    currency and must not be scaled a second time.
 
     If the FX rate needed for that conversion is unavailable, this raises
     `engine.restatement.MissingPriceError` (`what="FX rate"`) instead of
@@ -1264,11 +1275,12 @@ def _compute_positions_value(
     """
     total = 0.0
     for p in portfolio.positions:
-        price = latest_close_on_or_before(p.ticker, on, store=store)
-        if price is None:
-            price = p.avg_cost
+        quote = latest_price(p.ticker, on, store=store)
+        if quote is None:
+            price, ticker_ccy = p.avg_cost, ticker_currency(p.ticker)
+        else:
+            price, ticker_ccy = quote
         native_value = p.shares * price
-        ticker_ccy = _ticker_currency(p.ticker)
         if ticker_ccy == portfolio.currency:
             total += native_value
         else:

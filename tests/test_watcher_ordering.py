@@ -50,7 +50,7 @@ def broker_env(midas_data_root, monkeypatch):
     pm_base.mkdir()
     pending_dir = cfg.orders_dir / "pending"
     cancels_dir = cfg.orders_dir / "cancels"
-    monkeypatch.setattr("engine.paper_broker._TICKER_CURRENCY_OVERRIDES", None)
+    monkeypatch.setattr("engine.quotes._TICKER_CURRENCY_OVERRIDES", None)
     return {
         "ohlcv": ohlcv,
         "config_dir": config_dir,

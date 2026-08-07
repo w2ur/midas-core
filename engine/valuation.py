@@ -11,7 +11,7 @@ from datetime import date
 
 from engine.fx import convert as _fx_convert
 from engine.fx import to_eur
-from engine.ohlcv_store import latest_close_on_or_before as _latest_close
+from engine.quotes import latest_price as _latest_price
 
 
 def portfolio_mtm(portfolio_summary: dict, on: date | None = None) -> float | None:
@@ -21,11 +21,12 @@ def portfolio_mtm(portfolio_summary: dict, on: date | None = None) -> float | No
     converted before being summed, via the same pair of helpers the fill path
     (`engine.paper_broker`) and the restatement engine
     (`engine.restatement.revalue_snapshot`, `scripts/daily_session._compute_positions_value`)
-    use: `engine.paper_broker._ticker_currency` to resolve a ticker's native
-    currency and `engine.fx.convert` to convert its native-currency value
-    into the book's currency. Reusing these, rather than reimplementing FX
-    lookup here, is what keeps all pricing paths in agreement (this was the
-    third, previously un-fixed occurrence of the same conversion gap).
+    use: `engine.quotes.latest_price` to read the close already denominated in
+    the ticker's ISO currency (pence → pounds for an LSE listing) and
+    `engine.fx.convert` to convert that value into the book's currency.
+    Reusing these, rather than reimplementing the store read and FX lookup
+    here, is what keeps all pricing paths in agreement (this was the third,
+    previously un-fixed occurrence of the same conversion gap).
 
     Parameters
     ----------
@@ -56,22 +57,13 @@ def portfolio_mtm(portfolio_summary: dict, on: date | None = None) -> float | No
     cash = portfolio_summary.get("cash", 0.0)
     positions = portfolio_summary.get("positions", [])
     currency = portfolio_summary.get("currency", "USD")
-    # Lazy import: engine.paper_broker imports mtm_base_currency from this
-    # module at its own module top level, so a top-level import here would
-    # be circular (valuation -> paper_broker -> valuation). This is the
-    # first genuine circular-import case in engine/.
-    #
-    # Known follow-up, not fixed here: _ticker_currency is a pure
-    # currency-resolution helper that lives inside the execution/broker
-    # layer, but is now needed by three separate pricing modules
-    # (paper_broker itself, engine.restatement, and this module). This lazy
-    # import defers that layering debt rather than resolving it — the clean
-    # fix would move _ticker_currency to a lower-level module (e.g.
-    # engine.fx or a new engine.tickers) that all three can import from
-    # without a cycle. Out of scope for the FX-conversion fix this
-    # function needed it for.
-    from engine.paper_broker import _ticker_currency
 
+    # The layering debt this docstring used to record — a pure
+    # currency-resolution helper (`_ticker_currency`) living inside the
+    # execution/broker layer while three pricing modules imported it, forcing
+    # a lazy import here to break a valuation -> paper_broker -> valuation
+    # cycle — is resolved: `engine.quotes` is that lower-level module, and
+    # this is now a plain top-level import.
     # Compatibility: positions might be a list of ticker strings or a list of dicts.
     total = cash
     for p in positions:
@@ -83,11 +75,11 @@ def portfolio_mtm(portfolio_summary: dict, on: date | None = None) -> float | No
             shares = 0
         if not ticker or shares == 0:
             continue
-        price = _latest_close(ticker, on)
-        if price is None:
+        quote = _latest_price(ticker, on)
+        if quote is None:
             continue
+        price, ticker_currency = quote
         native_value = shares * price
-        ticker_currency = _ticker_currency(ticker)
         if ticker_currency == currency:
             total += native_value
         else:

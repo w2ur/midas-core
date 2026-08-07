@@ -40,7 +40,7 @@ def broker_env(midas_data_root, monkeypatch):
     pm_base.mkdir()
     # The OHLCV store, agent-config, ticker-currency, outbox, and inbox dirs all
     # resolve via get_config() under the redirected root — nothing to patch.
-    monkeypatch.setattr("engine.paper_broker._TICKER_CURRENCY_OVERRIDES", None)
+    monkeypatch.setattr("engine.quotes._TICKER_CURRENCY_OVERRIDES", None)
     return {
         "ohlcv": ohlcv,
         "config_dir": config_dir,
@@ -454,7 +454,7 @@ def test_rejects_with_no_fx_rate_when_ticker_currency_has_no_rate(
     # Force the ticker to resolve to USD so a cross-currency hop is required,
     # then make fx_convert return None.
     broker_env["ticker_ccy"].write_text('{"FOREIGN": "USD"}', encoding="utf-8")
-    monkeypatch.setattr("engine.paper_broker._TICKER_CURRENCY_OVERRIDES", None)
+    monkeypatch.setattr("engine.quotes._TICKER_CURRENCY_OVERRIDES", None)
     monkeypatch.setattr("engine.paper_broker.fx_convert", lambda *a, **kw: None)
 
     append_order(

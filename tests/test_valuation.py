@@ -144,20 +144,28 @@ def test_mtm_eur_returns_none_without_fx_rate(midas_data_root) -> None:
 # conversion, so a EUR book holding a GBP-listed ticker was mispriced as if
 # the GBP close were a EUR close. engine.restatement.revalue_snapshot and
 # scripts/daily_session._compute_positions_value already convert correctly
-# via the same two helpers (engine.paper_broker._ticker_currency +
-# engine.fx.convert); this was the third, un-fixed occurrence.
+# via the same helpers (engine.quotes.latest_price + engine.fx.convert);
+# this was the third, un-fixed occurrence.
 # ---------------------------------------------------------------------------
 
 
 def test_mtm_converts_non_native_currency_position(midas_data_root) -> None:
-    # EUR book holding a GBP-listed (".L" suffix) ticker.
-    _seed_ohlcv("TSCO.L", 5.0)
+    # EUR book holding a sterling-listed (".L" suffix) ticker.
+    #
+    # The store price is 500 — five hundred PENCE, not five hundred pounds.
+    # The LSE quotes in pence and `engine.quotes` normalises that to GBP 5.00
+    # before any FX conversion happens. This fixture used to read 5.0 and
+    # assert 50 GBP native, which silently encoded the defect (a `.L` quote
+    # treated as pounds, i.e. 100x). Dedicated pence coverage lives in
+    # tests/test_quotes.py; the assertion here is unchanged because the
+    # fixture price was rescaled to keep the same real-world value.
+    _seed_ohlcv("TSCO.L", 500.0)
     # Stored EURGBP=X close is EUR→GBP; GBP→EUR = 1/close.
     _seed_ohlcv("EURGBP=X", 0.85)
     summary = {
         "cash": 1000.0,
         "currency": "EUR",
-        "positions": [{"ticker": "TSCO.L", "shares": 10}],  # 50 GBP native
+        "positions": [{"ticker": "TSCO.L", "shares": 10}],  # 5000p = 50 GBP
     }
     # Native GBP value = 50; converted to EUR at 1/0.85 = 58.823529...
     expected = 1000.0 + 50.0 / 0.85
@@ -165,10 +173,10 @@ def test_mtm_converts_non_native_currency_position(midas_data_root) -> None:
 
 
 def test_mtm_returns_none_when_position_fx_rate_unavailable(midas_data_root) -> None:
-    # EUR book holding a GBP-listed ticker, but no EURGBP=X rate seeded —
+    # EUR book holding a sterling-listed ticker, but no EURGBP=X rate seeded —
     # the book cannot be accurately valued, so the whole result is None
     # (never a partial total that silently drops the unconvertible position).
-    _seed_ohlcv("TSCO.L", 5.0)
+    _seed_ohlcv("TSCO.L", 500.0)  # pence; see the test above
     summary = {
         "cash": 1000.0,
         "currency": "EUR",

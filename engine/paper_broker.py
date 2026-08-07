@@ -32,11 +32,16 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from engine.config import get_config, register_reset_callback
+from engine.config import get_config
 from engine.fees import fee_for
 from engine.fx import convert as fx_convert
-from engine.ohlcv_store import latest_close_on_or_before
 from engine.orders import Fill, Order, append_fill, inbox_order_ids
+from engine.quotes import (
+    _load_ticker_currency_overrides,  # noqa: F401 — re-exported, see below
+    latest_price,
+    normalise_quote,
+    ticker_currency,
+)
 from engine.triggers import (
     delete_pending,
     read_cancels,
@@ -127,56 +132,14 @@ class AgentConfig:
         )
 
 
-_TICKER_CURRENCY_OVERRIDES: dict[str, str] | None = None
-
-
-def _load_ticker_currency_overrides() -> dict[str, str]:
-    global _TICKER_CURRENCY_OVERRIDES
-    if _TICKER_CURRENCY_OVERRIDES is None:
-        path = get_config().ticker_currencies_path
-        if path.exists():
-            _TICKER_CURRENCY_OVERRIDES = json.loads(path.read_text(encoding="utf-8"))
-        else:
-            _TICKER_CURRENCY_OVERRIDES = {}
-    return _TICKER_CURRENCY_OVERRIDES
-
-
-def _reset_ticker_currency_overrides() -> None:
-    """Invalidate the ticker-currency override cache (fired by reset_config_cache).
-
-    The map is read once from get_config().ticker_currencies_path and memoised; a
-    MIDAS_DATA_DIR switch must re-read it from the new tree, so config registers
-    this to run whenever its own cache is cleared.
-    """
-    global _TICKER_CURRENCY_OVERRIDES
-    _TICKER_CURRENCY_OVERRIDES = None
-
-
-register_reset_callback(_reset_ticker_currency_overrides)
-
-
-def _ticker_currency(ticker: str) -> str:
-    """Resolve ticker -> ISO currency code.
-
-    1. Check data/ticker_currencies.json override map.
-    2. Fall back to a minimal suffix heuristic (add to override file rather than extending the heuristic).
-    """
-    overrides = _load_ticker_currency_overrides()
-    if ticker in overrides:
-        return overrides[ticker]
-    if ticker.endswith("-EUR"):
-        return "EUR"
-    if ticker.endswith("-USD"):
-        return "USD"
-    if ticker.endswith((".PA", ".DE", ".AS", ".MI")):
-        return "EUR"
-    if ticker.endswith(".L"):
-        return "GBP"
-    if ticker.endswith(".SW"):
-        return "CHF"
-    if ticker.endswith(".T"):
-        return "JPY"
-    return "USD"
+# Currency resolution moved to engine.quotes (2026-08-07). It was a pure
+# ticker→currency helper living inside the execution layer while three other
+# pricing modules imported it, and its suffix heuristic mapped every `.L`
+# ticker to GBP — but the LSE quotes in pence, so `.L` positions were valued
+# 100x high, and `PHAG.L` is not even sterling. These names stay re-exported
+# because engine.restatement, engine.valuation, scripts/daily_session and the
+# test suite all import them from here.
+_ticker_currency = ticker_currency
 
 
 def _drawdown_pct(
@@ -344,15 +307,19 @@ def _process_one(
     if allowed_tickers and order.ticker not in allowed_tickers:
         return _reject(order.order_id, "TICKER_NOT_IN_UNIVERSE")
 
-    # store defaults to get_config().ohlcv_dir inside latest_close_on_or_before —
-    # resolved at call time so MIDAS_DATA_DIR redirection reaches the broker's fills.
-    price = latest_close_on_or_before(order.ticker, trade_date)
-    if price is None:
+    # store defaults to get_config().ohlcv_dir inside latest_price — resolved at
+    # call time so MIDAS_DATA_DIR redirection reaches the broker's fills.
+    # latest_price returns the close ALREADY in the ticker's ISO currency: a
+    # pence-quoted LSE close arrives here as pounds, so `price` (and therefore
+    # Trade.price, Fill.fill_price and the stored avg_cost) is always in
+    # `ticker_ccy` — the unit Fill.fill_currency claims it is in.
+    quote = latest_price(order.ticker, trade_date)
+    if quote is None:
         return _reject(order.order_id, "NO_PRICE_DATA")
+    price, ticker_ccy = quote
 
     portfolio = portfolio_manager.load(order.agent_id)
     base_ccy = portfolio.currency
-    ticker_ccy = _ticker_currency(order.ticker)
     notional_native = order.shares * price
 
     if ticker_ccy == base_ccy:
@@ -577,8 +544,11 @@ def _execute_triggered_order(
 
     Differences from market-order processing:
       - `fire_price` is the live price observed by the watcher, used as fill_price
-        instead of latest_close_on_or_before. The rails (notional cap, cash check,
-        position check) are evaluated against this price.
+        instead of a store read. It arrives as a RAW vendor quote and is
+        normalised here via `engine.quotes.normalise_quote` (pence → pounds for
+        an LSE listing), so the rails (notional cap, cash check, position check)
+        are evaluated in the ticker's ISO currency, exactly as on the market-fill
+        path.
       - The returned Fill always has trigger_fired=True so the agent and the site
         can distinguish scheduled fills from market fills.
       - Does NOT consult MAX_ORDERS_PER_DAY (a triggered fire is not a same-day order).
@@ -615,7 +585,12 @@ def _execute_triggered_order(
     config = AgentConfig.load(order.agent_id)
     portfolio = portfolio_manager.load(order.agent_id)
     base_ccy = portfolio.currency
-    ticker_ccy = _ticker_currency(order.ticker)
+    # `fire_price` is a RAW vendor quote — the watcher reads it from ccxt or
+    # from the OHLCV store, both of which publish LSE prices in pence. This is
+    # the one pricing path that cannot go through latest_price (the price is
+    # handed in, not read here), so it normalises explicitly. `fire_price` is
+    # rebound so nothing downstream can use the un-normalised value.
+    fire_price, ticker_ccy = normalise_quote(order.ticker, fire_price)
     notional_native = order.shares * fire_price
 
     if ticker_ccy == base_ccy:

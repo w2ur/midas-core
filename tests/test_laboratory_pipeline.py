@@ -55,7 +55,7 @@ def lab_env(midas_data_root: Path, monkeypatch):
     blog_dir = cfg.blog_dir
     output_dir = cfg.output_dir
 
-    monkeypatch.setattr("engine.paper_broker._TICKER_CURRENCY_OVERRIDES", None)
+    monkeypatch.setattr("engine.quotes._TICKER_CURRENCY_OVERRIDES", None)
 
     # Seed OHLCV: yesterday's close present (simulates cron-before-OHLCV-refresh).
     def seed_ohlcv(ticker: str, price: float, on_date: date) -> None:

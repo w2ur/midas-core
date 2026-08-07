@@ -25,16 +25,15 @@ Two primitives:
 - ``revalue_snapshot`` re-prices a {ticker: shares} book from the committed
   OHLCV store as of a market date, converting any ticker not already in the
   book's base currency. It reuses the exact helpers the live desk already
-  uses for this: ``engine.ohlcv_store.latest_close_on_or_before`` (the same
-  store reader ``engine.paper_broker`` uses for fills and
-  ``engine.valuation.portfolio_mtm`` uses for point valuation — adj_close
-  when present, else close), ``engine.paper_broker._ticker_currency`` (the
-  same ticker→currency resolver the broker uses to decide whether a fill's
-  notional needs FX conversion), and ``engine.fx.convert`` (the same FX
-  helper the broker calls for that conversion). Reusing these three,
-  unmodified, is deliberate: if this module disagreed with the live desk on
-  how a position is priced or which currency it trades in, the restatement
-  would be wrong by definition — that is the whole point of the exercise.
+  uses for this: ``engine.quotes.latest_price`` (the same reader
+  ``engine.paper_broker`` uses for fills and ``engine.valuation.portfolio_mtm``
+  uses for point valuation — adj_close when present, else close, normalised
+  out of any vendor sub-unit such as LSE pence and paired with the ticker's
+  ISO currency) and ``engine.fx.convert`` (the same FX helper the broker
+  calls to convert a fill's notional). Reusing these, unmodified, is
+  deliberate: if this module disagreed with the live desk on how a position
+  is priced or which currency it trades in, the restatement would be wrong by
+  definition — that is the whole point of the exercise.
 """
 
 from __future__ import annotations
@@ -42,8 +41,7 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from engine.fx import convert as fx_convert
-from engine.ohlcv_store import latest_close_on_or_before
-from engine.paper_broker import _ticker_currency
+from engine.quotes import latest_price
 
 # A held position never reaches exactly zero via floating-point trade
 # replay; treat anything under this magnitude as closed.
@@ -149,11 +147,11 @@ def revalue_snapshot(
 
     Recorded ``cash`` is passed straight through and never recomputed — only
     the valuation of held positions changes. Each position is priced via
-    ``engine.ohlcv_store.latest_close_on_or_before`` (the same reader the
-    live desk uses for fills and point valuation) and, when the ticker's
-    resolved currency (``engine.paper_broker._ticker_currency``) differs
-    from ``currency``, converted via ``engine.fx.convert`` — the same FX
-    path the broker uses to convert a fill's notional. This is what makes
+    ``engine.quotes.latest_price`` (the same reader the live desk uses for
+    fills and point valuation, which returns the close already denominated
+    in the ticker's ISO currency) and, when that currency differs from
+    ``currency``, converted via ``engine.fx.convert`` — the same FX path the
+    broker uses to convert a fill's notional. This is what makes
     the primitive correct for a book whose positions are not all in its own
     base currency (e.g. an EUR book holding a USD-listed ticker).
 
@@ -191,12 +189,12 @@ def revalue_snapshot(
         if abs(shares) < _EPSILON:
             continue
 
-        price = latest_close_on_or_before(ticker, market_date)
-        if price is None:
+        quote = latest_price(ticker, market_date)
+        if quote is None:
             raise MissingPriceError(ticker, market_date)
 
+        price, ticker_currency = quote
         native_value = shares * price
-        ticker_currency = _ticker_currency(ticker)
 
         if ticker_currency == currency:
             positions_value += native_value
