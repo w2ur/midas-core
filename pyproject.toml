@@ -99,3 +99,35 @@ pythonpath = ["."]
 markers = [
     "live_cast: cast-coupled test — runs on the live desk, skipped on the demo desk (all-demo-* roster)",
 ]
+
+# Zero-warnings policy, enforced rather than asserted. `error` first: any
+# warning this list does not name fails the suite, so a warning our own code
+# starts emitting cannot accumulate into background noise. The 69 occurrences
+# that existed on 2026-08-07 were all third-party and are named below — the
+# policy's "documented exception" requirement, made mechanical instead of
+# living in prose that drifts.
+#
+# A hard gate on warnings is normally fragile, because any upstream release can
+# add a deprecation and turn CI red for a reason nobody chose. It is safe HERE
+# specifically because `requirements.txt` is a fully-resolved lockfile: a new
+# third-party warning can only arrive with a deliberate lock bump, which is
+# exactly when someone should be looking at it. Do not copy this pattern into a
+# project with unpinned dependencies.
+#
+# Each ignore names a warning we cannot fix from here, in a dependency we do
+# not control. Matching is on the message, not the module, so an ignore stops
+# applying if the upstream text changes — a stale entry surfaces as a red run
+# rather than as silent over-suppression.
+filterwarnings = [
+    "error",
+    # starlette's TestClient, reached via fastapi.testclient in backtester/tests.
+    # Fixed only by migrating to httpx2, which is a dependency decision for the
+    # backtester spin-out, not for its test suite.
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated:",
+    # pandas_ta sets mode.copy_on_write at import. Under pandas >= 3 the option
+    # is a no-op and deprecated; nothing downstream of us can unset it.
+    "ignore:The 'mode.copy_on_write' option is deprecated:",
+    # bt's own chained assignment inside Backtest.get_transactions. Ours is the
+    # calling code, not the assignment; bt would have to fix it upstream.
+    "ignore:A value is being set on a copy of a DataFrame or Series through chained assignment:",
+]

@@ -16,6 +16,7 @@ STRATEGIES_DIR = Path(__file__).resolve().parents[1] / "data" / "strategies"
 # Bulk validity tests
 # ---------------------------------------------------------------------------
 
+
 def test_all_specs_are_valid():
     """Every JSON file in data/strategies/ must parse without error and have
     an id matching the filename stem."""
@@ -24,7 +25,7 @@ def test_all_specs_are_valid():
         f"Expected at least 15 strategy specs, found {len(spec_files)}"
     )
     for path in spec_files:
-        data = json.load(open(path))
+        data = json.loads(path.read_text(encoding="utf-8"))
         spec = StrategySpec.from_dict(data)  # Should not raise
         assert spec.id == path.stem, (
             f"{path.name}: id field {spec.id!r} does not match filename stem {path.stem!r}"
@@ -40,6 +41,7 @@ def test_coin_flip_baseline_exists():
 # ---------------------------------------------------------------------------
 # Individual spec property tests
 # ---------------------------------------------------------------------------
+
 
 class TestGoldenCrossSP500:
     def _spec(self) -> StrategySpec:
