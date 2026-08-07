@@ -74,6 +74,10 @@ from pathlib import Path
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_PROJECT_ROOT))
 
+from engine.disclosure import (
+    UndisclosedRestatementError,
+    require_changelog_entry,
+)
 from engine.config import get_config
 from engine.leaderboard import build_leaderboard_rows
 from engine.portfolio import PortfolioManager
@@ -350,6 +354,12 @@ def main() -> None:
         help="Write the restated bundle files. Default is dry-run (no writes).",
     )
     parser.add_argument(
+        "--changelog-entry",
+        metavar="ANCHOR",
+        help="Anchor id of the METHODOLOGY.md changelog entry disclosing this "
+        "restatement. Required with --apply (see engine.disclosure).",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Compute and print without writing (default behavior — this flag is "
@@ -359,6 +369,14 @@ def main() -> None:
 
     if args.apply and args.dry_run:
         parser.error("--apply and --dry-run are mutually exclusive.")
+
+    if args.apply:
+        try:
+            require_changelog_entry(
+                args.changelog_entry, what="Restating published archive bundles"
+            )
+        except UndisclosedRestatementError as exc:
+            parser.exit(2, f"{exc}\n")
 
     run(apply=args.apply)
 

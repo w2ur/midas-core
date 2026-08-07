@@ -41,6 +41,7 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from engine.fx import convert as fx_convert
+from engine.valuation import value_position
 from engine.quotes import latest_price
 
 # A held position never reaches exactly zero via floating-point trade
@@ -58,9 +59,23 @@ class MissingPriceError(Exception):
     that never happened.
     """
 
+    #: Reason codes from `engine.valuation.value_position` → readable phrase.
+    #: The code is kept in the message alongside the phrase: the phrase is for
+    #: the human reading a session log, the code is what makes a valuation
+    #: failure greppable against the broker rejection describing the same
+    #: condition.
+    _PHRASES = {
+        "NO_PRICE_DATA": "price",
+        "NO_FX_RATE": "FX rate",
+        "CURRENCY_UNRESOLVED": "resolvable quote currency",
+    }
+
     def __init__(self, symbol: str, market_date: date, *, what: str = "price") -> None:
         self.symbol = symbol
         self.market_date = market_date
+        self.reason = what if what in self._PHRASES else None
+        if self.reason:
+            what = f"{self._PHRASES[self.reason]} ({self.reason})"
         super().__init__(
             f"No {what} for {symbol!r} on or before {market_date.isoformat()} in the "
             "committed OHLCV store — refusing to price at zero"
@@ -189,21 +204,13 @@ def revalue_snapshot(
         if abs(shares) < _EPSILON:
             continue
 
-        quote = latest_price(ticker, market_date)
-        if quote is None:
-            raise MissingPriceError(ticker, market_date)
-
-        price, ticker_currency = quote
-        native_value = shares * price
-
-        if ticker_currency == currency:
-            positions_value += native_value
-        else:
-            converted = fx_convert(native_value, ticker_currency, currency, market_date)
-            if converted is None:
-                raise MissingPriceError(
-                    f"{ticker_currency}->{currency}", market_date, what="FX rate"
-                )
-            positions_value += converted
+        # engine.valuation.value_position is the single pricing decision all
+        # three valuation paths now share (snapshots, leaderboard, this one).
+        # It answers in the broker's own vocabulary, so a valuation failure
+        # and a fill rejection describe the same condition with the same word.
+        valuation = value_position(ticker, shares, currency, market_date)
+        if not valuation.ok:
+            raise MissingPriceError(ticker, market_date, what=valuation.reason)
+        positions_value += valuation.value
 
     return cash + positions_value, positions_value

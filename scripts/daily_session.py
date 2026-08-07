@@ -71,6 +71,7 @@ from engine.baseline_manager import (
 from engine.blog import build_oracle_prompt, save_daily_blog_draft
 from engine.fx import convert as fx_convert
 from engine.quotes import latest_price, ticker_currency
+from engine.valuation import value_position
 from engine.orders import (
     DroppedTrade,
     Order,
@@ -1275,28 +1276,10 @@ def _compute_positions_value(
     """
     total = 0.0
     for p in portfolio.positions:
-        quote = latest_price(p.ticker, on, store=store)
-        if quote is None:
-            price, ticker_ccy = p.avg_cost, ticker_currency(p.ticker)
-            if ticker_ccy is None:
-                # Since 2026-08-07 an unenumerated suffix resolves to nothing
-                # rather than guessing USD. Say so plainly here: letting a None
-                # currency fall through to fx_convert raises the same error a
-                # missing rate does, and "None->EUR" sends the reader looking
-                # for an FX gap that does not exist.
-                raise MissingPriceError(p.ticker, on, what="quote currency")
-        else:
-            price, ticker_ccy = quote
-        native_value = p.shares * price
-        if ticker_ccy == portfolio.currency:
-            total += native_value
-        else:
-            converted = fx_convert(native_value, ticker_ccy, portfolio.currency, on)
-            if converted is None:
-                raise MissingPriceError(
-                    f"{ticker_ccy}->{portfolio.currency}", on, what="FX rate"
-                )
-            total += converted
+        valuation = value_position(p.ticker, p.shares, portfolio.currency, on)
+        if not valuation.ok:
+            raise MissingPriceError(p.ticker, on, what=valuation.reason)
+        total += valuation.value
     return total
 
 

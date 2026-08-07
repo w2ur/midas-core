@@ -79,6 +79,10 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 from engine.config import get_config
 from engine.ohlcv_store import latest_close_on_or_before
 from engine.portfolio import PortfolioManager
+from engine.disclosure import (
+    UndisclosedRestatementError,
+    require_changelog_entry,
+)
 from engine.restatement import MissingPriceError, replay_holdings, revalue_snapshot
 from scripts.fetch_market_data import _BENCHMARK_SOURCES
 
@@ -494,6 +498,13 @@ def main() -> None:
         "provided for explicitness).",
     )
     parser.add_argument(
+        "--changelog-entry",
+        metavar="ANCHOR",
+        help="Anchor id of the METHODOLOGY.md changelog entry disclosing this "
+        "restatement. Required with --apply: a published number does not move "
+        "undisclosed (see engine.disclosure).",
+    )
+    parser.add_argument(
         "--allow-ledger-divergence",
         nargs="+",
         default=[],
@@ -506,6 +517,17 @@ def main() -> None:
 
     if args.apply and args.dry_run:
         parser.error("--apply and --dry-run are mutually exclusive.")
+
+    # Only --apply is gated. A dry run publishes nothing, and forcing the
+    # changelog entry to exist before you can even see what would move would
+    # mean writing the disclosure before knowing the numbers.
+    if args.apply:
+        try:
+            require_changelog_entry(
+                args.changelog_entry, what="Restating published valuations"
+            )
+        except UndisclosedRestatementError as exc:
+            parser.exit(2, f"{exc}\n")
 
     run(apply=args.apply, allow_ledger_divergence=args.allow_ledger_divergence)
 

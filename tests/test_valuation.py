@@ -63,17 +63,35 @@ def test_mtm_multi_position(midas_data_root) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_mtm_missing_ticker_price_is_skipped(midas_data_root) -> None:
+def test_mtm_refuses_the_book_when_a_position_has_no_price(midas_data_root) -> None:
+    """Changed 2026-08-07 (review W4.5): a missing price used to be skipped.
+
+    Skipping values the position at zero, and the total still looks plausible
+    — 1,100 here, for a book holding 99 shares of something. That was the
+    weakest of the three answers this codebase gave to the same question; a
+    refusal is at least distinguishable from a right answer downstream, and
+    `build_leaderboard_rows` already drops a book it cannot value.
+    """
     _seed_ohlcv("MSFT", 300.0)
     summary = {
         "cash": 500.0,
         "currency": "USD",
         "positions": [
-            {"ticker": "MSFT", "shares": 2},  # 600
-            {"ticker": "GHOST", "shares": 99},  # no price row → contributes 0
+            {"ticker": "MSFT", "shares": 2},
+            {"ticker": "GHOST", "shares": 99},  # no price row anywhere
         ],
     }
-    # A missing price never crashes and never guesses: 500 + 600 = 1100.
+    assert portfolio_mtm(summary, date(2026, 6, 1)) is None
+
+
+def test_mtm_still_values_a_book_whose_positions_all_price(midas_data_root) -> None:
+    """The control: refusing must not become refusing everything."""
+    _seed_ohlcv("MSFT", 300.0)
+    summary = {
+        "cash": 500.0,
+        "currency": "USD",
+        "positions": [{"ticker": "MSFT", "shares": 2}],
+    }
     assert portfolio_mtm(summary, date(2026, 6, 1)) == pytest.approx(1100.0)
 
 
@@ -232,3 +250,89 @@ def test_mtm_is_cash_plus_position_value(midas_data_root, cash, a, b, c) -> None
     assert portfolio_mtm(summary, date(2026, 6, 1)) == pytest.approx(
         expected, rel=1e-9, abs=1e-6
     )
+
+
+# ---------------------------------------------------------------------------
+# W4.5 — one missing-price policy, not three
+#
+# The review's finding: "snapshots fall back to avg_cost, leaderboard/drawdown
+# value at zero, restatement raises — same book, three published answers."
+# Two of those answers were numbers, which is what made the divergence
+# survivable: a wrong number is indistinguishable from a right one downstream.
+# ---------------------------------------------------------------------------
+
+
+def _unpriceable_book():
+    from engine.portfolio import Portfolio, Position
+
+    return Portfolio(
+        cash=500.0,
+        currency="USD",
+        last_updated=date(2026, 6, 1),
+        positions=[
+            Position(
+                ticker="GHOST",
+                shares=99.0,
+                avg_cost=50.0,
+                date_opened=date(2026, 4, 17),
+                grid_level=0,
+            )
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    "reason_case, seed, expected_reason",
+    [
+        ("no price row at all", None, "NO_PRICE_DATA"),
+        ("no resolvable currency", "FOO.ZZ", "CURRENCY_UNRESOLVED"),
+    ],
+)
+def test_value_position_names_the_condition(
+    midas_data_root, reason_case, seed, expected_reason
+):
+    """The two ways a price can be missing are not the same problem.
+
+    A registry gap is fixed in `data/ticker_currencies.json`; a data gap is
+    fixed by the fetch job. Collapsing them into one message sends whoever
+    reads it to the wrong place.
+    """
+    from engine.valuation import value_position
+
+    ticker = seed or "GHOST"
+    if seed:
+        _seed_ohlcv(seed, 42.0)
+    result = value_position(ticker, 99.0, "USD", date(2026, 6, 1))
+    assert result.value is None
+    assert result.reason == expected_reason, reason_case
+
+
+def test_all_three_valuation_paths_refuse_the_same_fixture(midas_data_root):
+    """The done-when for W4.5, stated as an assertion.
+
+    Same position, same date, three call paths that used to answer
+    `avg_cost`, `0`, and `raise` respectively.
+    """
+    from scripts.daily_session import _compute_positions_value
+    from engine.restatement import MissingPriceError, revalue_snapshot
+    from engine.valuation import portfolio_mtm, value_position
+
+    on = date(2026, 6, 1)
+    book = _unpriceable_book()
+
+    # 1. the shared decision
+    assert value_position("GHOST", 99.0, "USD", on).reason == "NO_PRICE_DATA"
+
+    # 2. leaderboard / drawdown rail — was: silently zero
+    assert portfolio_mtm(book.to_dict(), on) is None
+
+    # 3. snapshot writer — was: avg_cost
+    with pytest.raises(MissingPriceError) as snapshot_exc:
+        _compute_positions_value(book, on)
+
+    # 4. restatement — already raised; must still name the same reason
+    with pytest.raises(MissingPriceError) as restate_exc:
+        revalue_snapshot({"GHOST": 99.0}, 500.0, on, "USD")
+
+    assert snapshot_exc.value.reason == "NO_PRICE_DATA"
+    assert restate_exc.value.reason == "NO_PRICE_DATA"

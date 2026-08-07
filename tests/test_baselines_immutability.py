@@ -279,3 +279,163 @@ def test_build_all_baselines_prints_one_aggregate_summary_on_refusal(
     # and the global msci_world.json share the URTH ticker and both refuse.
     assert out.count("[WARN] baselines:") == 1
     assert "2 published point(s) refused" in out
+
+
+# ---------------------------------------------------------------------------
+# Scoped restatement (reliability review W4.3)
+#
+# `build_all_baselines` used to take a bool, which could only say "restate
+# everything". On 2026-08-07 the coin flips genuinely needed restating onto
+# normalised units and the passive benchmarks did not; the blanket flag moved
+# eight benchmarks anyway — on fresher *prices*, not on units — and they had
+# to be restored by hand. An API that cannot express the intended scope will
+# eventually be used outside it.
+# ---------------------------------------------------------------------------
+
+
+# bt needs a few bars before the coin flip holds anything: over a two-day
+# window every value comes out flat at initial capital, and a "did it move?"
+# assertion would then be unfalsifiable in both directions.
+_DAYS = ["2026-04-17", "2026-04-18", "2026-04-19", "2026-04-20", "2026-04-21"]
+
+
+def _seed_desk(cfg, last_close: float = 105.0, fake_a_last: float = 12.0) -> dict[str, list[str]]:
+    """Seed enough OHLCV for every benchmark, coin flip and the global ref."""
+    ohlcv = cfg.ohlcv_dir
+    ohlcv.mkdir(parents=True, exist_ok=True)
+
+    def _seed(ticker: str, closes: list[float]) -> None:
+        lines = [f'{{"date":"{d}","close":{c}}}' for d, c in zip(_DAYS, closes)]
+        (ohlcv / f"{ticker}.jsonl").write_text("\n".join(lines) + "\n")
+
+    ramp = [100.0, 101.0, 102.0, 103.0, last_close]
+    agents = {
+        aid: cfg.roster[aid].benchmark
+        for aid in cfg.trading_roster
+        if cfg.roster[aid].benchmark is not None
+    }
+    for bench in agents.values():
+        if bench.ticker != "EUR_CASH_FLAT":
+            _seed(bench.ticker, ramp)
+    _seed(cfg.global_reference.ticker, ramp)
+    _seed("FAKE-A", [10.0, 10.5, 11.0, 11.5, fake_a_last])
+    _seed("FAKE-B", [20.0, 20.5, 20.0, 19.5, 19.0])
+    return {aid: ["FAKE-A", "FAKE-B"] for aid in agents}
+
+
+def _build(cfg, universes, restate_series=None):
+    from datetime import date as _date
+
+    from engine.baselines import build_all_baselines
+
+    build_all_baselines(
+        universes_by_agent=universes,
+        from_date=_date(2026, 4, 17),
+        to_date=_date(2026, 4, 21),
+        restate_series=restate_series,
+    )
+
+
+def _values(path):
+    import json
+
+    return {row["date"]: row["portfolio_value"] for row in json.loads(path.read_text())}
+
+
+def _priced_agents(cfg):
+    return [
+        aid
+        for aid in cfg.trading_roster
+        if cfg.roster[aid].benchmark is not None
+        and cfg.roster[aid].benchmark.ticker != "EUR_CASH_FLAT"
+    ]
+
+
+def test_restating_coin_flips_leaves_benchmarks_frozen(midas_data_root, capsys):
+    """The exact 2026-08-07 requirement, as an executable assertion.
+
+    Asserted on the benchmark rather than the coin flip because the benchmark
+    is the series that provably moves with a revised price (the coin flip sits
+    flat at initial capital over a fixture this small, so a "did it move?"
+    assertion on it would be unfalsifiable). This is the direction that
+    matters anyway: under the old bool, `restate=True` moved these.
+    """
+    from engine.config import get_config
+
+    cfg = get_config()
+    universes = _seed_desk(cfg)
+    _build(cfg, universes)
+
+    agent = _priced_agents(cfg)[0]
+    bench_path = cfg.baselines_dir / agent / "benchmark.json"
+    bench_before = _values(bench_path)
+
+    _seed_desk(cfg, last_close=999.0, fake_a_last=40.0)
+    _build(cfg, universes, restate_series={"coinflip"})
+    capsys.readouterr()
+
+    assert _values(bench_path) == bench_before, (
+        "a coin-flip-scoped restatement moved a passive benchmark — the exact "
+        "over-reach the bool API allowed on 2026-08-07"
+    )
+
+
+def test_the_scope_does_restate_what_it_names(midas_data_root, capsys):
+    """The other half: without this, a scope matching nothing would pass above."""
+    from engine.config import get_config
+
+    cfg = get_config()
+    universes = _seed_desk(cfg)
+    _build(cfg, universes)
+
+    agent = _priced_agents(cfg)[0]
+    bench_path = cfg.baselines_dir / agent / "benchmark.json"
+    bench_before = _values(bench_path)
+
+    _seed_desk(cfg, last_close=999.0)
+    _build(cfg, universes, restate_series={"benchmark"})
+    capsys.readouterr()
+
+    assert _values(bench_path) != bench_before
+
+
+def test_a_fully_qualified_series_restates_only_that_agent(midas_data_root, capsys):
+    """`<agent>/<kind>` narrows to one file; other agents stay frozen."""
+    from engine.config import get_config
+
+    cfg = get_config()
+    universes = _seed_desk(cfg)
+    _build(cfg, universes)
+
+    priced = _priced_agents(cfg)
+    target, bystander = priced[0], priced[1]
+    target_path = cfg.baselines_dir / target / "benchmark.json"
+    bystander_path = cfg.baselines_dir / bystander / "benchmark.json"
+    target_before = _values(target_path)
+    bystander_before = _values(bystander_path)
+
+    _seed_desk(cfg, last_close=999.0)
+    _build(cfg, universes, restate_series={f"{target}/benchmark"})
+    capsys.readouterr()
+
+    assert _values(target_path) != target_before
+    assert _values(bystander_path) == bystander_before
+
+
+def test_no_scope_means_nothing_restates(midas_data_root, capsys):
+    """Default is append-or-refuse — the same posture as passing nothing."""
+    from engine.config import get_config
+
+    cfg = get_config()
+    universes = _seed_desk(cfg)
+    _build(cfg, universes)
+
+    agent = _priced_agents(cfg)[0]
+    bench_path = cfg.baselines_dir / agent / "benchmark.json"
+    before = _values(bench_path)
+
+    _seed_desk(cfg, last_close=999.0)
+    _build(cfg, universes)
+    capsys.readouterr()
+
+    assert _values(bench_path) == before

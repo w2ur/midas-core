@@ -98,7 +98,16 @@ def test_uses_per_ticker_latest_close_when_dates_differ(midas_data_root: Path) -
     assert pv == pytest.approx(5 * 293.32 * (1 / 1.25) + 2 * 1300.0)
 
 
-def test_falls_back_to_avg_cost_when_no_price_in_store(midas_data_root: Path) -> None:
+def test_refuses_rather_than_falling_back_to_avg_cost(midas_data_root: Path) -> None:
+    """Changed 2026-08-07 (review W4.5): this used to value at `avg_cost`.
+
+    Cost is not a valuation — it is the last price at which somebody was
+    willing to transact, which may be months stale. And snapshots are
+    immutable, so a snapshot written from cost is permanent. The session now
+    skips that book's row for the day instead; `step_update_snapshots`
+    catches this per portfolio, so one unpriceable book does not abort the
+    session.
+    """
     store = get_config().ohlcv_dir
     store.mkdir(parents=True, exist_ok=True)
     # UNKNOWN resolves to USD (no suffix, no override); the book is EUR.
@@ -118,9 +127,8 @@ def test_falls_back_to_avg_cost_when_no_price_in_store(midas_data_root: Path) ->
         ]
     )
 
-    pv = _compute_positions_value(portfolio, date(2026, 5, 8), store=store)
-
-    assert pv == pytest.approx(10 * 50.0 * (1 / 1.25))
+    with pytest.raises(MissingPriceError):
+        _compute_positions_value(portfolio, date(2026, 5, 8), store=store)
 
 
 def test_empty_portfolio_returns_zero(tmp_path: Path) -> None:

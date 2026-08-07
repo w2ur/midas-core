@@ -25,7 +25,7 @@ from __future__ import annotations
 import json
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Iterator
+from typing import Collection, Iterator
 
 import pandas as pd
 
@@ -296,19 +296,42 @@ def merge_baseline_series(
     return appended, refused
 
 
+def _series_restated(
+    restate_series: Collection[str] | None, agent: str, kind: str
+) -> bool:
+    """Does the caller's restatement scope cover this one series?
+
+    A scope entry is either a bare kind (`"coinflip"` — every agent's coin
+    flip) or a fully-qualified `"<agent>/<kind>"` (`"goldfinger/coinflip"`).
+
+    This replaced a plain bool, which could only say "restate everything".
+    That is not a hypothetical shortcoming: on 2026-08-07 the coin-flip series
+    genuinely needed restating onto normalised units, the passive benchmarks
+    did not, and the blanket flag moved eight of them anyway — on *fresher
+    prices*, not on units, which is precisely the retroactive drift the
+    append-or-refuse rule exists to refuse. They had to be restored by hand.
+    An API that cannot express the intended scope will eventually be used
+    outside it.
+    """
+    if not restate_series:
+        return False
+    return kind in restate_series or f"{agent}/{kind}" in restate_series
+
+
 def build_all_baselines(
     universes_by_agent: dict[str, list[str]],
     from_date: date,
     to_date: date,
     max_positions_by_agent: dict[str, int] | None = None,
     *,
-    restate: bool = False,
+    restate_series: Collection[str] | None = None,
 ) -> None:
     """Produce all per-agent baseline files + the global reference file.
 
     Iterates get_config().trading_roster; agents whose benchmark is None are
-    skipped. Append-or-refuse: an already-published date is kept as-is
-    unless ``restate=True``. Missing OHLCV data for a brand-new agent (no
+    skipped. Append-or-refuse: an already-published date is kept as-is unless
+    the series is named in ``restate_series`` (see ``_series_restated`` for
+    the scoping rules, and for why this is not a bool). Missing OHLCV data for a brand-new agent (no
     prior file) yields an empty file — "no line to draw" for the site.
     Missing OHLCV data against an *established* baseline is not empty: the
     old file is kept frozen and a [WARN] is printed by
@@ -332,7 +355,9 @@ def build_all_baselines(
         agent_dir = baselines_dir / agent_id
         bench = compute_passive_benchmark(spec, from_date, to_date)
         appended, refused = merge_baseline_series(
-            agent_dir / "benchmark.json", bench, restate=restate
+            agent_dir / "benchmark.json",
+            bench,
+            restate=_series_restated(restate_series, agent_id, "benchmark"),
         )
         total_appended += appended
         total_refused += refused
@@ -348,7 +373,9 @@ def build_all_baselines(
             to_date=to_date,
         )
         appended, refused = merge_baseline_series(
-            agent_dir / "coinflip.json", coin, restate=restate
+            agent_dir / "coinflip.json",
+            coin,
+            restate=_series_restated(restate_series, agent_id, "coinflip"),
         )
         total_appended += appended
         total_refused += refused
@@ -356,7 +383,7 @@ def build_all_baselines(
     appended, refused = merge_baseline_series(
         baselines_dir / "global" / "msci_world.json",
         compute_global_reference(from_date, to_date),
-        restate=restate,
+        restate=_series_restated(restate_series, "global", "msci_world"),
     )
     total_appended += appended
     total_refused += refused

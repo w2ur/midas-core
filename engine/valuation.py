@@ -7,11 +7,68 @@ and by the orchestrator for budget verification.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date
 
 from engine.fx import convert as _fx_convert
 from engine.fx import to_eur
 from engine.quotes import latest_price as _latest_price
+from engine.quotes import ticker_currency as _ticker_currency
+
+
+@dataclass(frozen=True)
+class PositionValuation:
+    """One position's value in a book's currency, or why it has none.
+
+    `reason` uses the broker's own vocabulary (`NO_PRICE_DATA`,
+    `NO_FX_RATE`, `CURRENCY_UNRESOLVED`) so a valuation failure and a fill
+    rejection describe the same condition with the same word.
+    """
+
+    value: float | None
+    reason: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.reason is None
+
+
+def value_position(
+    ticker: str, shares: float, book_currency: str, on: date | None = None
+) -> PositionValuation:
+    """Value one position in `book_currency` — the single pricing decision.
+
+    This exists because the same question was being answered three different
+    ways. Asked to price a position it could not price, the snapshot writer
+    fell back to `avg_cost`, the leaderboard valued it at **zero**, and the
+    restatement engine raised. Same book, same missing row, three published
+    answers — and two of them were numbers, which is the problem: a wrong
+    number is indistinguishable from a right one downstream, while a refusal
+    is not.
+
+    All three now refuse. `portfolio_mtm` returns `None` for the whole book
+    (its callers already drop a book they cannot value), and the snapshot
+    writer raises so the session skips that book's row for the day rather
+    than publishing a valuation it had to invent — snapshots are immutable,
+    so an invented one is permanent.
+    """
+    quote = _latest_price(ticker, on)
+    if quote is None:
+        # `latest_price` returns None for two distinct conditions; separate
+        # them so the diagnostic points at the right thing. A registry gap is
+        # not a data gap and is fixed somewhere else entirely.
+        if _ticker_currency(ticker) is None:
+            return PositionValuation(None, "CURRENCY_UNRESOLVED")
+        return PositionValuation(None, "NO_PRICE_DATA")
+
+    native_value = shares * quote.price
+    if quote.currency == book_currency:
+        return PositionValuation(native_value)
+
+    converted = _fx_convert(native_value, quote.currency, book_currency, on)
+    if converted is None:
+        return PositionValuation(None, "NO_FX_RATE")
+    return PositionValuation(converted)
 
 
 def portfolio_mtm(portfolio_summary: dict, on: date | None = None) -> float | None:
@@ -41,16 +98,22 @@ def portfolio_mtm(portfolio_summary: dict, on: date | None = None) -> float | No
     -------
     float | None
         The mark-to-market value in `portfolio_summary["currency"]`, or
-        `None` if a held position's currency needs converting and the
-        required FX rate is unavailable. Returning `None` for the whole
-        book — rather than silently summing everything else and dropping
-        just the unconvertible position — avoids understating the book by a
-        precise-looking but wrong number; a missing *price* (ticker has no
-        OHLCV row at all) is a separate, pre-existing case and is still
-        skipped as zero, since there we truly have no information to guess
-        from either way. `portfolio_mtm_eur` and `mtm_base_currency`
-        propagate this `None` rather than raising, matching the leaderboard
-        call path's existing "skip this one book" contract
+        `None` if **any** held position cannot be valued — no price, no
+        resolvable quote currency, or no FX rate. Returning `None` for the
+        whole book, rather than summing everything else, avoids understating
+        it by a precise-looking but wrong number.
+
+        Missing *price* used to be treated differently here: the position was
+        skipped, which values it at zero. That was the weakest of the three
+        answers the codebase gave to the same question (2026-08-07 review,
+        W4.5) — a book quietly missing a position is exactly as wrong as one
+        summing an unconverted foreign close, and harder to notice because
+        the total still looks plausible. All three paths now refuse; see
+        `value_position`.
+
+        `portfolio_mtm_eur` and `mtm_base_currency` propagate this `None`
+        rather than raising, matching the leaderboard call path's existing
+        "skip this one book" contract
         (`engine.leaderboard.build_leaderboard_rows` already drops any agent
         whose EUR-MTM is `None`).
     """
@@ -75,18 +138,10 @@ def portfolio_mtm(portfolio_summary: dict, on: date | None = None) -> float | No
             shares = 0
         if not ticker or shares == 0:
             continue
-        quote = _latest_price(ticker, on)
-        if quote is None:
-            continue
-        price, ticker_currency = quote
-        native_value = shares * price
-        if ticker_currency == currency:
-            total += native_value
-        else:
-            converted = _fx_convert(native_value, ticker_currency, currency, on)
-            if converted is None:
-                return None
-            total += converted
+        valuation = value_position(ticker, shares, currency, on)
+        if not valuation.ok:
+            return None
+        total += valuation.value
     return total
 
 
