@@ -141,6 +141,12 @@ export MIDAS_DATA_DIR=/tmp/my-desk
 pytest -q
 ```
 
+The suite runs with **warnings as errors** (`filterwarnings` in `pyproject.toml`). Three
+third-party warnings are named as exceptions with their justification; anything else fails
+the run. That is a hard gate rather than a fragile one only because `requirements.txt` is a
+fully-resolved lockfile — a new upstream warning can reach you only through a deliberate
+lock bump.
+
 ## Run your own desk
 
 The whole cast is config. Copy the demo desk and edit two things:
