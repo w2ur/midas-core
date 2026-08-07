@@ -172,8 +172,15 @@ def test_the_heuristic_keys_on_the_exact_suffix_not_a_string_ending(
     assert vendor_quote_unit("OPAP.AT") == "EUR"
     assert vendor_quote_unit("7203.T") == "JPY"
     assert vendor_quote_unit("RY.TO") == "CAD"
-    # An unenumerated suffix keeps the pre-existing USD default.
-    assert vendor_quote_unit("FOO.ZZ") == "USD"
+    # An unenumerated suffix now resolves to NOTHING (2026-08-07, review W1.4).
+    # It used to answer USD, which is how 126 tickers in `world`'s universe were
+    # silently valued as dollars — the failure mode with no symptom, because a
+    # wrong currency still prices. Refusing is loud; guessing was not.
+    assert vendor_quote_unit("FOO.ZZ") is None
+    assert ticker_currency("FOO.ZZ") is None
+    # A bare ticker keeps USD: that is Yahoo's convention for a US listing, not
+    # a guess about an exchange we failed to enumerate.
+    assert vendor_quote_unit("AAPL") == "USD"
 
 
 def test_registry_entry_without_a_currency_falls_back(midas_data_root: Path) -> None:

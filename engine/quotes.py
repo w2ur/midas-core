@@ -15,11 +15,16 @@ Two facts the rest of the engine must never have to know individually:
    vendor cannot answer for.
 
 2. **`GBp` is a unit, not a currency.** The LSE quotes most of its order
-   book in pence. `GBp 116.60` is `GBP 1.1660`. The store holds the raw
-   vendor quote — pence — because that is what the vendor publishes and what
-   an agent reading `data/market/ohlcv/LLOY.L.jsonl` sees. Converting it is
-   the job of exactly one function here, `normalise_quote`, so that no two
-   pricing paths can disagree about whether it has already happened.
+   book in pence. `GBp 116.60` is `GBP 1.1660`. Since 2026-08-07 the store
+   is **ISO-denominated**: the pence→pounds division happens exactly once,
+   on the *ingest* side, in `scripts.fetch_ohlcv._normalise_vendor_units`
+   via `vendor_unit_scale`. A row in `data/market/ohlcv/LLOY.L.jsonl` is
+   therefore already pounds.
+
+   The split between `normalise_vendor_quote` (converts a **vendor** price)
+   and `store_quote` (labels a **stored** price, scaling nothing) is what
+   makes double-application structurally impossible. **A read path must
+   never scale** — doing so divides every LSE price by 100 twice.
 
 Resolution order (highest first):
 
@@ -28,7 +33,10 @@ Resolution order (highest first):
      stopped answering for (`WDFC.SW` is delisted at Yahoo and still needs a
      currency).
   2. `data/tickers.json` — the vendor-captured registry (`currency` field).
-  3. The suffix heuristic below.
+  3. The suffix heuristic below — and if that has no entry for the suffix,
+     **`None`**, not a guess. Everything here can return `None`; the broker
+     turns it into a `CURRENCY_UNRESOLVED` rejection rather than trading a
+     position it cannot denominate.
 
 Stdlib + engine only: this module is in the `midas-core` sync manifest, so
 it must never import a vendor client. The vendor call lives in
@@ -50,9 +58,11 @@ from engine.ohlcv_store import latest_close_on_or_before
 class Quote(NamedTuple):
     """A price already denominated in an ISO currency.
 
-    `price` is never a sub-unit quote: `normalise_quote` has divided a pence
-    quote by 100 before this exists. `currency` is therefore always an ISO
-    4217 code, never `GBp`.
+    `price` is never a sub-unit quote: the pence→pounds division happened at
+    ingest (`normalise_vendor_quote`, via `vendor_unit_scale`) before this
+    exists. `currency` is therefore always an ISO 4217 code, never `GBp` —
+    and never `None`, because a price whose currency is unresolvable is
+    returned as `None` instead of as a Quote carrying an empty unit.
     """
 
     price: float
@@ -187,8 +197,21 @@ def _reset_caches() -> None:
 register_reset_callback(_reset_caches)
 
 
-def _heuristic_unit(ticker: str) -> str:
-    """Suffix-only guess. USD when nothing matches — the pre-existing default."""
+def _heuristic_unit(ticker: str) -> str | None:
+    """Suffix-only guess, or `None` when the suffix is one we do not know.
+
+    An **unenumerated suffix used to answer `USD`**, which is how 126 tickers
+    in `world`'s universe alone (`.ST`, `.MC`, `.BR`, `.HE`, `.OL`, `.CO`,
+    `.VI`, `.IR`, `.LS`, `.LU`, `.WA`, `.AT`) were silently valued as dollars
+    — the fourth failure mode of the 2026-08-07 quote-currency defect, and
+    the one that produced no visible symptom because a wrong currency still
+    prices. Guessing is not better than refusing: a `None` here becomes a
+    `CURRENCY_UNRESOLVED` rejection at the broker, which is loud.
+
+    A bare ticker with no suffix keeps `USD`. That is not a guess about an
+    unknown exchange — it is Yahoo's convention for a US listing, and the
+    only shape it can take.
+    """
     if ticker.endswith("-EUR"):
         return "EUR"
     if ticker.endswith("-USD"):
@@ -197,12 +220,12 @@ def _heuristic_unit(ticker: str) -> str:
         return "GBP"
     _, dot, suffix = ticker.rpartition(".")
     if dot:
-        return _SUFFIX_UNITS.get(suffix.upper(), "USD")
+        return _SUFFIX_UNITS.get(suffix.upper())
     return "USD"
 
 
-def vendor_quote_unit(ticker: str) -> str:
-    """The unit the VENDOR quotes `ticker` in.
+def vendor_quote_unit(ticker: str) -> str | None:
+    """The unit the VENDOR quotes `ticker` in, or `None` if unresolvable.
 
     May be a sub-unit code (`GBp`) — this is the raw answer, not an ISO
     code. It describes what arrives from yfinance, **not** what is in the
@@ -222,25 +245,36 @@ def vendor_quote_unit(ticker: str) -> str:
     return _heuristic_unit(ticker)
 
 
-def _iso_and_scale(unit: str) -> tuple[str, float]:
+def _iso_and_scale(unit: str | None) -> tuple[str | None, float]:
     """Split a quote unit into (ISO currency, price multiplier).
 
     Case-sensitive on purpose — see `_SUB_UNITS`. Anything not a known
     sub-unit is passed through upper-cased, so a hand-written override of
     `"eur"` still resolves to `EUR` at scale 1.0.
+
+    An unresolved unit yields `(None, 1.0)`: no currency, and no scaling
+    either. Scaling by anything other than 1.0 on an unknown unit would be
+    inventing the very fact we just admitted we do not have.
     """
+    if unit is None:
+        return None, 1.0
     if unit in _SUB_UNITS:
         return _SUB_UNITS[unit]
     return unit.upper(), 1.0
 
 
-def ticker_currency(ticker: str) -> str:
-    """Resolve ticker → ISO 4217 currency code.
+def ticker_currency(ticker: str) -> str | None:
+    """Resolve ticker → ISO 4217 currency code, or `None` if unresolvable.
 
     `GBp` (pence) resolves to `GBP`: the sub-unit is a quoting convention,
     not a currency, and `engine.fx` only knows ISO codes. The 1/100 that
     goes with it is applied to the *price* once, at ingest, by
     `normalise_vendor_quote`.
+
+    `None` means neither map answered and the suffix is unknown — see
+    `_heuristic_unit`. Every caller must decide explicitly what to do with
+    that; the broker rejects the order (`CURRENCY_UNRESOLVED`) rather than
+    trading a position it cannot denominate.
     """
     return _iso_and_scale(vendor_quote_unit(ticker))[0]
 
@@ -257,8 +291,11 @@ def vendor_unit_scale(ticker: str) -> float:
     return _iso_and_scale(vendor_quote_unit(ticker))[1]
 
 
-def normalise_vendor_quote(ticker: str, vendor_price: float) -> Quote:
+def normalise_vendor_quote(ticker: str, vendor_price: float) -> Quote | None:
     """Convert a raw VENDOR quote for `ticker` into its ISO currency.
+
+    `None` when the currency is unresolvable — the price would be a number
+    with no unit, which is what this module exists to stop.
 
     This is the only place the pence→pounds division exists, and since
     2026-08-07 it lives on the **ingest** side of the store rather than the
@@ -271,10 +308,12 @@ def normalise_vendor_quote(ticker: str, vendor_price: float) -> Quote:
     every reader had to remember to normalise, and three of them did not.
     """
     iso, scale = _iso_and_scale(vendor_quote_unit(ticker))
+    if iso is None:
+        return None
     return Quote(vendor_price * scale, iso)
 
 
-def store_quote(ticker: str, stored_price: float) -> Quote:
+def store_quote(ticker: str, stored_price: float) -> Quote | None:
     """Attach the ISO currency to a price read from the store.
 
     Deliberately applies **no** scaling: the store is ISO-denominated at
@@ -282,8 +321,16 @@ def store_quote(ticker: str, stored_price: float) -> Quote:
     exists rather than having callers pair the raw reader with
     `ticker_currency` by hand, because that hand-pairing is exactly what
     dropped the conversion on three pricing paths at once.
+
+    `None` when the currency is unresolvable. A price with no currency is
+    not a quote, and returning one anyway is how an unlabelled number
+    reaches `fx.convert` and comes back as if it were already in the book's
+    own currency.
     """
-    return Quote(stored_price, ticker_currency(ticker))
+    currency = ticker_currency(ticker)
+    if currency is None:
+        return None
+    return Quote(stored_price, currency)
 
 
 def latest_price(
@@ -292,8 +339,12 @@ def latest_price(
     """Latest close on or before `on`, in the ticker's ISO currency.
 
     Thin composition of `engine.ohlcv_store.latest_close_on_or_before` and
-    `store_quote`. Returns `None` on exactly the same condition the raw
-    reader does — ticker absent from the store, or no row on or before `on`.
+    `store_quote`. Returns `None` when the raw reader does — ticker absent
+    from the store, or no row on or before `on` — and also when the
+    ticker's currency is unresolvable, since an unlabelled price is not a
+    quote. Callers that must tell those two apart (the broker does: they
+    are `NO_PRICE_DATA` and `CURRENCY_UNRESOLVED`) should ask
+    `ticker_currency` first.
 
     No scaling happens here: the store is normalised at ingest. Prefer this
     over calling the raw reader plus `ticker_currency` separately — that

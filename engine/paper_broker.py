@@ -1,6 +1,6 @@
 """Paper broker — Hands side of the Brain/Hands split.
 
-Reads orders from data/orders/outbox/, applies 9 safety rails, fills at end-of-day
+Reads orders from data/orders/outbox/, applies the safety rails, fills at end-of-day
 close from the committed OHLCV store (latest-on-or-before the trade date — critical
 because the daily session fires at 20:00 UTC but fetch-ohlcv.yml runs at 22:30 UTC),
 writes data/orders/inbox/, mutates portfolios via PortfolioManager.apply_trade.
@@ -11,6 +11,10 @@ Rejection reason codes:
 - MAX_ORDER_NOTIONAL: order notional (base currency) > per-agent cap
 - TICKER_NOT_IN_UNIVERSE: allowed_universe is non-empty and ticker not in union
 - NO_PRICE_DATA: no row in OHLCV store for ticker <= trade_date
+- CURRENCY_UNRESOLVED: ticker's quote currency is in neither map and its suffix is unknown
+- PRICE_IMPLAUSIBLE: fill price outside [1/5, 5]x its reference (prior close on BUY, avg_cost on SELL)
+- TRIGGER_LEVEL_IMPLAUSIBLE: conditional order's level outside [0.2, 5.0]x the latest close
+- VALUATION_UNAVAILABLE: the book cannot be valued, so its relative rails cannot be evaluated
 - NO_FX_RATE: ticker currency ≠ base and no FX rate available to convert notional
 - INSUFFICIENT_CASH: BUY cost > portfolio cash (post earlier fills)
 - NO_POSITION_TO_SELL: SELL on a ticker not held
@@ -29,7 +33,7 @@ import json
 import logging
 import subprocess
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from engine.config import get_config
@@ -72,6 +76,10 @@ REJECTION_REASON_CODES = frozenset(
         "MAX_ORDER_NOTIONAL",
         "TICKER_NOT_IN_UNIVERSE",
         "NO_PRICE_DATA",
+        "CURRENCY_UNRESOLVED",
+        "PRICE_IMPLAUSIBLE",
+        "TRIGGER_LEVEL_IMPLAUSIBLE",
+        "VALUATION_UNAVAILABLE",
         "NO_FX_RATE",
         "INSUFFICIENT_CASH",
         "NO_POSITION_TO_SELL",
@@ -110,6 +118,7 @@ class AgentConfig:
     daily_drawdown_halt_pct: float
     allowed_universe: list[str]
     dry_run: bool
+    max_order_notional_pct: float | None = None
 
     @classmethod
     def load(cls, agent_id: str) -> "AgentConfig":
@@ -125,11 +134,129 @@ class AgentConfig:
         s = spec.safety
         return cls(
             max_order_notional=s.max_order_notional,
+            max_order_notional_pct=s.max_order_notional_pct,
             max_orders_per_day=s.max_orders_per_day,
             daily_drawdown_halt_pct=s.daily_drawdown_halt_pct,
             allowed_universe=list(s.allowed_universe),
             dry_run=s.dry_run,
         )
+
+
+#: A fill price more than this multiple of its reference — or less than its
+#: reciprocal — is refused. The reference is the prior stored close on a BUY
+#: and the position's own `avg_cost` on a SELL, both already in the ticker's
+#: ISO currency, so the comparison is unit-clean.
+#:
+#: 5x is deliberately loose. It is not a market-move detector: a stock can
+#: legitimately halve, and a crypto pair can legitimately double. What it
+#: catches is the class that has actually happened here — a unit or basis
+#: error, which arrives as a factor of 100 (pence quoted as pounds) or of the
+#: split ratio. Two orders of magnitude of headroom over a 100x error, and
+#: nothing in the committed ledger sits anywhere near the band.
+PRICE_BAND = 5.0
+
+#: A conditional order's trigger level outside this multiple of the latest
+#: stored close is refused at intake, before it can ever fire. All 68 live
+#: pending orders sit within [0.77, 2.06]; the 2026-08-07 pence-stop (level
+#: 111.00 against a 1.16 price) sits at 95.7.
+TRIGGER_LEVEL_MIN = 0.2
+TRIGGER_LEVEL_MAX = 5.0
+
+
+def _price_out_of_band(price: float, reference: float | None) -> bool:
+    """True when `price` is implausibly far from `reference`.
+
+    A missing or non-positive reference means "no opinion" — the check
+    abstains rather than guessing, because the alternative is rejecting every
+    first-ever BUY in a ticker.
+    """
+    if reference is None or reference <= 0 or price <= 0:
+        return False
+    ratio = price / reference
+    return ratio > PRICE_BAND or ratio < 1.0 / PRICE_BAND
+
+
+def _reference_price(order: Order, portfolio, trade_date: date) -> float | None:
+    """What today's fill price for `order` should look roughly like.
+
+    SELL compares against the position's own `avg_cost` — the price the book
+    actually paid, in the ticker's currency, which is the tightest reference
+    available and the one that catches a basis change under an existing
+    holding.
+
+    BUY has no position to lean on, so it compares against the **prior**
+    stored close rather than today's: today's close is the very number under
+    suspicion, and comparing it to itself is the classic check that cannot
+    fail. `None` (a first-ever BUY, or a ticker with a single stored row)
+    means the check abstains.
+    """
+    if order.action == "SELL":
+        position = next(
+            (p for p in portfolio.positions if p.ticker == order.ticker), None
+        )
+        return position.avg_cost if position is not None else None
+    previous = latest_price(order.ticker, trade_date - timedelta(days=1))
+    return previous.price if previous is not None else None
+
+
+def _trigger_level_out_of_band(order: Order, trade_date: date) -> bool:
+    """True when a conditional order's level is nowhere near the live price.
+
+    Caught at **intake**, not at fire time: a pending order sits on disk for
+    days, and the point is that it never becomes an armed instruction in the
+    first place. This is the rail for incident #9 — a stop authored in pence
+    (level 111.00) against a ticker trading at GBP 1.16, which no other check
+    in the system could see.
+
+    Abstains when the ticker has no price and when the level is non-positive
+    (the Order validator already refuses that shape).
+    """
+    if order.trigger is None:
+        return False
+    level = order.trigger.get("level")
+    if not isinstance(level, (int, float)) or level <= 0:
+        return False
+    quote = latest_price(order.ticker, trade_date)
+    if quote is None or quote.price <= 0:
+        return False
+    ratio = level / quote.price
+    return ratio < TRIGGER_LEVEL_MIN or ratio > TRIGGER_LEVEL_MAX
+
+
+def _book_value(
+    agent_id: str, portfolio_manager: PortfolioManager, on: date
+) -> float | None:
+    """The book's current value in its own currency, for the relative rails.
+
+    Falls back through: today's mark-to-market → the last published snapshot
+    → the roster's initial capital. The fallbacks matter because the cap has
+    to exist on day one (no snapshot yet) and must not evaporate the moment
+    an FX rate is missing. `None` only when the agent is off-roster AND has
+    no snapshot, which the caller treats as "cannot evaluate the rail".
+    """
+    portfolio = portfolio_manager.load(agent_id)
+    value = mtm_base_currency(portfolio.to_dict(), on)
+    if value is not None:
+        return value
+    snaps = portfolio_manager.load_snapshots(agent_id)
+    if snaps:
+        return snaps[-1].get("portfolio_value")
+    spec = get_config().roster.get(agent_id)
+    return spec.initial_capital if spec is not None else None
+
+
+def _notional_cap(config: AgentConfig, book_value: float | None) -> float | None:
+    """The per-order notional ceiling, in the book's base currency.
+
+    `None` means the rail cannot be evaluated — a percentage cap against a
+    book that will not value. The caller refuses the order rather than
+    treating an unknown ceiling as no ceiling.
+    """
+    if config.max_order_notional_pct is None:
+        return config.max_order_notional
+    if book_value is None:
+        return None
+    return book_value * config.max_order_notional_pct / 100.0
 
 
 # Currency resolution moved to engine.quotes (2026-08-07). It was a pure
@@ -144,17 +271,22 @@ _ticker_currency = ticker_currency
 
 def _drawdown_pct(
     agent_id: str, portfolio_manager: PortfolioManager, today: date
-) -> float:
+) -> float | None:
     """Drawdown % from the most recent snapshot, in the portfolio's base currency.
 
-    Returns 0.0 if no snapshot exists yet (first day of experiment), or if
-    today's value can't be computed because a held position's currency
-    differs from the book's own and the FX rate needed to convert it is
-    unavailable (`mtm_base_currency` returns `None` in that case — see
-    `engine.valuation.portfolio_mtm`). Same "can't determine it, don't halt
-    on unknown data" fallback already used two lines above for the
-    no-prior-snapshot case; this rail's other batch-level counterpart
-    (MAX_ORDERS_PER_DAY) is unaffected either way.
+    Returns 0.0 — a known "no drawdown" — when no snapshot exists yet (first
+    day of the experiment) or when the previous value was zero.
+
+    Returns **None** when today's value cannot be computed at all, because a
+    held position's currency differs from the book's own and the FX rate
+    needed to convert it is unavailable (`mtm_base_currency` returns `None`
+    there — see `engine.valuation.portfolio_mtm`). This used to be 0.0, on a
+    "can't determine it, don't halt on unknown data" reading. That reading is
+    backwards for a rail: it makes the halt *disappear* precisely when the
+    book has become unvaluable, which is the state most likely to accompany a
+    real problem. The caller now refuses the batch with
+    VALUATION_UNAVAILABLE instead — a rail that cannot be evaluated is not a
+    rail that passed.
     """
     snaps = portfolio_manager.load_snapshots(agent_id)
     if not snaps:
@@ -163,7 +295,7 @@ def _drawdown_pct(
     summary = portfolio.to_dict()
     today_value = mtm_base_currency(summary, today)
     if today_value is None:
-        return 0.0
+        return None
     prev_value = snaps[-1]["portfolio_value"]
     if prev_value == 0:
         return 0.0
@@ -307,6 +439,13 @@ def _process_one(
     if allowed_tickers and order.ticker not in allowed_tickers:
         return _reject(order.order_id, "TICKER_NOT_IN_UNIVERSE")
 
+    # Asked before the price read, so the two failures stay distinguishable:
+    # latest_price returns None both for "no row in the store" and for "no
+    # resolvable currency", and an operator reading the inbox needs to know
+    # which. An unresolvable currency is a registry gap, not a data gap.
+    if ticker_currency(order.ticker) is None:
+        return _reject(order.order_id, "CURRENCY_UNRESOLVED")
+
     # store defaults to get_config().ohlcv_dir inside latest_price — resolved at
     # call time so MIDAS_DATA_DIR redirection reaches the broker's fills.
     # latest_price returns the close ALREADY in the ticker's ISO currency: a
@@ -320,6 +459,10 @@ def _process_one(
 
     portfolio = portfolio_manager.load(order.agent_id)
     base_ccy = portfolio.currency
+
+    if _price_out_of_band(price, _reference_price(order, portfolio, trade_date)):
+        return _reject(order.order_id, "PRICE_IMPLAUSIBLE")
+
     notional_native = order.shares * price
 
     if ticker_ccy == base_ccy:
@@ -330,7 +473,12 @@ def _process_one(
             return _reject(order.order_id, "NO_FX_RATE")
         notional_base = converted
 
-    if notional_base > config.max_order_notional:
+    cap = _notional_cap(
+        config, _book_value(order.agent_id, portfolio_manager, trade_date)
+    )
+    if cap is None:
+        return _reject(order.order_id, "VALUATION_UNAVAILABLE")
+    if notional_base > cap:
         return _reject(order.order_id, "MAX_ORDER_NOTIONAL")
 
     fee = fee_for(order.ticker, notional_base)
@@ -473,6 +621,10 @@ def fill_day(
             _emit(_reject(o.order_id, "TRIGGER_NO_EXPIRY"))
             already_processed.add(o.order_id)
             continue
+        if _trigger_level_out_of_band(o, trade_date):
+            _emit(_reject(o.order_id, "TRIGGER_LEVEL_IMPLAUSIBLE"))
+            already_processed.add(o.order_id)
+            continue
         save_pending(o, pending_dir=pending_dir)
         # No inbox record on successful registration — the agent sees it
         # next session in their "Active triggers" prompt section.
@@ -485,10 +637,18 @@ def fill_day(
     for agent_id, agent_orders in by_agent.items():
         config = AgentConfig.load(agent_id)
 
-        if (
-            _drawdown_pct(agent_id, portfolio_manager, trade_date)
-            < config.daily_drawdown_halt_pct
-        ):
+        # A book that will not value fails the batch closed. The drawdown rail
+        # is the one rail that can stop a whole day's trading, and letting it
+        # silently pass on an unvaluable book (the previous 0.0 fallback) meant
+        # it switched itself off exactly when the book was in an unusual state.
+        drawdown = _drawdown_pct(agent_id, portfolio_manager, trade_date)
+        if drawdown is None:
+            for o in agent_orders:
+                _emit(_reject(o.order_id, "VALUATION_UNAVAILABLE"))
+                already_processed.add(o.order_id)
+            continue
+
+        if drawdown < config.daily_drawdown_halt_pct:
             for o in agent_orders:
                 _emit(_reject(o.order_id, "DAILY_DRAWDOWN_HALT"))
                 already_processed.add(o.order_id)
@@ -544,11 +704,12 @@ def _execute_triggered_order(
 
     Differences from market-order processing:
       - `fire_price` is the live price observed by the watcher, used as fill_price
-        instead of a store read. It arrives as a RAW vendor quote and is
-        denominated by `engine.quotes.store_quote`; the pence→pounds scaling for
-        an LSE listing), so the rails (notional cap, cash check, position check)
-        are evaluated in the ticker's ISO currency, exactly as on the market-fill
-        path.
+        instead of a store read. It is ALREADY ISO-denominated (ccxt, or the
+        store, which has been normalised at ingest since 2026-08-07), so
+        `engine.quotes.store_quote` only labels it — it applies no scaling, and
+        must not: scaling here would divide every LSE fire price by 100 a second
+        time. The rails (notional cap, cash check, position check) are therefore
+        evaluated in the ticker's ISO currency, exactly as on the market path.
       - The returned Fill always has trigger_fired=True so the agent and the site
         can distinguish scheduled fills from market fills.
       - Does NOT consult MAX_ORDERS_PER_DAY (a triggered fire is not a same-day order).
@@ -592,7 +753,27 @@ def _execute_triggered_order(
     # currency explicitly rather than pairing the raw value with
     # `ticker_currency` by hand. It must NOT scale: doing so would divide every
     # LSE fire price by 100 a second time.
-    fire_price, ticker_ccy = store_quote(order.ticker, fire_price)
+    denominated = store_quote(order.ticker, fire_price)
+    if denominated is None:
+        f = _reject(order.order_id, "CURRENCY_UNRESOLVED")
+        f.trigger_fired = True
+        return f
+    fire_price, ticker_ccy = denominated
+
+    # The fire price came from ccxt or from the store; the store is the
+    # reference either way. A SELL leans on the position's own avg_cost, as
+    # on the market path. This is the check that would have refused a pence
+    # level firing against a pounds book.
+    if order.action == "SELL":
+        reference = _reference_price(order, portfolio, trade_date)
+    else:
+        stored = latest_price(order.ticker, trade_date)
+        reference = stored.price if stored is not None else None
+    if _price_out_of_band(fire_price, reference):
+        f = _reject(order.order_id, "PRICE_IMPLAUSIBLE")
+        f.trigger_fired = True
+        return f
+
     notional_native = order.shares * fire_price
 
     if ticker_ccy == base_ccy:
@@ -612,7 +793,14 @@ def _execute_triggered_order(
         f.trigger_fired = True
         return f
 
-    if notional_base > config.max_order_notional:
+    cap = _notional_cap(
+        config, _book_value(order.agent_id, portfolio_manager, trade_date)
+    )
+    if cap is None:
+        f = _reject(order.order_id, "VALUATION_UNAVAILABLE")
+        f.trigger_fired = True
+        return f
+    if notional_base > cap:
         f = _reject(order.order_id, "MAX_ORDER_NOTIONAL")
         f.trigger_fired = True
         return f

@@ -1278,6 +1278,13 @@ def _compute_positions_value(
         quote = latest_price(p.ticker, on, store=store)
         if quote is None:
             price, ticker_ccy = p.avg_cost, ticker_currency(p.ticker)
+            if ticker_ccy is None:
+                # Since 2026-08-07 an unenumerated suffix resolves to nothing
+                # rather than guessing USD. Say so plainly here: letting a None
+                # currency fall through to fx_convert raises the same error a
+                # missing rate does, and "None->EUR" sends the reader looking
+                # for an FX gap that does not exist.
+                raise MissingPriceError(p.ticker, on, what="quote currency")
         else:
             price, ticker_ccy = quote
         native_value = p.shares * price

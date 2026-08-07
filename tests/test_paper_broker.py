@@ -1089,24 +1089,49 @@ class TestSafetyFold:
         assert rails.dry_run == spec_safety.dry_run
 
     @pytest.mark.live_cast
-    def test_satoshi_has_folded_permissive_values(self, midas_data_root):
-        """satoshi's safety fold preserved the permissive paper-only rails."""
+    def test_satoshi_rails_are_calibrated_to_bind(self, midas_data_root):
+        """Rails recalibrated 2026-08-07 (reliability review W1.1).
+
+        They were `1_000_000 / 100 / -95%` on a €10,000 book: a per-order cap
+        100x the entire portfolio, a daily count no agent has ever approached,
+        and a halt that fires only after the book has lost nearly everything.
+        Those are not limits, they are decoration — the broker could not say
+        no to a 100x unit error.
+        """
         from engine.paper_broker import AgentConfig
 
         rails = AgentConfig.load("satoshi")
-        assert rails.max_order_notional == 1_000_000.0
-        assert rails.daily_drawdown_halt_pct == -95.0
-        assert rails.max_orders_per_day == 100
+        assert rails.max_order_notional_pct == 30.0
+        assert rails.daily_drawdown_halt_pct == -15.0
+        assert rails.max_orders_per_day == 10
         assert rails.dry_run is False
 
     @pytest.mark.live_cast
-    def test_yolo_sapiens_eur_has_folded_permissive_values(self, midas_data_root):
-        """Spot-check a second trader to confirm the fold is roster-wide."""
+    def test_every_trader_shares_the_calibrated_rails(self, midas_data_root):
+        """Roster-wide, not spot-checked: one un-migrated agent is a hole."""
         from engine.paper_broker import AgentConfig
 
-        rails = AgentConfig.load("yolo-sapiens-eur")
-        assert rails.max_order_notional == 1_000_000.0
-        assert rails.daily_drawdown_halt_pct == -95.0
+        cfg = get_config()
+        assert len(cfg.trading_roster) == 10
+        for agent_id in cfg.trading_roster:
+            rails = AgentConfig.load(agent_id)
+            assert rails.max_order_notional_pct == 30.0, agent_id
+            assert rails.max_orders_per_day == 10, agent_id
+            assert rails.daily_drawdown_halt_pct == -15.0, agent_id
+
+    @pytest.mark.live_cast
+    def test_relative_cap_binds_at_the_current_book_size(self, midas_data_root):
+        """The number that matters is the one the rail produces, not the config.
+
+        A percentage is only an improvement if it actually resolves to
+        something smaller than the book — pin the arithmetic, not the literal.
+        """
+        from engine.paper_broker import AgentConfig, _notional_cap
+
+        rails = AgentConfig.load("satoshi")
+        assert _notional_cap(rails, 10_000.0) == 3_000.0
+        # And it self-scales, which is the point: no maintenance as books move.
+        assert _notional_cap(rails, 25_000.0) == 7_500.0
 
     def test_not_in_roster_agent_gets_safe_defaults(self, midas_data_root):
         """the-manager is not in roster.yaml; it must receive safe defaults.
@@ -1121,3 +1146,296 @@ class TestSafetyFold:
         assert rails.daily_drawdown_halt_pct == -5.0
         assert rails.max_orders_per_day == 5  # original default, NOT 100
         assert rails.dry_run is False
+
+
+# ---------------------------------------------------------------------------
+# Reliability review W1 — the broker can say no
+#
+# Every rail below is written so that removing it turns a rejection into a
+# fill. The point of the review's W1 was not "add checks" but "make the
+# broker capable of refusing a 100x unit error", so each test asserts on the
+# refusal AND a neighbouring legitimate case that must still pass.
+# ---------------------------------------------------------------------------
+
+
+class TestPriceImplausible:
+    def test_rejects_a_hundred_times_fill_price(self, broker_env):
+        """The shape the GBp defect took: a price off by two orders of magnitude."""
+        from engine.paper_broker import fill_day
+
+        _write_config(broker_env["config_dir"], "a1")
+        pm = _init_portfolio(broker_env["pm_base"], "a1", cash=10_000.0)
+        # Yesterday 1.16, today 116.00 — a store that reverted to pence.
+        _seed_ohlcv(
+            broker_env["ohlcv"], "LLOY.L", [("2026-04-16", 1.16), ("2026-04-17", 116.0)]
+        )
+        append_order(TRADE_DATE, _make_order("o1", "a1", "BUY", "LLOY.L", 1.0))
+
+        fills = fill_day(TRADE_DATE, pm)
+        assert [f.reason for f in fills] == ["PRICE_IMPLAUSIBLE"]
+
+    def test_rejects_a_hundredth_fill_price(self, broker_env):
+        """And the mirror image — the double-divide, not just the missed one."""
+        from engine.paper_broker import fill_day
+
+        _write_config(broker_env["config_dir"], "a1")
+        pm = _init_portfolio(broker_env["pm_base"], "a1", cash=10_000.0)
+        _seed_ohlcv(
+            broker_env["ohlcv"], "LLOY.L", [("2026-04-16", 116.0), ("2026-04-17", 1.16)]
+        )
+        append_order(TRADE_DATE, _make_order("o1", "a1", "BUY", "LLOY.L", 1.0))
+
+        fills = fill_day(TRADE_DATE, pm)
+        assert [f.reason for f in fills] == ["PRICE_IMPLAUSIBLE"]
+
+    def test_a_violent_but_real_move_still_fills(self, broker_env):
+        """The must-pass control: -60% in a day is a market, not a unit error.
+
+        Without this, a band tight enough to feel safe would quietly stop the
+        desk trading through a crash — the rail becoming the incident.
+        """
+        from engine.paper_broker import fill_day
+
+        _write_config(broker_env["config_dir"], "a1")
+        pm = _init_portfolio(broker_env["pm_base"], "a1", cash=10_000.0)
+        _seed_ohlcv(
+            broker_env["ohlcv"], "AAPL", [("2026-04-16", 100.0), ("2026-04-17", 40.0)]
+        )
+        append_order(TRADE_DATE, _make_order("o1", "a1", "BUY", "AAPL", 1.0))
+
+        fills = fill_day(TRADE_DATE, pm)
+        assert [f.status for f in fills] == ["filled"]
+
+    def test_a_first_ever_buy_has_no_reference_and_fills(self, broker_env):
+        """One stored row means no prior close. Abstain, do not refuse."""
+        from engine.paper_broker import fill_day
+
+        _write_config(broker_env["config_dir"], "a1")
+        pm = _init_portfolio(broker_env["pm_base"], "a1", cash=10_000.0)
+        _seed_ohlcv(broker_env["ohlcv"], "AAPL", [("2026-04-17", 190.0)])
+        append_order(TRADE_DATE, _make_order("o1", "a1", "BUY", "AAPL", 1.0))
+
+        fills = fill_day(TRADE_DATE, pm)
+        assert [f.status for f in fills] == ["filled"]
+
+    def test_sell_is_measured_against_the_position_cost(self, broker_env):
+        """A SELL leans on avg_cost — the price the book actually paid."""
+        from engine.paper_broker import fill_day
+
+        _write_config(broker_env["config_dir"], "a1")
+        pm = _init_portfolio(broker_env["pm_base"], "a1", cash=10_000.0)
+        _seed_ohlcv(broker_env["ohlcv"], "AAPL", [("2026-04-17", 190.0)])
+        append_order(TRADE_DATE, _make_order("o1", "a1", "BUY", "AAPL", 10.0))
+        fill_day(TRADE_DATE, pm)
+
+        # The store re-denominates by 100x overnight; the book paid 190.
+        later = date(2026, 4, 18)
+        _seed_ohlcv(
+            broker_env["ohlcv"],
+            "AAPL",
+            [("2026-04-17", 190.0), ("2026-04-18", 19_000.0)],
+        )
+        append_order(later, _make_order("o2", "a1", "SELL", "AAPL", 5.0))
+
+        fills = fill_day(later, pm)
+        assert [f.reason for f in fills] == ["PRICE_IMPLAUSIBLE"]
+
+
+class TestTriggerLevelImplausible:
+    def test_rejects_a_pence_level_against_a_pounds_price(self, broker_env):
+        """Incident #9, the one with no regression coverage until now.
+
+        A stop authored at 111.00 (pence) on a ticker the store prices at
+        GBP 1.16. Nothing in the system could see this: the level was a valid
+        float, the ticker was in the universe, and the order simply sat in
+        pending waiting to fire the instant it was armed.
+        """
+        from engine.paper_broker import fill_day
+        from engine.triggers import list_pending
+
+        _write_config(broker_env["config_dir"], "a1")
+        pm = _init_portfolio(broker_env["pm_base"], "a1", cash=10_000.0, currency="EUR")
+        _seed_ohlcv(broker_env["ohlcv"], "LLOY.L", [("2026-04-17", 1.16)])
+
+        append_order(
+            TRADE_DATE,
+            Order(
+                order_id="ord_stop",
+                ts=datetime(2026, 4, 17, 20, 0, tzinfo=timezone.utc),
+                agent_id="a1",
+                action="SELL",
+                ticker="LLOY.L",
+                shares=100.0,
+                reasoning="stop at 111",
+                currency="EUR",
+                trigger={"op": "<=", "level": 111.0},
+                expires="2026-05-17",
+            ),
+        )
+
+        fills = fill_day(TRADE_DATE, pm)
+        assert [f.reason for f in fills] == ["TRIGGER_LEVEL_IMPLAUSIBLE"]
+        # And it never became an armed instruction.
+        assert list_pending() == []
+
+    def test_an_ordinary_stop_still_registers(self, broker_env):
+        """Control: all 68 live pending orders sit within [0.77, 2.06]."""
+        from engine.paper_broker import fill_day
+        from engine.triggers import list_pending
+
+        _write_config(broker_env["config_dir"], "a1")
+        pm = _init_portfolio(broker_env["pm_base"], "a1", cash=10_000.0, currency="EUR")
+        _seed_ohlcv(broker_env["ohlcv"], "LLOY.L", [("2026-04-17", 1.16)])
+
+        append_order(
+            TRADE_DATE,
+            Order(
+                order_id="ord_stop",
+                ts=datetime(2026, 4, 17, 20, 0, tzinfo=timezone.utc),
+                agent_id="a1",
+                action="SELL",
+                ticker="LLOY.L",
+                shares=100.0,
+                reasoning="stop 10% below",
+                currency="EUR",
+                trigger={"op": "<=", "level": 1.04},
+                expires="2026-05-17",
+            ),
+        )
+
+        fills = fill_day(TRADE_DATE, pm)
+        assert fills == []
+        assert len(list_pending()) == 1
+
+
+class TestCurrencyUnresolved:
+    def test_rejects_a_ticker_no_layer_can_denominate(self, broker_env):
+        """An unknown suffix used to answer USD. Now it answers nothing."""
+        from engine.paper_broker import fill_day
+
+        _write_config(broker_env["config_dir"], "a1")
+        pm = _init_portfolio(broker_env["pm_base"], "a1", cash=10_000.0)
+        _seed_ohlcv(broker_env["ohlcv"], "FOO.ZZ", [("2026-04-17", 42.0)])
+        append_order(TRADE_DATE, _make_order("o1", "a1", "BUY", "FOO.ZZ", 1.0))
+
+        fills = fill_day(TRADE_DATE, pm)
+        assert [f.reason for f in fills] == ["CURRENCY_UNRESOLVED"]
+
+    def test_an_override_entry_rescues_the_same_ticker(self, broker_env):
+        """The control that proves the rejection is about the maps, not the
+        ticker: add it to layer 1 and the identical order fills."""
+        from engine.config import reset_config_cache
+        from engine.paper_broker import fill_day
+
+        broker_env["ticker_ccy"].write_text(json.dumps({"FOO.ZZ": "USD"}))
+        reset_config_cache()
+
+        _write_config(broker_env["config_dir"], "a1")
+        pm = _init_portfolio(broker_env["pm_base"], "a1", cash=10_000.0)
+        _seed_ohlcv(broker_env["ohlcv"], "FOO.ZZ", [("2026-04-17", 42.0)])
+        append_order(TRADE_DATE, _make_order("o1", "a1", "BUY", "FOO.ZZ", 1.0))
+
+        fills = fill_day(TRADE_DATE, pm)
+        assert [f.status for f in fills] == ["filled"]
+
+
+class TestRelativeNotionalCap:
+    def test_rejects_an_order_above_thirty_percent_of_the_book(self, broker_env):
+        from engine.paper_broker import fill_day
+
+        _write_config(
+            broker_env["config_dir"],
+            "a1",
+            max_order_notional_pct=30.0,
+            max_order_notional=1_000_000.0,
+        )
+        pm = _init_portfolio(broker_env["pm_base"], "a1", cash=10_000.0)
+        _seed_ohlcv(broker_env["ohlcv"], "AAPL", [("2026-04-17", 100.0)])
+        # 31 x 100 = 3_100 on a 10_000 book — over the 3_000 ceiling.
+        append_order(TRADE_DATE, _make_order("o1", "a1", "BUY", "AAPL", 31.0))
+
+        fills = fill_day(TRADE_DATE, pm)
+        assert [f.reason for f in fills] == ["MAX_ORDER_NOTIONAL"]
+
+    def test_the_percentage_beats_the_absolute_when_both_are_set(self, broker_env):
+        """A percentage cap must not be silently widened by a stale absolute.
+
+        The absolute here is 1_000_000 — the value the ten traders actually
+        ran with. If precedence went the other way this order would fill.
+        """
+        from engine.paper_broker import fill_day
+
+        _write_config(
+            broker_env["config_dir"],
+            "a1",
+            max_order_notional_pct=30.0,
+            max_order_notional=1_000_000.0,
+        )
+        pm = _init_portfolio(broker_env["pm_base"], "a1", cash=10_000.0)
+        _seed_ohlcv(broker_env["ohlcv"], "AAPL", [("2026-04-17", 100.0)])
+        append_order(TRADE_DATE, _make_order("o1", "a1", "BUY", "AAPL", 29.0))
+
+        fills = fill_day(TRADE_DATE, pm)
+        assert [f.status for f in fills] == ["filled"]
+
+    def test_an_absolute_only_config_is_unchanged(self, broker_env):
+        """Forks and the allocator keep the fixed cap — no silent migration."""
+        from engine.paper_broker import fill_day
+
+        _write_config(broker_env["config_dir"], "a1", max_order_notional=500.0)
+        pm = _init_portfolio(broker_env["pm_base"], "a1", cash=10_000.0)
+        _seed_ohlcv(broker_env["ohlcv"], "AAPL", [("2026-04-17", 100.0)])
+        append_order(TRADE_DATE, _make_order("o1", "a1", "BUY", "AAPL", 6.0))
+
+        fills = fill_day(TRADE_DATE, pm)
+        assert [f.reason for f in fills] == ["MAX_ORDER_NOTIONAL"]
+
+
+class TestValuationUnavailable:
+    def test_a_book_that_will_not_value_halts_instead_of_trading(self, broker_env):
+        """W1.5: an unevaluated rail is not a passed rail.
+
+        The book holds a position in a currency with no available FX rate, so
+        `mtm_base_currency` returns None. That used to read as drawdown 0.0 —
+        the halt switching itself off exactly when the book had become
+        unvaluable.
+        """
+        from engine.config import reset_config_cache
+        from engine.paper_broker import fill_day
+
+        # JPY position in a EUR book, with no JPY->EUR rate in the store.
+        broker_env["ticker_ccy"].write_text(json.dumps({"7203.T": "JPY"}))
+        reset_config_cache()
+
+        _write_config(broker_env["config_dir"], "a1")
+        pm = _init_portfolio(broker_env["pm_base"], "a1", cash=10_000.0, currency="EUR")
+        _seed_ohlcv(broker_env["ohlcv"], "7203.T", [("2026-04-17", 2_500.0)])
+        _seed_ohlcv(broker_env["ohlcv"], "AAPL", [("2026-04-17", 100.0)])
+        pm.add_snapshot(
+            "a1",
+            date(2026, 4, 16),
+            portfolio_value=10_000.0,
+            cash=10_000.0,
+            positions_value=0.0,
+            benchmarks={},
+        )
+        from engine.types import Trade
+
+        pm.apply_trade(
+            "a1",
+            Trade(
+                id="seed",
+                timestamp=datetime(2026, 4, 17, 19, 0, tzinfo=timezone.utc),
+                action="BUY",
+                ticker="7203.T",
+                shares=1.0,
+                price=2_500.0,
+                total=20.0,
+                fees=0.0,
+                reasoning="seed the unvaluable position",
+            ),
+        )
+
+        append_order(TRADE_DATE, _make_order("o1", "a1", "BUY", "AAPL", 1.0, "EUR"))
+        fills = fill_day(TRADE_DATE, pm)
+        assert [f.reason for f in fills] == ["VALUATION_UNAVAILABLE"]

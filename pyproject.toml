@@ -84,7 +84,17 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# backtester/tests is a second root, not a subdirectory of tests/: its 13 files
+# cover a service deployed to Cloud Run and were collected by nothing — CI ran
+# `pytest -q`, which honours testpaths, so they only ever ran when someone
+# typed the path by hand.
+#
+# This file syncs byte-identical to midas-core, which ships no backtester/.
+# A testpaths entry matching nothing is skipped silently there (probed on
+# pytest 9.1.1), so the mirror is unaffected — but that same silence means a
+# rename here would stop collecting them just as quietly, so the entry and the
+# directory are pinned together in tests/test_ci_guards.py.
+testpaths = ["tests", "backtester/tests"]
 pythonpath = ["."]
 markers = [
     "live_cast: cast-coupled test — runs on the live desk, skipped on the demo desk (all-demo-* roster)",

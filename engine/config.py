@@ -30,7 +30,23 @@ class BenchmarkSpec:
 
 @dataclass(frozen=True)
 class SafetyRails:
+    """Per-agent limits the broker enforces. The persona is aspirational; this binds.
+
+    ``max_order_notional_pct`` expresses the per-order cap as a percentage of
+    the book's **current** value rather than as an absolute amount, and takes
+    precedence over ``max_order_notional`` when set. A fixed cap has to be
+    chosen against a book size, and it silently stops binding as soon as the
+    book moves away from that size — the ten traders ran from day one with
+    `1_000_000` against €10,000 books, a cap 100x larger than the entire
+    portfolio, which is a rail that cannot fire. A percentage re-scales with
+    the book and needs no maintenance.
+
+    The absolute field stays for forks and for the allocator, whose cap is
+    deliberately a fixed small number.
+    """
+
     max_order_notional: float = 500.0
+    max_order_notional_pct: float | None = None
     max_orders_per_day: int = 5
     daily_drawdown_halt_pct: float = -5.0
     allowed_universe: tuple[str, ...] = ()
@@ -187,8 +203,10 @@ def _benchmark(raw: dict | None) -> BenchmarkSpec | None:
 
 def _safety(raw: dict | None) -> SafetyRails:
     raw = raw or {}
+    pct = raw.get("max_order_notional_pct")
     return SafetyRails(
         max_order_notional=float(raw.get("max_order_notional", 500.0)),
+        max_order_notional_pct=None if pct is None else float(pct),
         max_orders_per_day=int(raw.get("max_orders_per_day", 5)),
         daily_drawdown_halt_pct=float(raw.get("daily_drawdown_halt_pct", -5.0)),
         allowed_universe=tuple(raw.get("allowed_universe", []) or []),
