@@ -61,21 +61,31 @@ class TestLoadStoreSeries:
         s = fx._load_store_series("EURUSD=X")
         assert s == {"2025-01-02": 1.10, "2025-01-03": 1.12}
 
-    def test_prefers_adj_close_when_present(self, fake_ohlcv):
+    def test_reads_raw_close_and_ignores_adj_close(self, fake_ohlcv):
+        """Raw `close`, never `adj_close` (2026-08-07 review §5.2).
+
+        Asserted the opposite until 2026-08-07. An FX pair's two fields are
+        equal in practice, so this fixture makes them differ on purpose —
+        otherwise the test could not tell the two bases apart.
+        """
         _write_jsonl(
             fake_ohlcv / "X.jsonl",
             [{"date": "2025-01-02", "close": 1.0, "adj_close": 1.05}],
         )
         s = fx._load_store_series("X")
-        assert s == {"2025-01-02": 1.05}
+        assert s == {"2025-01-02": 1.0}
 
-    def test_falls_back_to_close_when_adj_close_null(self, fake_ohlcv):
+    def test_skips_row_with_null_close(self, fake_ohlcv):
+        """A row with no close is skipped, not served from `adj_close`."""
         _write_jsonl(
             fake_ohlcv / "X.jsonl",
-            [{"date": "2025-01-02", "close": 1.0, "adj_close": None}],
+            [
+                {"date": "2025-01-02", "close": None, "adj_close": 1.05},
+                {"date": "2025-01-03", "close": 1.12, "adj_close": 1.20},
+            ],
         )
         s = fx._load_store_series("X")
-        assert s == {"2025-01-02": 1.0}
+        assert s == {"2025-01-03": 1.12}
 
     def test_skips_blank_lines(self, fake_ohlcv):
         path = fake_ohlcv / "X.jsonl"

@@ -33,7 +33,13 @@ _DIRECT: dict[tuple[str, str], tuple[str, bool]] = {
 
 
 def _load_store_series(ticker: str) -> dict[str, float]:
-    """Return {date_iso: close_price} for a ticker, or empty dict if missing."""
+    """Return {date_iso: raw close} for a ticker, or empty dict if missing.
+
+    Raw `close`, never `adj_close` — same basis as every other read path
+    (`engine.ohlcv_store` module docstring). For an FX pair the two fields
+    are equal anyway (a currency pair pays no dividend); reading `close`
+    keeps the rule uniform rather than resting on that.
+    """
     path = get_config().ohlcv_dir / f"{ticker}.jsonl"
     if not path.exists():
         return {}
@@ -48,11 +54,7 @@ def _load_store_series(ticker: str) -> dict[str, float]:
             except json.JSONDecodeError:
                 continue
             d = row.get("date")
-            close = (
-                row.get("adj_close")
-                if row.get("adj_close") is not None
-                else row.get("close")
-            )
+            close = row.get("close")
             if d and close is not None:
                 series[d] = float(close)
     return series

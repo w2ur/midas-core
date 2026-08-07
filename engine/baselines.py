@@ -30,6 +30,7 @@ from typing import Collection, Iterator
 import pandas as pd
 
 from engine.config import BenchmarkSpec, get_config
+from engine.disclosure import require_changelog_entry
 
 
 def _initial() -> float:
@@ -45,7 +46,15 @@ def _daterange(start: date, end: date) -> Iterator[date]:
 
 
 def _load_ohlcv(ticker: str) -> dict[str, float]:
-    """Return date_iso -> close for the ticker, empty if file missing."""
+    """Return date_iso -> raw close for the ticker, empty if file missing.
+
+    Raw `close`, never `adj_close` — see the `engine.ohlcv_store` module
+    docstring. It matters most here: the passive benchmark and the coin flip
+    are the controls the agents are graded against, and the agent curve is a
+    price-return series (the broker credits no dividend cash). A control on a
+    total-return basis would beat every agent by the market's dividend yield
+    and none of that gap would be skill.
+    """
     path = get_config().ohlcv_dir / f"{ticker}.jsonl"
     if not path.exists():
         return {}
@@ -55,7 +64,7 @@ def _load_ohlcv(ticker: str) -> dict[str, float]:
         if not line:
             continue
         row = json.loads(line)
-        out[row["date"]] = float(row.get("adj_close") or row["close"])
+        out[row["date"]] = float(row["close"])
     return out
 
 
@@ -325,6 +334,7 @@ def build_all_baselines(
     max_positions_by_agent: dict[str, int] | None = None,
     *,
     restate_series: Collection[str] | None = None,
+    changelog_entry: str | None = None,
 ) -> None:
     """Produce all per-agent baseline files + the global reference file.
 
@@ -342,7 +352,21 @@ def build_all_baselines(
     ``scripts.daily_session.step_update_snapshots``'s aggregate line, so a
     session with refusals scattered across many agents surfaces one count
     instead of dozens of individual prints.
+
+    **A non-empty ``restate_series`` requires ``changelog_entry``** — the
+    anchor of the METHODOLOGY.md entry disclosing what moves and why, verified
+    to resolve (``engine.disclosure``). This is the third path that can move a
+    published number, and it was the last one still ungated:
+    ``restate_valuations.py`` and ``restate_bundles.py`` grew the same
+    precondition on 2026-08-07, but a baseline series can only be restated
+    from Python, so there was no ``--changelog-entry`` flag to require. The
+    routine session call passes no scope and is unaffected.
     """
+    if restate_series:
+        require_changelog_entry(
+            changelog_entry,
+            what=f"Restating baseline series {sorted(restate_series)}",
+        )
     cfg = get_config()
     max_positions_by_agent = max_positions_by_agent or {}
     baselines_dir = cfg.baselines_dir

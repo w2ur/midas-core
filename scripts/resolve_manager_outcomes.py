@@ -266,7 +266,10 @@ def _forward_rows(
     """Return OHLCV rows for ``ticker`` with date strictly after ``decision_date``.
 
     Returns a list of (date_str, price) tuples sorted chronologically.
-    Uses adj_close when available, falls back to close.
+    Prices are the raw `close`, never `adj_close` — see the
+    `engine.ohlcv_store` module docstring. The Manager's realized returns are
+    scored against `alpha_vs_msci_pct`, and MSCI World is read through the
+    same basis, so both legs of that comparison move together.
     """
     path = store / f"{ticker}.jsonl"
     if not path.exists():
@@ -285,11 +288,7 @@ def _forward_rows(
             row_date = row.get("date")
             if row_date is None or row_date <= decision_date:
                 continue
-            val = (
-                row.get("adj_close")
-                if row.get("adj_close") is not None
-                else row.get("close")
-            )
+            val = row.get("close")
             if val is None:
                 continue
             rows.append((row_date, float(val)))

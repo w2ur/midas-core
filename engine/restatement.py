@@ -27,9 +27,9 @@ Two primitives:
   book's base currency. It reuses the exact helpers the live desk already
   uses for this: ``engine.quotes.latest_price`` (the same reader
   ``engine.paper_broker`` uses for fills and ``engine.valuation.portfolio_mtm``
-  uses for point valuation — adj_close when present, else close, normalised
-  out of any vendor sub-unit such as LSE pence and paired with the ticker's
-  ISO currency) and ``engine.fx.convert`` (the same FX helper the broker
+  uses for point valuation — the row's raw ``close``, never ``adj_close``,
+  normalised out of any vendor sub-unit such as LSE pence and paired with
+  the ticker's ISO currency) and ``engine.fx.convert`` (the same FX helper the broker
   calls to convert a fill's notional). Reusing these, unmodified, is
   deliberate: if this module disagreed with the live desk on how a position
   is priced or which currency it trades in, the restatement would be wrong by

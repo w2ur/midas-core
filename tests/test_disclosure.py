@@ -143,3 +143,56 @@ class TestScriptsRefuseToApplyUndisclosed:
             env=env,
         )
         assert "requires disclosure" not in (result.stdout + result.stderr)
+
+
+class TestBaselineRestatementIsGated:
+    """`build_all_baselines` was the third path that moves published numbers.
+
+    `restate_valuations.py` and `restate_bundles.py` grew the `--changelog-entry`
+    precondition on 2026-08-07, but a baseline series can only be restated from
+    Python — there was no CLI flag to require, so the gap stayed open until the
+    raw-close basis change (`close-basis-2026-08-07`) went to move 757 coin-flip
+    rows through it.
+    """
+
+    def _build(self, **kwargs):
+        from engine.baselines import build_all_baselines
+
+        return build_all_baselines(
+            universes_by_agent={},
+            from_date=__import__("datetime").date(2026, 4, 17),
+            to_date=__import__("datetime").date(2026, 4, 18),
+            **kwargs,
+        )
+
+    def test_restating_without_a_changelog_entry_is_refused(self, midas_data_root):
+        _write_methodology(
+            midas_data_root, '- <a id="real-anchor"></a>**Something moved.**\n'
+        )
+        with pytest.raises(UndisclosedRestatementError):
+            self._build(restate_series={"coinflip"})
+
+    def test_restating_with_an_unresolvable_anchor_is_refused(self, midas_data_root):
+        _write_methodology(
+            midas_data_root, '- <a id="real-anchor"></a>**Something moved.**\n'
+        )
+        with pytest.raises(UndisclosedRestatementError):
+            self._build(restate_series={"coinflip"}, changelog_entry="not-an-anchor")
+
+    def test_restating_with_a_resolving_anchor_is_allowed(self, midas_data_root):
+        _write_methodology(
+            midas_data_root, '- <a id="real-anchor"></a>**Something moved.**\n'
+        )
+        self._build(restate_series={"coinflip"}, changelog_entry="real-anchor")
+
+    def test_the_routine_session_call_is_not_gated(self, midas_data_root):
+        """No scope means no restatement, so nothing to disclose.
+
+        The daily session calls this on every run; a gate that fired here
+        would take the desk down rather than protect the record.
+        """
+        _write_methodology(
+            midas_data_root, '- <a id="real-anchor"></a>**Something moved.**\n'
+        )
+        self._build()
+        self._build(restate_series=set())

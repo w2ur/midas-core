@@ -156,7 +156,13 @@ class TestGetLatestPrice:
         price = get_latest_price("MSFT")
         assert price == pytest.approx(420.0)
 
-    def test_falls_back_to_close_when_adj_close_absent(self, midas_data_root):
+    def test_serves_row_carrying_only_close(self, midas_data_root):
+        """A row with no `adj_close` at all is served from `close`.
+
+        Trivially true since 2026-08-07 (every read path takes `close`), but
+        kept: it was the fallback branch before the basis change and the
+        shape still occurs in crypto rows.
+        """
         from engine.config import get_config
 
         ohlcv = get_config().ohlcv_dir

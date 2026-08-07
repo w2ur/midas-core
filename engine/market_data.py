@@ -57,21 +57,21 @@ def _read_store_file(ticker: str) -> list[dict] | None:
 
 
 def _store_series(ticker: str, start: date, end: date) -> pd.Series | None:
-    """One ticker's adjusted-close series from the store, or None if uncovered.
+    """One ticker's raw-close series from the store, or None if uncovered.
 
     "Uncovered" means: absent from the store, or its earliest row postdates
     `start`, or it has no row inside the window.
+
+    Raw `close`, never `adj_close` — see the `engine.ohlcv_store` module
+    docstring.
     """
     rows = _read_store_file(ticker)
     if rows is None:
         return None
     if min(r["date"] for r in rows) > start.isoformat():
         return None
-    # Use adj_close when present; fall back to close for instruments without splits/divs.
     series_data = {
-        r["date"]: (
-            r.get("adj_close") if r.get("adj_close") is not None else r.get("close")
-        )
+        r["date"]: r.get("close")
         for r in rows
         if start.isoformat() <= r["date"] <= end.isoformat()
     }
@@ -135,6 +135,13 @@ def _vendor_close(raw: pd.DataFrame) -> pd.DataFrame | None:
     level at all, and `raw["Close"]` raises `KeyError` on it. A vendor miss is
     not an exception here: the store may have served every other column of the
     request, and raising would discard those too.
+
+    Callers download with `auto_adjust=False`, so level 0 carries `Close` and
+    `Adj Close` as separate blocks and this picks the raw one — the same basis
+    the store serves. Under `auto_adjust=True` there is only a `Close` block
+    and it is the *adjusted* series, which would put a store-served raw column
+    and a vendor-served total-return column side by side in one frame. Same
+    shape of defect as the pence/pounds mixing W7.1 fixed, one field over.
     """
     if isinstance(raw.columns, pd.MultiIndex):
         return raw["Close"] if "Close" in raw.columns.get_level_values(0) else None
@@ -159,7 +166,7 @@ def _close_frame(tickers: list[str], start: date, end: date) -> pd.DataFrame:
             missing,
             start=str(start),
             end=str(end),
-            auto_adjust=True,
+            auto_adjust=False,  # raw Close, matching the store's basis
             progress=False,
         )
         close = _vendor_close(raw)
@@ -175,28 +182,26 @@ def _close_frame(tickers: list[str], start: date, end: date) -> pd.DataFrame:
 
 
 def _latest_close_from_store(ticker: str) -> float | None:
-    """Return the latest adj_close (or close) for a ticker from the store."""
+    """Return the latest raw close for a ticker from the store.
+
+    Raw `close`, never `adj_close` — see the `engine.ohlcv_store` module
+    docstring.
+    """
     rows = _read_store_file(ticker)
     if not rows:
         return None
     latest = max(rows, key=lambda r: r["date"])
-    val = latest.get("adj_close")
-    if val is None:
-        val = latest.get("close")
+    val = latest.get("close")
     return float(val) if val is not None else None
 
 
 def latest_close_and_date_from_store(ticker: str) -> tuple[float, str] | None:
-    """Return (close, ISO-date) of the most recent row for a ticker, or None."""
+    """Return (raw close, ISO-date) of the most recent row for a ticker, or None."""
     rows = _read_store_file(ticker)
     if not rows:
         return None
     latest = max(rows, key=lambda r: r["date"])
-    val = (
-        latest.get("adj_close")
-        if latest.get("adj_close") is not None
-        else latest.get("close")
-    )
+    val = latest.get("close")
     if val is None:
         return None
     return (float(val), str(latest["date"]))
@@ -357,7 +362,7 @@ class MarketDataFetcher:
         raw = yf.download(
             missing,
             period="5d",
-            auto_adjust=True,
+            auto_adjust=False,  # raw Close, matching the store's basis
             progress=False,
         )
 
