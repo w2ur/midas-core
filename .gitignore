@@ -7,3 +7,6 @@ build/
 dist/
 data/cache/
 .DS_Store
+
+# Per-agent memory and local Claude Code settings — never committed
+.claude/
