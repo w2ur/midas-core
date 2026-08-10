@@ -697,21 +697,40 @@ def _all_symbols_fail(symbol: str, start: date, end: date):
     return None
 
 
+def _cover(symbols: list[str], close: float = 1.5) -> None:
+    """Give each symbol a store file, i.e. a history of having served rows.
+
+    The gate's denominator is store coverage, so a test that does not seed the
+    store is testing the "cannot measure" branch whatever else it sets up.
+    """
+    for symbol in symbols:
+        _write_raw(
+            get_config().ohlcv_dir / f"{symbol}.jsonl",
+            [_tight_line("2026-08-05", close)],
+        )
+
+
 class TestFailureRateGate:
     """`fetch_ohlcv.py` exited 0 regardless of the failure count, so a total
     vendor outage produced a green run, "No OHLCV changes to commit", and a
     session pricing a stale store the next evening — with nothing anywhere
-    saying the data had not arrived."""
+    saying the data had not arrived.
+
+    The denominator is the symbols the store ALREADY COVERS. Against the full
+    symbol list the gate was mis-calibrated from the day it shipped and fired
+    on every full-universe run — see `TestUnresolvedSymbolsAreNotAnOutage`.
+    """
 
     def test_total_outage_exits_nonzero(
         self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
     ) -> None:
+        _cover(["AAPL", "MSFT", "SAP.DE", "BP.L"])
         monkeypatch.setattr(fo, "_fetch_symbol", _all_symbols_fail)
         monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
 
         rc = _run_main(monkeypatch, ["--symbols", "AAPL,MSFT,SAP.DE,BP.L"])
 
-        assert rc == 1
+        assert rc == fo.EXIT_VENDOR_OUTAGE
         assert "vendor-side or network failure" in capsys.readouterr().err
 
     def test_a_few_dead_symbols_are_not_a_failure(
@@ -720,6 +739,7 @@ class TestFailureRateGate:
         """The control, and the reason the threshold is a rate rather than a
         count: `MATIC-USD` and `UNI-USD` have served nothing since March and
         April 2025. Any absolute floor would fire every night or never."""
+        _cover(_MANY)
         good = _make_fake_fetch_symbol(
             {s: {"2026-08-06": [1, 2, 0.5, 1.5, 1.5, 100]} for s in _MANY[:-1]}
         )
@@ -733,6 +753,7 @@ class TestFailureRateGate:
         self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The falsifying pair for the rate itself."""
+        _cover(_MANY)
         # 3 of 20 = 15%, over the limit.
         good = _make_fake_fetch_symbol(
             {s: {"2026-08-06": [1, 2, 0.5, 1.5, 1.5, 100]} for s in _MANY[:-3]}
@@ -740,17 +761,234 @@ class TestFailureRateGate:
         monkeypatch.setattr(fo, "_fetch_symbol", good)
         monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
 
-        assert _run_main(monkeypatch, ["--symbols", ",".join(_MANY)]) == 1
+        assert (
+            _run_main(monkeypatch, ["--symbols", ",".join(_MANY)])
+            == fo.EXIT_VENDOR_OUTAGE
+        )
+
+    def test_already_current_symbols_stay_in_the_denominator(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Regression: a second run in one UTC day must not read as an outage.
+
+        A covered symbol whose store already holds `end` is skipped before the
+        fetch, but it is *evidence the store is healthy* and belongs in the
+        denominator. Excluding it collapses the population onto the handful of
+        permanently-dead names that are still attempted (their store is stale,
+        so they never take the skip branch) — `MATIC-USD` and `UNI-USD` alone
+        read 2/2 = 100% and fail a fully current store. Reachable by a re-run,
+        by the documented `workflow_dispatch`, or by a Friday cron delayed past
+        midnight writing Saturday rows before the Saturday crypto-only run.
+        """
+        today = date.today().isoformat()
+        current = [f"CUR{i}" for i in range(20)]
+        for symbol in current:
+            _write_raw(
+                get_config().ohlcv_dir / f"{symbol}.jsonl", [_tight_line(today, 1.5)]
+            )
+        # Two covered-but-dead names, still attempted because their store is old.
+        _cover(["MATIC-USD", "UNI-USD"])
+
+        monkeypatch.setattr(fo, "_fetch_symbol", _make_fake_fetch_symbol({}))
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+
+        rc = _run_main(
+            monkeypatch, ["--symbols", ",".join(current + ["MATIC-USD", "UNI-USD"])]
+        )
+
+        assert rc == 0, "2 dead names against 22 covered symbols is not an outage"
+
+    def test_a_bootstrap_where_nothing_answers_is_still_an_outage(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        """The empty store has no coverage, but "nothing served" still decides.
+
+        Returning 0 here would reopen W2.5's exact hole on the one run with
+        nothing to fall back on — a fork's first fetch, or a run after the
+        store directory moved.
+        """
+        monkeypatch.setattr(fo, "_fetch_symbol", _all_symbols_fail)
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+
+        rc = _run_main(monkeypatch, ["--symbols", "AAPL,MSFT,SAP.DE,BP.L"])
+
+        assert rc == fo.EXIT_VENDOR_OUTAGE
+        assert "no prior coverage" in capsys.readouterr().err
+
+    def test_a_healthy_bootstrap_with_a_bad_universe_still_passes(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The falsifying pair for the bootstrap branch.
+
+        Without this, the test above passes just as happily against a rule that
+        fails every empty-store run — which is the fork-hostile version.
+        """
+        good = _make_fake_fetch_symbol(
+            {s: {"2026-08-06": [1, 2, 0.5, 1.5, 1.5, 100]} for s in _MANY}
+        )
+        monkeypatch.setattr(fo, "_fetch_symbol", good)
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+
+        rc = _run_main(
+            monkeypatch,
+            ["--symbols", ",".join(_MANY + [f"BAD{i}.PA" for i in range(200)])],
+        )
+
+        assert rc == 0
 
     def test_empty_vendor_frame_is_reported_on_stderr(
         self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
     ) -> None:
         """An empty frame used to return None without a word."""
-        monkeypatch.setattr(
-            fo.yf, "download", lambda *a, **k: pd.DataFrame()
-        )
+        monkeypatch.setattr(fo.yf, "download", lambda *a, **k: pd.DataFrame())
         assert fo._fetch_symbol("AAPL", date(2026, 8, 1), date(2026, 8, 6)) is None
         assert "AAPL: vendor returned no rows" in capsys.readouterr().err
+
+
+class TestUnresolvedSymbolsAreNotAnOutage:
+    """Regression: 5599e64f6 — the gate fired on its own steady state.
+
+    A symbol that has never served a row and has no store file is a ticker
+    that does not resolve at the vendor, not a vendor that stopped answering.
+    Counting the two together put the 2026-08-07 baseline (121 failures of
+    1,150 = 10.5%) permanently over the 10% limit, so every full-universe run
+    exited 1, the commit step was skipped, and the price store stopped
+    advancing for four days — the outage the gate exists to detect, produced
+    by the gate. 118 of those 121 are Refinitiv-style codes in
+    `data/universes/stoxx600.json` that Yahoo has no route for.
+    """
+
+    def test_the_production_shape_does_not_fail_the_run(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The exact 2026-08-07 proportions: 10.5% of the list, 0.2% of coverage."""
+        covered = [f"COV{i}" for i in range(1030)]
+        never_served = [f"BADTICKER{i}.PA" for i in range(121)]
+        _cover(covered)
+
+        # Every covered symbol answers except two — NKLA and ROG.SW on the night.
+        good = _make_fake_fetch_symbol(
+            {s: {"2026-08-06": [1, 2, 0.5, 1.5, 1.5, 100]} for s in covered[:-2]}
+        )
+        monkeypatch.setattr(fo, "_fetch_symbol", good)
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+
+        rc = _run_main(monkeypatch, ["--symbols", ",".join(covered + never_served)])
+
+        assert rc == 0, "the steady-state baseline must not fail the run"
+
+    def test_the_old_denominator_would_have_failed_this(
+        self, midas_data_root: Path
+    ) -> None:
+        """The control: prove the shape above really is over the old limit.
+
+        Without this, `test_the_production_shape_does_not_fail_the_run` passes
+        just as happily against a gate that never fires at all.
+        """
+        total, unresolved_count, covered_failures = 1151, 121, 2
+        assert unresolved_count / total > fo.MAX_FAILURE_RATE
+        assert covered_failures / (total - unresolved_count) < fo.MAX_FAILURE_RATE
+
+    def test_a_covered_symbol_going_dark_still_fails(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        """The gate must still bind on what it was built for.
+
+        Unresolvable tickers alongside a real outage must not dilute it — under
+        the old denominator they would have, by inflating the population the
+        rate is taken over.
+        """
+        covered = [f"COV{i}" for i in range(20)]
+        _cover(covered)
+        # 5 of 20 covered symbols go dark = 25%, over the limit.
+        good = _make_fake_fetch_symbol(
+            {s: {"2026-08-06": [1, 2, 0.5, 1.5, 1.5, 100]} for s in covered[:-5]}
+        )
+        monkeypatch.setattr(fo, "_fetch_symbol", good)
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+
+        rc = _run_main(
+            monkeypatch,
+            ["--symbols", ",".join(covered + [f"BAD{i}.PA" for i in range(200)])],
+        )
+
+        assert rc == fo.EXIT_VENDOR_OUTAGE
+        assert "the store already covers" in capsys.readouterr().err
+
+    def test_unresolved_symbols_are_reported_not_silently_tolerated(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        """Not failing the run is not the same as saying nothing.
+
+        ~120 unfetchable tickers in a committed universe is a real defect; it
+        is just not one a red nightly run can fix, and holding the price store
+        hostage to it is what broke the desk.
+        """
+        _cover(["AAPL"])
+        good = _make_fake_fetch_symbol(
+            {"AAPL": {"2026-08-06": [1, 2, 0.5, 1.5, 1.5, 100]}}
+        )
+        monkeypatch.setattr(fo, "_fetch_symbol", good)
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+
+        rc = _run_main(monkeypatch, ["--symbols", "AAPL,AIRP.PA,BNPP.PA"])
+
+        err = capsys.readouterr().err
+        assert rc == 0
+        assert "2 symbol(s) have never served a row" in err
+        assert "AIRP.PA" in err
+
+    def test_the_report_survives_a_quarantine_night(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        """`if total_quarantined: return 1` used to sit above this report.
+
+        So on any night the tripwire refused a row, the ~120-unroutable-ticker
+        warning — the entire point of the report — was never printed. The
+        quarantine check is now last, after every report.
+        """
+        _cover(["AAPL"])
+        good = _make_fake_fetch_symbol(
+            {"AAPL": {"2026-08-06": [1, 2, 0.5, 1.5, 1.5, 100]}}
+        )
+        monkeypatch.setattr(fo, "_fetch_symbol", good)
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+        monkeypatch.setattr(fo, "_write_rows", lambda *a, **k: fo.MergeResult(0, 0, 1))
+
+        rc = _run_main(monkeypatch, ["--symbols", "AAPL,AIRP.PA"])
+
+        assert rc == fo.EXIT_QUARANTINED
+        assert "have never served a row" in capsys.readouterr().err
+
+
+class TestExitCodes:
+    """The workflow must tell a deliberate refusal from a crash.
+
+    A bare `!cancelled()` push gate commits whatever is on disk, including a
+    store half-written by an exception at symbol 500 of 1,150 — and the session
+    that prices it writes one immutable snapshot row per book, so some mark at
+    today and others at yesterday with no correction possible.
+    """
+
+    def test_the_deliberate_exits_are_distinct_from_one(self) -> None:
+        assert fo.EXIT_QUARANTINED != 1
+        assert fo.EXIT_VENDOR_OUTAGE != 1
+        assert fo.EXIT_QUARANTINED != fo.EXIT_VENDOR_OUTAGE
+
+    def test_committable_exits_name_exactly_the_deliberate_ones(self) -> None:
+        assert set(fo.COMMITTABLE_EXITS) == {
+            0,
+            fo.EXIT_QUARANTINED,
+            fo.EXIT_VENDOR_OUTAGE,
+        }
+        assert 1 not in fo.COMMITTABLE_EXITS, "an unhandled traceback exits 1"
+
+    # The workflow half of this contract is asserted in tests/test_ci_guards.py
+    # (TestPushGateMatchesExitCodes). That module is live-only, and
+    # .github/workflows/ does not exist in midas-core — so a workflow-reading
+    # test HERE is an unconditional failure in the public repo's suite. Caught
+    # by running core's suite after the sync, which `sync_core check` cannot
+    # see: the file is byte-identical in both repos, and that is the problem.
 
 
 _MANY = [f"SYM{i}" for i in range(20)]
