@@ -3,7 +3,7 @@
 Runs every 15 min via .github/workflows/check-triggers.yml. Walks pending
 orders, fetches current prices, fires when triggers are hit, expires old
 ones. Blackout window 19:55-21:00 UTC to avoid commit-races with the
-20:00 UTC daily session (see BLACKOUT_END for why 21:00, not 20:30).
+20:00 UTC daily session (see BLACKOUT_END for why it tracks the session).
 
 Usage:
     python scripts/check_triggers.py            # normal run
@@ -43,17 +43,32 @@ from scripts.daily_session import (
 logger = logging.getLogger(__name__)
 
 BLACKOUT_START = time(19, 55)
-# 21:00, not the original 20:30. The window has to outlast the *merge* to main,
-# not just the sandbox commit, because that is when main actually moves. Over
-# the 15 most recent weekday sessions on this repo, the session commit landed
-# 20:09-20:39 and the auto-merge 20:12-20:45 (worst: 2026-08-05, merged 20:45)
-# — two of the last five sessions were still landing after the 20:30 cutoff.
-# A watcher fire inside the tail is not a lost fire but a lost *session*: the
-# fire commits to main, and the session's own `assert_session_fresh` then sees
-# the ledger move and raises StaleSessionError, discarding a completed run.
-# 21:00 clears the measured tail with ~15 min of headroom. It does not clear
-# everything: 2026-07-29 committed at 21:46. A blackout is a race-narrower,
-# not a lock — the session guard remains the actual correctness mechanism.
+# THE BLACKOUT END IS A FUNCTION OF THE SESSION START — move one and move the
+# other, in the same change. That coupling is the whole content of this
+# constant, and it has now been got wrong in both directions.
+#
+# The window has to outlast the *merge* to main, not just the sandbox commit,
+# because the merge is when main actually moves. Measured over the 15 weekday
+# sessions before 2026-08-07, against a 20:00 UTC session: commits landed
+# 20:09-20:39, auto-merges 20:12-20:45 (worst: 2026-08-05, merged 20:45). So
+# the tail runs to session start + ~45 min, and the end wants ~15 min on top.
+#
+# A fire inside that tail is not a lost fire but a lost SESSION: the fire
+# commits to main, the session's own `assert_session_fresh` sees the ledger
+# move, raises StaleSessionError, and discards a completed run.
+#
+# History, because the shape repeats:
+#   20:30 → 21:00  2026-08-07  original end predated the merge step entirely;
+#                              two of the last five sessions landed past it.
+#   21:00 → 21:30  2026-08-10  session moved to 20:30 UTC (22:30 Paris), which
+#                              slid the whole distribution to 20:42-21:15.
+#   21:30 → 21:00  2026-08-11  session moved back to 20:00 UTC.
+#
+# It does not clear everything — 2026-07-29 committed at 21:46. A blackout is
+# a race-narrower, not a lock; `session_guard` is the correctness mechanism.
+#
+# NB the cron is UTC and ignores DST, so a session anchored to a Paris wall
+# time silently shifts an hour in late October and this must be revisited.
 BLACKOUT_END = time(21, 0)
 
 # Type alias for the injectable committer used in process_fired_order.
