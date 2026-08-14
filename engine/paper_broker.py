@@ -2,7 +2,8 @@
 
 Reads orders from data/orders/outbox/, applies the safety rails, fills at end-of-day
 close from the committed OHLCV store (latest-on-or-before the trade date — critical
-because the daily session fires at 20:00 UTC but fetch-ohlcv.yml runs at 22:30 UTC),
+because the daily session fires at 20:00 UTC but fetch-ohlcv.yml's 06:00 UTC run
+only captures the previous day's close),
 writes data/orders/inbox/, mutates portfolios via PortfolioManager.apply_trade.
 
 Rejection reason codes:

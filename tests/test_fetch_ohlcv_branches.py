@@ -1,17 +1,23 @@
 """Branch coverage for scripts.fetch_ohlcv.main() — the nightly, unattended cron
 entry point.
 
-Every symbol now runs with a 1-day revision window — the trailing stored bar is
-re-requested and replaced when its value changed. The two halves of that
-behaviour are pinned separately:
+Since 2026-08-12 `main()` fetches through YESTERDAY, never today, so no forming
+bar is ever stored (`_fetch_end()` below is the fixtures' anchor for that).
+Every symbol still runs with a 1-day revision window — the trailing stored bar
+is re-requested and replaced when its value changed — but what it catches is
+the vendor revising an already-complete bar, not a partial one this run wrote
+itself. The two halves of that behaviour are pinned separately:
 
-- **No churn.** A cash equity or ETF bar IS final at the 22:30 UTC fetch
-  (measured: SPY and AAPL, 0 of 23 trailing bars drifted), so the re-fetch is
-  identical, `merge_rows` finds nothing to replace, and every stored byte
-  survives. This is why widening the window to ~1,100 committed files is safe.
-- **Revision.** Crypto (24/7) and commodity futures (`=F`, whose next Globex
-  session has already opened at 22:30 UTC — GC=F drifted on 13 of the last 22
-  bars, worst +2.865%) are still forming when written, and must be corrected.
+- **No churn.** A cash equity or ETF close does not move once its session has
+  ended (measured: SPY and AAPL, 0 of 23 trailing bars drifted), so the
+  re-fetch is identical, `merge_rows` finds nothing to replace, and every
+  stored byte survives. This is why widening the window to ~1,100 committed
+  files is safe.
+- **Revision.** Commodity futures (`=F`) and crypto do get revised by the
+  vendor after the fact — GC=F drifted on 13 of the last 22 bars, worst
+  +2.865% — and must be corrected. (Those figures were measured under the
+  22:30 UTC schedule, when the same bars were also still forming at fetch
+  time; that second cause is gone, the vendor revisions are not.)
 
 All tests here drive `main()` end-to-end with `_fetch_symbol` and
 `_fetch_ticker_info` monkeypatched to synthetic, network-free responses —
@@ -44,6 +50,19 @@ def _yf_frame(rows: dict[str, list]) -> pd.DataFrame:
     idx = pd.DatetimeIndex([pd.Timestamp(d) for d in rows], name="Date")
     data = [rows[d] for d in rows]
     return pd.DataFrame(data, index=idx, columns=pd.Index(_FIELDS))
+
+
+def _fetch_end() -> date:
+    """The newest day a run asks the vendor for: yesterday, never today.
+
+    `scripts.fetch_ohlcv.main` sets `end = date.today() - 1` (2026-08-12) so
+    that every bar it stores is a COMPLETE daily bar — asking for today serves
+    a partial one on any 24/7 instrument. Fixtures anchor here rather than on
+    `date.today()` because `_make_fake_fetch_symbol` honours the requested
+    window: a fixture row dated today is simply never requested, which turns a
+    revision test into a silent no-op instead of a failure.
+    """
+    return date.today() - timedelta(days=1)
 
 
 def _make_fake_fetch_symbol(frames: dict[str, dict[str, list]]):
@@ -127,26 +146,26 @@ def test_equity_unchanged_trailing_bar_stays_byte_identical(
     nothing to replace. Every pre-existing byte survives — including the
     non-canonically-spaced row before the window, which proves an untouched
     row is carried across the rewrite verbatim rather than re-serialized."""
-    today = date.today()
-    yesterday = today - timedelta(days=1)
-    day_before = today - timedelta(days=2)
+    end = _fetch_end()
+    prev = end - timedelta(days=1)
+    prev2 = end - timedelta(days=2)
 
-    yesterday_bar = [1, 2, 0.5, 185.0, 185.0, 1]
-    today_bar = [1, 2, 0.5, 200.12, 200.12, 1]
+    prev_bar = [1, 2, 0.5, 185.0, 185.0, 1]
+    end_bar = [1, 2, 0.5, 200.12, 200.12, 1]
 
     path = get_config().ohlcv_dir / "AAPL.jsonl"
-    day_before_line = _tight_line(day_before.isoformat(), 180.0)
+    prev2_line = _tight_line(prev2.isoformat(), 180.0)
     # Stored in the same form the fetch would produce → the re-fetch is a no-op.
-    yesterday_line = _canonical_line(yesterday.isoformat(), yesterday_bar)
-    _write_raw(path, [day_before_line, yesterday_line])
+    prev_line = _canonical_line(prev.isoformat(), prev_bar)
+    _write_raw(path, [prev2_line, prev_line])
     before = path.read_text(encoding="utf-8")
 
     frames = {
         "AAPL": {
-            # An equity close does not move after 22:30 UTC — measured over 23
-            # trading days, SPY and AAPL drifted on 0 of them.
-            yesterday.isoformat(): yesterday_bar,
-            today.isoformat(): today_bar,
+            # A cash-equity close does not move once the session has ended —
+            # measured over 23 trading days, SPY and AAPL drifted on 0 of them.
+            prev.isoformat(): prev_bar,
+            end.isoformat(): end_bar,
         }
     }
     monkeypatch.setattr(fo, "_fetch_symbol", _make_fake_fetch_symbol(frames))
@@ -158,9 +177,9 @@ def test_equity_unchanged_trailing_bar_stays_byte_identical(
     text = path.read_text(encoding="utf-8")
     assert text.startswith(before)  # nothing about the pre-existing bytes moved
     assert text.splitlines() == [
-        day_before_line,
-        yesterday_line,  # unchanged — the window found nothing to revise
-        _canonical_line(today.isoformat(), today_bar),
+        prev2_line,
+        prev_line,  # unchanged — the window found nothing to revise
+        _canonical_line(end.isoformat(), end_bar),
     ]
 
 
@@ -178,27 +197,27 @@ def test_futures_stale_by_one_day_revises_trailing_row(
     the bar is still forming. Measured over the store's 23 most recent bars it
     differed from its final value on 13 of the 22 days the two records share
     (worst +2.865% on 2026-07-29); `PL=F` (+3.365%) and `CL=F` (+2.516%) behave
-    the same way. Worse, the corrected skip condition means every run now writes
-    a same-day partial — with the crypto gate in place futures went from ~61%
-    wrong to ~100% wrong. The trailing row must be replaced by its final
-    value."""
-    today = date.today()
-    yesterday = today - timedelta(days=1)
-    day_before = today - timedelta(days=2)
+    the same way. Since 2026-08-12 `end` is yesterday, so the stored bar is no
+    longer a partial one this run wrote itself — but the vendor still revises a
+    complete futures bar, which is exactly what the window now exists to catch.
+    The trailing row must be replaced by its final value."""
+    end = _fetch_end()
+    prev = end - timedelta(days=1)
+    prev2 = end - timedelta(days=2)
 
     path = get_config().ohlcv_dir / "GC=F.jsonl"
-    day_before_line = _tight_line(day_before.isoformat(), 3310.0)
-    partial_yesterday_line = _canonical_line(
-        yesterday.isoformat(), [3320.0, 3355.0, 3315.0, 3341.6, 3341.6, 1200]
+    prev2_line = _tight_line(prev2.isoformat(), 3310.0)
+    superseded_prev_line = _canonical_line(
+        prev.isoformat(), [3320.0, 3355.0, 3315.0, 3341.6, 3341.6, 1200]
     )
-    _write_raw(path, [day_before_line, partial_yesterday_line])
+    _write_raw(path, [prev2_line, superseded_prev_line])
 
-    final_yesterday_bar = [3320.0, 3372.4, 3315.0, 3437.3, 3437.3, 1850]
-    today_bar = [3437.3, 3460.0, 3430.0, 3451.9, 3451.9, 900]
+    revised_prev_bar = [3320.0, 3372.4, 3315.0, 3437.3, 3437.3, 1850]
+    end_bar = [3437.3, 3460.0, 3430.0, 3451.9, 3451.9, 900]
     frames = {
         "GC=F": {
-            yesterday.isoformat(): final_yesterday_bar,
-            today.isoformat(): today_bar,
+            prev.isoformat(): revised_prev_bar,
+            end.isoformat(): end_bar,
         }
     }
     monkeypatch.setattr(fo, "_fetch_symbol", _make_fake_fetch_symbol(frames))
@@ -209,25 +228,25 @@ def test_futures_stale_by_one_day_revises_trailing_row(
 
     lines = path.read_text(encoding="utf-8").splitlines()
     assert lines == [
-        day_before_line,  # before the window — byte-identical
-        _canonical_line(yesterday.isoformat(), final_yesterday_bar),  # revised
-        _canonical_line(today.isoformat(), today_bar),  # appended
+        prev2_line,  # before the window — byte-identical
+        _canonical_line(prev.isoformat(), revised_prev_bar),  # revised
+        _canonical_line(end.isoformat(), end_bar),  # appended
     ]
-    assert json.loads(lines[1])["close"] == 3437.3  # not the frozen 3341.6
+    assert json.loads(lines[1])["close"] == 3437.3  # not the superseded 3341.6
 
 
 def test_crypto_stale_by_one_day_revises_trailing_row(
     midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    today = date.today()
-    yesterday = today - timedelta(days=1)
-    day_before = today - timedelta(days=2)
+    end = _fetch_end()
+    prev = end - timedelta(days=1)
+    prev2 = end - timedelta(days=2)
 
     path = get_config().ohlcv_dir / "BTC-EUR.jsonl"
-    day_before_line = _tight_line(day_before.isoformat(), 54000.0)
-    stale_yesterday_line = json.dumps(
+    prev2_line = _tight_line(prev2.isoformat(), 54000.0)
+    stale_prev_line = json.dumps(
         {
-            "date": yesterday.isoformat(),
+            "date": prev.isoformat(),
             "open": 55151.82,
             "high": 55893.35,
             "low": 55010.56,
@@ -236,12 +255,12 @@ def test_crypto_stale_by_one_day_revises_trailing_row(
             "volume": 20443908096,
         }
     )
-    _write_raw(path, [day_before_line, stale_yesterday_line])
+    _write_raw(path, [prev2_line, stale_prev_line])
 
     frames = {
         "BTC-EUR": {
-            yesterday.isoformat(): [1, 2, 0.5, 55545.09, 55545.09, 1],
-            today.isoformat(): [1, 2, 0.5, 56061.41, 56061.41, 1],
+            prev.isoformat(): [1, 2, 0.5, 55545.09, 55545.09, 1],
+            end.isoformat(): [1, 2, 0.5, 56061.41, 56061.41, 1],
         }
     }
     monkeypatch.setattr(fo, "_fetch_symbol", _make_fake_fetch_symbol(frames))
@@ -252,7 +271,7 @@ def test_crypto_stale_by_one_day_revises_trailing_row(
 
     lines = path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 3
-    assert lines[0] == day_before_line  # untouched row stays byte-identical
+    assert lines[0] == prev2_line  # untouched row stays byte-identical
     assert json.loads(lines[1])["close"] == 55545.09  # trailing row revised
     assert json.loads(lines[2])["close"] == 56061.41  # new row appended
 
@@ -260,17 +279,51 @@ def test_crypto_stale_by_one_day_revises_trailing_row(
 # --- skip path ---------------------------------------------------------
 
 
-def test_skip_path_no_fetch_no_mutation_when_store_covers_today(
+def test_the_run_never_asks_the_vendor_for_todays_bar(
     midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    today = date.today()
+    """`end` is yesterday, so no forming bar can enter the store (2026-08-12).
+
+    Pinned directly rather than left to the fixtures that depend on it. Asking
+    for today costs nothing on a cash market — the day has not opened — but a
+    24/7 instrument is served a partial bar the moment the UTC day opens
+    (measured: Yahoo returns a same-day BTC-USD close at 07:49 UTC). The 20:00
+    session publishes whatever the store holds and `add_snapshot` freezes it,
+    so a partial captured at 06:00 becomes a permanent published mark.
+    """
+    requested: list[date] = []
+
+    def fake(symbol: str, start: date, end: date) -> pd.DataFrame | None:
+        requested.append(end)
+        return None
+
+    monkeypatch.setattr(fo, "_fetch_symbol", fake)
+    monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+
+    _run_main(monkeypatch, ["--symbols", "BTC-EUR"])
+
+    assert requested, "the run asked the vendor for nothing at all"
+    assert requested[0] == date.today() - timedelta(days=1)
+    assert requested[0] != date.today()
+
+
+def test_skip_path_no_fetch_no_mutation_when_store_covers_end(
+    midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The skip is keyed on `end`, not on the calendar day.
+
+    Since 2026-08-12 `end` is yesterday, so this is the ordinary
+    second-run-in-one-day case: the store already holds the newest day this
+    run would ask for, and nothing is requested.
+    """
+    end = _fetch_end()
     path = get_config().ohlcv_dir / "AAPL.jsonl"
-    today_line = _tight_line(today.isoformat(), 200.0)
-    _write_raw(path, [today_line])
+    end_line = _tight_line(end.isoformat(), 200.0)
+    _write_raw(path, [end_line])
     before = path.read_text(encoding="utf-8")
 
     def fake(symbol: str, start: date, end: date) -> pd.DataFrame | None:
-        raise AssertionError("must not fetch when the store already covers today")
+        raise AssertionError("must not fetch when the store already covers end")
 
     monkeypatch.setattr(fo, "_fetch_symbol", fake)
     monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
@@ -286,12 +339,12 @@ def test_skip_path_no_fetch_no_mutation_when_store_covers_today(
 def test_backfill_refetches_full_window_and_keeps_pre_existing_row(
     midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    today = date.today()
-    old = today - timedelta(days=4)
+    end = _fetch_end()
+    old = end - timedelta(days=4)
     path = get_config().ohlcv_dir / "AAPL.jsonl"
     _write_raw(path, [_tight_line(old.isoformat(), 100.0)])
 
-    frames = {"AAPL": {today.isoformat(): [1, 2, 0.5, 210.0, 210.0, 1]}}
+    frames = {"AAPL": {end.isoformat(): [1, 2, 0.5, 210.0, 210.0, 1]}}
     monkeypatch.setattr(fo, "_fetch_symbol", _make_fake_fetch_symbol(frames))
     monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
 
@@ -305,7 +358,7 @@ def test_backfill_refetches_full_window_and_keeps_pre_existing_row(
         for line in path.read_text(encoding="utf-8").splitlines()
     ]
     assert old.isoformat() in dates  # append-only: pre-existing row survives
-    assert today.isoformat() in dates
+    assert end.isoformat() in dates
 
 
 # --- resweep (rewrites committed history — full-window revision) -----------
@@ -777,14 +830,17 @@ class TestFailureRateGate:
         permanently-dead names that are still attempted (their store is stale,
         so they never take the skip branch) — `MATIC-USD` and `UNI-USD` alone
         read 2/2 = 100% and fail a fully current store. Reachable by a re-run,
-        by the documented `workflow_dispatch`, or by a Friday cron delayed past
-        midnight writing Saturday rows before the Saturday crypto-only run.
+        by the documented `workflow_dispatch`, or by the Tue-Sat full run
+        (`0 6 * * 2-6`) delayed past midnight into Sunday — its `end` is then
+        Saturday, so it writes the Saturday rows for the 24/7 names before the
+        Sun-Mon crypto-only run (`0 6 * * 0,1`), whose `end` is also Saturday,
+        asks for them.
         """
-        today = date.today().isoformat()
+        end = _fetch_end().isoformat()
         current = [f"CUR{i}" for i in range(20)]
         for symbol in current:
             _write_raw(
-                get_config().ohlcv_dir / f"{symbol}.jsonl", [_tight_line(today, 1.5)]
+                get_config().ohlcv_dir / f"{symbol}.jsonl", [_tight_line(end, 1.5)]
             )
         # Two covered-but-dead names, still attempted because their store is old.
         _cover(["MATIC-USD", "UNI-USD"])

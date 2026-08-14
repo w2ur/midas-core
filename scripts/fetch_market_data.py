@@ -66,11 +66,22 @@ _BENCHMARK_SOURCES: dict[str, list[tuple[str, float, str]]] = {
 # store from one whose equity feed died three weeks ago.
 EQUITY_BENCHMARKS = ("sp500", "msci_world")
 
-# Calendar days, not trading days. The longest ordinary equity gap is a
-# Thu-close → Tue-session Easter/Christmas weekend: the session on Tuesday
-# reads Thursday's close because the OHLCV cron runs *after* the session, so
-# 4 days of legitimate lag is reachable without anything being wrong. 5 is not:
-# no market this store follows closes for five consecutive calendar days.
+# Calendar days, not trading days. The bound is set by which market DATES can
+# legitimately be missing between the newest stored close and the session
+# reading it — NOT by the clock order of the collector and the session, which
+# an earlier wording ("the OHLCV cron runs after the session") was read both
+# ways and settled neither.
+#
+# The longest ordinary gap is a Good-Friday or Christmas weekend: the cash
+# market's last close is Thursday's, Friday and the weekend produce no bar at
+# all, and the session that follows runs before its own day's close exists —
+# so the newest close it can possibly see is 4 calendar days old, with nothing
+# wrong anywhere. 5 is not reachable: no market this store follows closes for
+# five consecutive calendar days.
+#
+# That reasoning is independent of the collection hour. The fetch moved from
+# 22:30 UTC to 06:00 UTC on 2026-08-12 and the reachable lag is identical
+# either side of the move, so this threshold did not change with it.
 MAX_EQUITY_STALENESS_DAYS = 4
 
 

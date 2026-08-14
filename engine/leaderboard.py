@@ -8,9 +8,13 @@ baseline.
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timezone
 
-from engine.valuation import portfolio_mtm_eur
+from engine.config import get_config
+from engine.fx import convert as fx_convert
+from engine.fx import to_eur
+from engine.valuation import mtm_base_currency, portfolio_mtm_eur
 
 # Trading days per year — annualization factor for the daily Sharpe ratio,
 # matching the ``daily_sharpe`` convention bt/ffn use on the backtest path
@@ -77,26 +81,171 @@ def max_drawdown(values: list[float]) -> float | None:
     return worst if seen_positive_peak else None
 
 
+def _baseline_return_pct(agent_id: str, filename: str, on: date | None) -> float | None:
+    """Return of an agent's baseline series (benchmark/coin flip) as of `on`.
+
+    The series lives in ``data/baselines/<agent>/<filename>`` in the book's
+    own currency, indexed at the initial capital. Measured from the series'
+    first row to the last row dated on-or-before ``on`` (the whole series
+    when ``on`` is None). Returns None — never raises — when the series is
+    missing, empty, unreadable, or starts before ``on``: a fresh fork and the
+    demo desk have no baselines, and the leaderboard must still rank.
+    """
+    path = get_config().baselines_dir / agent_id / filename
+    try:
+        series = json.loads(path.read_text())
+        if not isinstance(series, list) or not series:
+            return None
+        rows = series
+        if on is not None:
+            iso = on.isoformat()
+            rows = [r for r in series if str(r.get("date", "")) <= iso]
+            if not rows:
+                return None
+        first = float(series[0]["portfolio_value"])
+        last = float(rows[-1]["portfolio_value"])
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        # AttributeError: a corrupt series can parse to a list of non-dicts,
+        # and `.get` on those must degrade like every other malformed shape.
+        return None
+    if first == 0:
+        return None
+    return (last - first) / first * 100.0
+
+
+def _benchmark_return_pct(agent_id: str, on: date | None) -> float | None:
+    return _baseline_return_pct(agent_id, "benchmark.json", on)
+
+
+def _coinflip_return_pct(agent_id: str, on: date | None) -> float | None:
+    return _baseline_return_pct(agent_id, "coinflip.json", on)
+
+
+def _initial_capital_base(agent_id: str, currency: str | None) -> float | None:
+    """The EUR inception anchor expressed in the book's own currency.
+
+    The anchor is the agent's own ``initial_capital`` from ``roster.yaml``
+    (global fallback when the agent is not in the roster — e.g. a
+    bundle-derived summary on a fork); non-EUR books received it converted
+    at day one, so their local return is measured off that converted base —
+    not off a flat 10,000.
+    """
+    cfg = get_config()
+    spec = cfg.roster.get(agent_id)
+    initial = float(spec.initial_capital if spec else cfg.initial_capital)
+    if currency in (None, "EUR"):
+        return initial
+    return fx_convert(initial, "EUR", currency, cfg.day_one)
+
+
+def _local_return_pct(agent_id: str, summary: dict, on: date | None) -> float | None:
+    """Book-currency return since inception, in percent. None if unvaluable."""
+    mtm = mtm_base_currency(summary, on)
+    if mtm is None:
+        return None
+    # Same missing-currency default as portfolio_mtm_eur — the two halves of
+    # a row must never disagree about which currency the book is in.
+    initial = _initial_capital_base(agent_id, summary.get("currency", "USD"))
+    if initial is None or initial <= 0:
+        return None
+    return (mtm / initial - 1.0) * 100.0
+
+
+def _fx_translation_pp(currency: str | None, on: date | None) -> float | None:
+    """Leaderboard tailwind/headwind from the book currency's move vs EUR.
+
+    The EUR value of one unit of the book's currency on ``on`` versus at day
+    one — the return a *flat* non-EUR book would show on the EUR-normalised
+    leaderboard. None for EUR books (no translation leg) and when either
+    rate is unavailable.
+    """
+    if currency in (None, "EUR"):
+        return None
+    now_eur = to_eur(1.0, currency, on)
+    day_one_eur = to_eur(1.0, currency, get_config().day_one)
+    if now_eur is None or day_one_eur is None or day_one_eur == 0:
+        return None
+    return (now_eur / day_one_eur - 1.0) * 100.0
+
+
 def build_leaderboard_rows(
     portfolio_summaries: dict[str, dict],
     on: date | None,
 ) -> list[dict]:
-    """Return ranked rows: [{rank, agent, return_pct}, ...] sorted desc.
+    """Return ranked rows sorted by benchmark-relative return, best first.
+
+    Row shape: ``{rank, agent, return_pct, vs_benchmark_pp, vs_coinflip_pp}``
+    plus ``fx_translation_pp`` on non-EUR books.
+
+    ``return_pct`` stays the EUR-normalised return off the €10,000 anchor —
+    unchanged since inception. Ranking moved to ``vs_benchmark_pp``
+    (2026-08-14): the book's own-currency return minus its pre-registered
+    benchmark's return, which is FX-free by construction — raw EUR ranking
+    mixed market beta and currency translation into a skill ordering (the
+    steady-eddie twins' 15pp gap was ~5pp market + ~2.4pp FX). Rows without
+    a benchmark series rank after measured rows, by raw EUR return — a
+    missing baseline must never read as best or worst (same null-last rule
+    as the site's board-sort). A desk with no baselines at all (demo desk,
+    fresh fork) therefore ranks exactly as before this field existed.
 
     Agents whose EUR-MTM cannot be computed (e.g. missing FX rate) are dropped.
     """
     rows: list[dict] = []
+    # The translation leg is a property of (currency, on), not of the row —
+    # memoised so the watcher's 15-minute builds don't re-derive the same
+    # rate pair once per non-EUR book.
+    fx_pp_by_currency: dict[str, float | None] = {}
     for agent_id, summary in portfolio_summaries.items():
         eur_mtm = portfolio_mtm_eur(summary, on)
         if eur_mtm is None:
             continue
-        rows.append(
-            {
-                "agent": agent_id,
-                "return_pct": round((eur_mtm / 10_000 - 1) * 100, 4),
-            }
-        )
-    rows.sort(key=lambda r: r["return_pct"], reverse=True)
+        # Same missing-currency default as portfolio_mtm_eur (see
+        # _local_return_pct) — one currency assumption per row.
+        currency = summary.get("currency", "USD")
+        local = _local_return_pct(agent_id, summary, on)
+        bench = _benchmark_return_pct(agent_id, on)
+        coin = _coinflip_return_pct(agent_id, on)
+        row = {
+            "agent": agent_id,
+            "return_pct": round((eur_mtm / 10_000 - 1) * 100, 4),
+            "vs_benchmark_pp": (
+                round(local - bench, 4)
+                if local is not None and bench is not None
+                else None
+            ),
+            "vs_coinflip_pp": (
+                round(local - coin, 4)
+                if local is not None and coin is not None
+                else None
+            ),
+        }
+        if currency not in fx_pp_by_currency:
+            fx_pp_by_currency[currency] = _fx_translation_pp(currency, on)
+        fx_pp = fx_pp_by_currency[currency]
+        if fx_pp is not None:
+            row["fx_translation_pp"] = round(fx_pp, 4)
+        rows.append(row)
+
+    return rank_leaderboard_rows(rows)
+
+
+def rank_leaderboard_rows(rows: list[dict]) -> list[dict]:
+    """Sort rows on the ranking metric and assign ``rank`` in place.
+
+    The single definition of the board's order, shared with
+    ``scripts.restate_bundles`` so a restated bundle cannot drift onto a
+    different metric than the live builder. A row without a
+    ``vs_benchmark_pp`` key (pre-2026-08-14 bundles) ranks exactly like one
+    where it is null: after every measured row, by raw EUR return.
+    """
+
+    def _sort_key(r: dict) -> tuple:
+        vs = r.get("vs_benchmark_pp")
+        if vs is not None:
+            return (0, -vs, r["agent"])
+        return (1, -r["return_pct"], r["agent"])
+
+    rows.sort(key=_sort_key)
     for i, row in enumerate(rows, start=1):
         row["rank"] = i
     return rows

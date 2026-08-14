@@ -91,10 +91,21 @@ def build_oracle_prompt(
             posts_s += f'    - "{text}"\n'
     posts_block = f"\n\nAGENT POSTS TODAY:{posts_s}" if posts_s else ""
 
-    lb_s = "\n".join(
-        f"  #{e['rank']} {_display_name(e['agent'])}: {e['return_pct']:+.1f}% (EUR)"
-        for e in leaderboard
-    )
+    def _lb_line(e: dict) -> str:
+        # Rank orders on vs_benchmark_pp since 2026-08-14. The narrator must
+        # see the ranked quantity, or a -9.4% book at #1 reads as an error it
+        # will "correct" or explain away — the Day 79-85 fabrication class.
+        vs = e.get("vs_benchmark_pp")
+        if vs is not None:
+            return (
+                f"  #{e['rank']} {_display_name(e['agent'])}: "
+                f"{vs:+.1f}pp vs benchmark (EUR return {e['return_pct']:+.1f}%)"
+            )
+        return (
+            f"  #{e['rank']} {_display_name(e['agent'])}: {e['return_pct']:+.1f}% (EUR)"
+        )
+
+    lb_s = "\n".join(_lb_line(e) for e in leaderboard)
 
     journal_section = ""
     if agent_memories:

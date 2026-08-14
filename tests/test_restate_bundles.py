@@ -209,3 +209,60 @@ def test_agent_summary_for_date_replays_holdings_to_the_resolved_session_date(
         "positions": [{"ticker": "AAPL", "shares": 2.0}],
         "currency": "USD",
     }
+
+
+def test_new_era_bundle_refreshes_vs_fields_and_ranks_on_them(monkeypatch):
+    # Regression: review 2026-08-14. A bundle published under the
+    # benchmark-relative ranking carries vs_* fields; restating it must
+    # refresh them from the fresh rows (computed as of the bundle's date)
+    # and rank on vs_benchmark_pp — not resurrect the raw-EUR sort with
+    # stale vs figures beside a fresh return_pct.
+    monkeypatch.setattr(
+        rb,
+        "_agent_summary_for_date",
+        lambda state, bundle_date: {"cash": 0.0, "positions": [], "currency": "EUR"},
+    )
+    monkeypatch.setattr(
+        rb,
+        "build_leaderboard_rows",
+        lambda summaries, on: [
+            {"agent": "a", "return_pct": 12.0, "vs_benchmark_pp": -2.0, "vs_coinflip_pp": 0.5},
+            {"agent": "b", "return_pct": -3.0, "vs_benchmark_pp": 4.0, "vs_coinflip_pp": None},
+        ],
+    )
+    bundle = {
+        "leaderboard": [
+            {"agent": "a", "return_pct": 10.0, "vs_benchmark_pp": 1.0, "vs_coinflip_pp": 1.0, "rank": 1},
+            {"agent": "b", "return_pct": -4.0, "vs_benchmark_pp": 0.5, "vs_coinflip_pp": 0.5, "rank": 2},
+        ]
+    }
+    agent_states = {"a": _state("touched"), "b": _state("touched")}
+
+    restate_bundle_leaderboard(bundle, "2026-08-20", agent_states)
+
+    # b beats its benchmark by more -> rank 1 despite the lower EUR return.
+    assert [r["agent"] for r in bundle["leaderboard"]] == ["b", "a"]
+    assert bundle["leaderboard"][0]["vs_benchmark_pp"] == 4.0
+    assert bundle["leaderboard"][0]["vs_coinflip_pp"] is None
+    assert bundle["leaderboard"][1]["vs_benchmark_pp"] == -2.0
+
+
+def test_old_era_bundle_keeps_raw_return_sort_and_gains_no_vs_fields(monkeypatch):
+    # A pre-2026-08-14 bundle has no vs fields; restating it must not add
+    # them or re-rank history under a metric that did not exist then.
+    monkeypatch.setattr(
+        rb,
+        "_agent_summary_for_date",
+        lambda state, bundle_date: {"cash": 0.0, "positions": [], "currency": "EUR"},
+    )
+    monkeypatch.setattr(
+        rb,
+        "build_leaderboard_rows",
+        lambda summaries, on: [
+            {"agent": "a", "return_pct": 7.0, "vs_benchmark_pp": -9.0, "vs_coinflip_pp": 1.0},
+        ],
+    )
+    bundle = {"leaderboard": [{"agent": "a", "return_pct": 5.0, "rank": 1}]}
+    restate_bundle_leaderboard(bundle, "2026-06-01", {"a": _state("touched")})
+
+    assert bundle["leaderboard"] == [{"agent": "a", "return_pct": 7.0, "rank": 1}]

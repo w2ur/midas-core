@@ -192,6 +192,88 @@ def test_build_new_rows_skips_already_present_dates() -> None:
     assert [d for d, _ in rows] == ["2026-04-16"]
 
 
+def test_build_new_rows_warns_when_a_row_has_no_close(caplog) -> None:
+    import logging
+
+    import pandas as pd
+
+    from engine.ohlcv_ingest import build_new_rows
+
+    df = pd.DataFrame(
+        {
+            "Open": [1.0, 2.0],
+            "High": [1.0, 2.0],
+            "Low": [1.0, 2.0],
+            "Close": [None, 2.0],
+            "Adj Close": [None, 2.0],
+            "Volume": [10, 20],
+        },
+        index=pd.to_datetime(["2026-08-10", "2026-08-11"]),
+    )
+    with caplog.at_level(logging.WARNING, logger="engine.ohlcv_ingest"):
+        rows = build_new_rows(df, set(), symbol="SAP.DE")
+
+    assert [d for d, _ in rows] == ["2026-08-11"]
+    assert "SAP.DE" in caplog.text
+    assert "2026-08-10" in caplog.text
+
+
+def test_build_new_rows_is_silent_when_every_row_has_a_close(caplog) -> None:
+    import logging
+
+    import pandas as pd
+
+    from engine.ohlcv_ingest import build_new_rows
+
+    df = pd.DataFrame(
+        {
+            "Open": [1.0],
+            "High": [1.0],
+            "Low": [1.0],
+            "Close": [2.0],
+            "Adj Close": [2.0],
+            "Volume": [10],
+        },
+        index=pd.to_datetime(["2026-08-11"]),
+    )
+    with caplog.at_level(logging.WARNING, logger="engine.ohlcv_ingest"):
+        build_new_rows(df, set(), symbol="SAP.DE")
+
+    assert caplog.text == ""
+
+
+def test_merge_rows_warns_when_a_row_has_no_close(tmp_path, caplog) -> None:
+    import logging
+
+    import pandas as pd
+
+    from engine.ohlcv_ingest import merge_rows
+
+    path = tmp_path / "SAP.DE.jsonl"
+    path.write_text(
+        '{"date": "2026-08-07", "open": 1.0, "high": 1.0, "low": 1.0, '
+        '"close": 1.0, "adj_close": 1.0, "volume": 1}\n',
+        encoding="utf-8",
+    )
+    df = pd.DataFrame(
+        {
+            "Open": [1.0, 2.0],
+            "High": [1.0, 2.0],
+            "Low": [1.0, 2.0],
+            "Close": [None, 2.0],
+            "Adj Close": [None, 2.0],
+            "Volume": [10, 20],
+        },
+        index=pd.to_datetime(["2026-08-10", "2026-08-11"]),
+    )
+    with caplog.at_level(logging.WARNING, logger="engine.ohlcv_ingest"):
+        result = merge_rows(path, df, revise_from="2026-08-11")
+
+    assert result.appended == 1
+    assert "SAP.DE" in caplog.text
+    assert "2026-08-10" in caplog.text
+
+
 # --- append_new_rows: merge + idempotency ---------------------------------
 
 
@@ -738,7 +820,7 @@ class TestQuarantineCatches:
         assert "2026-05-08" not in path.read_text()
 
     def test_the_quarantine_record_is_diagnosable(self, tmp_path):
-        """"anomaly" is not actionable; the old value, the new one and the
+        """ "anomaly" is not actionable; the old value, the new one and the
         ratio are."""
         from engine.ohlcv_ingest import merge_rows
 
@@ -837,7 +919,9 @@ class TestQuarantineDoesNotCatch:
         path = tmp_path / "LLOY.L.jsonl"
         _store(path, [("2026-08-06", 1.16)])
 
-        result = merge_rows(path, _frame([("2026-08-06", 116.0)]), revise_from="2026-08-06")
+        result = merge_rows(
+            path, _frame([("2026-08-06", 116.0)]), revise_from="2026-08-06"
+        )
 
         assert result.quarantined == 0
         assert result.revised == 1

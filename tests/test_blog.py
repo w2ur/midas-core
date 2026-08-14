@@ -277,3 +277,38 @@ class TestSaveDailyBlogDraft:
         content = path.read_text(encoding="utf-8")
         # Title containing colon MUST be quoted to stay valid YAML
         assert 'title: "Day 2: The Split"' in content
+
+
+class TestOraclePromptVsBenchmark:
+    def test_leaderboard_line_carries_the_ranked_quantity(self) -> None:
+        # Since 2026-08-14 rank orders on vs_benchmark_pp; a prompt showing
+        # only the EUR return would hand the narrator a board whose order
+        # contradicts every number in it (a -9.4% book at #1), which is the
+        # narrator-fed-wrong-facts class of the Day 79-85 incident.
+        from engine.blog import build_oracle_prompt
+
+        leaderboard = [
+            {"agent": "satoshi", "return_pct": -9.4, "vs_benchmark_pp": 6.6, "rank": 1},
+            {"agent": "steady-eddie-usd", "return_pct": 16.3, "vs_benchmark_pp": 5.2, "rank": 2},
+        ]
+        prompt = build_oracle_prompt(
+            day_number=87,
+            market_data={},
+            agent_results={},
+            agent_posts={},
+            leaderboard=leaderboard,
+        )
+        assert "+6.6pp vs benchmark" in prompt
+        assert "-9.4" in prompt  # EUR return still shown, labelled
+
+    def test_pre_rerank_rows_render_the_old_line(self) -> None:
+        from engine.blog import build_oracle_prompt
+
+        prompt = build_oracle_prompt(
+            day_number=2,
+            market_data={},
+            agent_results={},
+            agent_posts={},
+            leaderboard=[{"agent": "world", "return_pct": 2.6, "rank": 1}],
+        )
+        assert "+2.6% (EUR)" in prompt

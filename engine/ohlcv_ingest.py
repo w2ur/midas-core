@@ -106,15 +106,28 @@ def fetch_window_start(
 ) -> date | None:
     """Return the inclusive start date for the next fetch, or None to skip.
 
-    ``end`` is the last day we want (normally today). The OHLCV cron runs at
-    22:30 UTC — after the US close — so a store holding ``end - 1`` must still
-    fetch ``end``: the bar exists. Only a store that already holds ``end`` is
-    skipped.
+    ``end`` is the last day we want, and since 2026-08-12 its caller sets it to
+    **yesterday, never today** — so this function is never asked for a day that
+    has not closed. That is the point: a cash market would simply serve nothing
+    for the current day, but a 24/7 instrument (crypto, FX, futures on Globex)
+    is served a bar the moment the UTC day opens (verified 2026-08-12: a
+    same-day BTC-USD close is returned at 07:49 UTC), and under the 06:00 cron
+    that bar would be about six hours old. The 20:00 session publishes whatever
+    the store holds and ``PortfolioManager.add_snapshot`` freezes it, so a
+    partial captured at 06:00 becomes a permanent published mark. Ending at
+    yesterday makes every stored bar a complete one on every instrument.
 
-    ``revise_days`` re-requests that many already-stored trailing days so a bar
-    that was still forming when it was first written can be corrected by its
-    final value. It has no effect on an empty store, which fetches the full
-    ``history_days`` window regardless.
+    A store holding ``end - 1`` must still attempt ``end``; only a store that
+    already holds ``end`` is skipped, which is what makes a second run in one
+    UTC day a no-op.
+
+    ``revise_days`` re-requests that many already-stored trailing days. It no
+    longer corrects *partial* bars — with ``end`` at yesterday none are ever
+    stored — it corrects the vendor **revising a bar that was already
+    complete**, which is real and measured: futures moved on 13 of 22 shared
+    days and FX on 5 of 23, and Yahoo restates raw ``close`` outright for a
+    corporate action. It has no effect on an empty store, which fetches the
+    full ``history_days`` window regardless.
     """
     if last is None:
         return end - timedelta(days=history_days)
@@ -139,23 +152,59 @@ def row_to_record(row_date: str, row: object) -> dict:
     }
 
 
-def build_new_rows(df: pd.DataFrame, existing: set[str]) -> list[tuple[str, str]]:
+def _warn_dropped_no_close(symbol: str, dropped: list[str]) -> None:
+    """Log a row dropped for a missing close. A no-op when nothing was dropped.
+
+    Shared by ``build_new_rows`` and ``merge_rows`` — both discard a row this
+    way, and until 2026-08-12 each did so on a bare ``continue``, which is how
+    the European side of the store ran a full trading day behind the US side
+    for five weeks while every run printed a healthy row count and exited
+    green.
+
+    The two callers are asymmetric ON PURPOSE, so do not "fix" it: a null
+    close for a date the store ALREADY holds reaches ``merge_rows`` and is
+    warned about there, while ``build_new_rows`` has already skipped that date
+    as seen before it ever looks at the close. Neither can warn about the
+    other's rows.
+    """
+    if not dropped:
+        return
+    logger.warning(
+        "%s: dropped %d row(s) with no close — %s. The vendor served the "
+        "date but not a usable price; the store does not advance for it.",
+        symbol or "<unknown symbol>",
+        len(dropped),
+        ", ".join(sorted(dropped)),
+    )
+
+
+def build_new_rows(
+    df: pd.DataFrame, existing: set[str], *, symbol: str = ""
+) -> list[tuple[str, str]]:
     """Merge a fetched frame against already-stored dates.
 
     Returns a date-sorted list of ``(iso_date, json_line)`` pairs for dates not
     already in ``existing``. Rows whose close is missing are dropped (a store row
     with no close is useless for valuation and fills). Idempotent: re-running with
     a frame whose dates are all present yields an empty list.
+
+    A dropped row is **logged**, not silent. Until 2026-08-12 it was a bare
+    ``continue``, and that is how the European side of the store ran a full
+    trading day behind the US side for five weeks while every run printed a
+    healthy row count and exited green.
     """
     rows_to_append: list[tuple[str, str]] = []
+    dropped: list[str] = []
     for ts, row in df.iterrows():
         d = ts.date().isoformat() if hasattr(ts, "date") else str(ts)
         if d in existing:
             continue
         record = row_to_record(d, row)
         if record["close"] is None:
+            dropped.append(d)
             continue
         rows_to_append.append((d, json.dumps(record)))
+    _warn_dropped_no_close(symbol, dropped)
     rows_to_append.sort(key=lambda pair: pair[0])
     return rows_to_append
 
@@ -175,13 +224,12 @@ def append_new_rows(
     """
     existing = existing_dates(path) | (skip_dates or set())
     path.parent.mkdir(parents=True, exist_ok=True)
-    rows_to_append = build_new_rows(df, existing)
+    rows_to_append = build_new_rows(df, existing, symbol=path.stem)
     if rows_to_append:
         with path.open("a", encoding="utf-8") as f:
             for _, line in rows_to_append:
                 f.write(line + "\n")
     return len(rows_to_append)
-
 
 
 # ---------------------------------------------------------------------------
@@ -191,9 +239,13 @@ def append_new_rows(
 #: A *revision* — a value replacing an already-stored close for the same date —
 #: moving more than this fraction is quarantined rather than ingested.
 #:
-#: Calibrated against the measured legitimate revisions, not guessed. Commodity
-#: futures drift up to +3.37% between the 22:30 UTC fetch and the final close;
-#: FX up to -1.56% on a Friday. 20% clears both by better than 5x while sitting
+#: Calibrated against the measured legitimate revisions, not guessed. Measured
+#: under the 22:30 UTC schedule in force until 2026-08-12: commodity futures
+#: drifted up to +3.37% between that fetch and the final close, FX up to -1.56%
+#: on a Friday. Those are the calibration figures and are kept as such rather
+#: than restated for the 06:00 schedule, which has NOT been re-measured. The
+#: threshold is unchanged either way: 20% clears both by better than 5x while
+#: sitting
 #: two orders of magnitude below a units flip (100x) or a typical split ratio.
 REVISION_LIMIT = 0.20
 
@@ -281,11 +333,16 @@ def merge_rows(
     are appended, stored dates are never touched.
 
     With ``revise_from`` set to an ISO date, an already-stored row on or after
-    that date is *replaced* when the fetched value differs. This exists for bars
-    that are still forming when they are first written — 24/7 crypto, commodity
-    futures whose next session has already opened, FX after its 17:00 ET roll —
-    which the store previously had no way to correct. A bar that was already
-    final re-fetches identical, so no stored value is replaced.
+    that date is *replaced* when the fetched value differs. It was built for
+    bars that were still forming when first written — 24/7 crypto, commodity
+    futures whose next session had already opened, FX after its 17:00 ET roll —
+    which the store had no way to correct. Since 2026-08-12 the fetch ends at
+    yesterday and stores no forming bar at all, so what this now corrects is the
+    vendor **revising an already-complete bar**: measured, futures moved on 13
+    of 22 shared days and FX on 5 of 23, and Yahoo restates raw ``close``
+    outright for a corporate action (which ``detect_split`` adjudicates on the
+    weekly resweep). A bar the vendor does not revise re-fetches identical, so
+    no stored value is replaced.
 
     **The store's existing line order is preserved.** A revision overwrites its
     row in place; new dates are appended at the end, in ascending date order
@@ -365,9 +422,7 @@ def merge_rows(
         # so append_new_rows would write a SECOND row for it. Salvaging the
         # date out of the raw text keeps the duplicate out; a date we cannot
         # salvage is still exposed, which the warning above is the notice of.
-        return MergeResult(
-            append_new_rows(path, df, skip_dates=salvaged_dates), 0, 0
-        )
+        return MergeResult(append_new_rows(path, df, skip_dates=salvaged_dates), 0, 0)
 
     symbol = path.stem
     # The newest stored close, used as the reference for a brand-new row.
@@ -380,10 +435,12 @@ def merge_rows(
     new_rows: dict[str, str] = {}
     revised = 0
     refused: list[QuarantinedRow] = []
+    dropped_no_close: list[str] = []
     for ts, row in df.iterrows():
         d = ts.date().isoformat() if hasattr(ts, "date") else str(ts)
         record = row_to_record(d, row)
         if record["close"] is None:
+            dropped_no_close.append(d)
             continue
         line = json.dumps(record)
         incoming = record["close"]
@@ -409,6 +466,8 @@ def merge_rows(
                     continue
             stored[d] = line  # in place — keeps this row's position in the file
             revised += 1
+
+    _warn_dropped_no_close(symbol, dropped_no_close)
 
     # Only the NEW dates are sorted, so a multi-day catch-up lands
     # chronologically among itself; the pre-existing order is untouched. On an

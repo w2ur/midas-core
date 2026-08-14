@@ -28,8 +28,8 @@ base at Step 0, then re-validates both before anything irreversible.
 Why "ledger moved", not "main moved"
 ------------------------------------
 main advances during a healthy session all the time — the sentiment-digest
-commit lands at ~20:26, 26 minutes into a 20:00 session, and the OHLCV cron
-lands at 22:30. Aborting on any movement would fail good sessions.
+commit lands at ~20:26, 26 minutes into a 20:00 session. Aborting on any
+movement would fail good sessions.
 
 What actually invalidates a session is movement in the *ledger*: portfolios,
 orders, baselines, the leaderboard. Those are the files a session recomputes

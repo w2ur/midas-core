@@ -488,19 +488,45 @@ def main() -> int:
             print(f"  {s}")
         return 0
 
-    end = date.today()
+    # NEVER today (2026-08-12). `end` is the newest day this run will ask the
+    # vendor for, and asking for today is asking for a bar that is still
+    # forming. On a cash market that costs nothing — the day has not opened, so
+    # the vendor returns nothing — but a 24/7 instrument (crypto, FX, and
+    # futures on Globex) is served a partial bar the moment the UTC day opens.
+    # Measured on 2026-08-12: Yahoo returns a same-day BTC-USD close at 07:49
+    # UTC. Under the 06:00 cron that row is roughly six hours old, the 20:00
+    # session publishes it, and `PortfolioManager.add_snapshot` then freezes it
+    # — the next morning's revision arrives too late to move the published
+    # mark. Under the old 22:30 cron the same row was ~22.5 h formed, which was
+    # wrong more cheaply rather than right.
+    #
+    # Ending at yesterday means every row this run stores is a COMPLETE daily
+    # bar, on every instrument. The published mark becomes a final close.
+    #
+    # The snapshot dating is unchanged by this, which is the point: at 06:00 on
+    # day D the store advances to D-1 and the 20:00 session on D publishes a
+    # D-1-dated row — exactly what the 22:30 cron on D-1 produced. Verified
+    # against the live record (`data/portfolios/*/snapshots.json`): the 08-04
+    # session published 08-03, the 08-05 session published 08-04.
+    end = date.today() - timedelta(days=1)
 
     # Universal 1-day revision window: re-request the trailing stored day and
-    # let its final value replace it. Crypto trades 24/7; commodity futures
-    # (`=F`) have already opened the next Globex session by 22:30 UTC; FX (`=X`)
-    # rolls at 17:00 ET and drifts mildly, worst on Fridays. All three are
-    # still forming when first written. Cash equities and ETFs ARE final at
-    # fetch time — for them the re-fetched bar is identical, `merge_rows` finds
-    # nothing to replace, and no already-stored row changes value or position.
-    # (The file is still rewritten to append the day's new bar, and a genuine
-    # revision does rewrite it — what is invariant is the stored rows, not the
-    # file's mtime.) So a blanket window adds no churn and needs no instrument
-    # taxonomy to maintain as universes grow.
+    # let its final value replace it.
+    #
+    # It no longer catches PARTIAL bars — with `end` at yesterday nothing
+    # partial is ever stored. What it catches now is a genuine vendor
+    # revision of an already-complete bar, which is real and measurable:
+    # `GC=F`/`PL=F`/`CL=F` each moved on 13 of 22 shared days (up to +3.4%)
+    # and FX on 5 of 23 (worst -1.56%) when that was measured under the 22:30
+    # schedule. Yahoo also restates raw `close` outright for a corporate
+    # action, which is what `detect_split` adjudicates on the weekly resweep.
+    #
+    # For a bar the vendor does not revise, the re-fetch is identical,
+    # `merge_rows` finds nothing to replace, and no already-stored row changes
+    # value or position. (The file is still rewritten to append the day's new
+    # bar, and a genuine revision does rewrite it — what is invariant is the
+    # stored rows, not the file's mtime.) So a blanket window adds no churn
+    # and needs no instrument taxonomy to maintain as universes grow.
     revise_days = 1
 
     registry_updates: dict[str, dict] = {}
@@ -550,8 +576,11 @@ def main() -> int:
                     # branch) — MATIC-USD and UNI-USD alone read 2/2 = 100%
                     # and fail a fully current store. Reachable whenever most
                     # symbols are already up to date: a second run in one UTC
-                    # day, or a Friday cron delayed past midnight that writes
-                    # Saturday rows before the Saturday crypto-only run.
+                    # day, or the Tue-Sat full run (`0 6 * * 2-6`) delayed past
+                    # midnight into Sunday — its `end` is then Saturday, so it
+                    # writes the Saturday rows for the 24/7 names before the
+                    # Sun-Mon crypto-only run (`0 6 * * 0,1`), whose `end` is
+                    # also Saturday, asks for them.
                     if path.exists():
                         considered_covered += 1
                     continue  # OHLCV already up to date; still refresh name

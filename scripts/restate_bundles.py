@@ -52,8 +52,8 @@ Rank is a derived property of the *whole* array's sort order, not a
 per-agent fact — freezing an untouched agent's ``return_pct`` cannot mean
 freezing its rank too, since other entries around it may have moved. Every
 bundle's leaderboard is re-sorted and re-ranked after merging touched and
-frozen rows, using the same sort ``build_leaderboard_rows`` performs
-internally.
+frozen rows, via ``rank_leaderboard_rows`` — the same sort the live builder
+uses, so a restated bundle cannot drift onto a different ranking metric.
 
 Dry-run is the default. Pass ``--apply`` to write.
 
@@ -79,7 +79,7 @@ from engine.disclosure import (
     require_changelog_entry,
 )
 from engine.config import get_config
-from engine.leaderboard import build_leaderboard_rows
+from engine.leaderboard import build_leaderboard_rows, rank_leaderboard_rows
 from engine.portfolio import PortfolioManager
 from engine.restatement import replay_holdings
 from scripts.restate_valuations import (
@@ -247,6 +247,19 @@ def restate_bundle_leaderboard(
             # the merge/sort below.
             new_row = dict(old_row)
             new_row["return_pct"] = new_return_pct
+            # Metric era: a bundle whose rows carry vs_benchmark_pp was
+            # published under the 2026-08-14 benchmark-relative ranking, so
+            # its restatement refreshes those fields from the same fresh rows
+            # (they were computed as of this bundle's date). A pre-re-rank
+            # bundle keeps its raw-return era untouched — adding the fields
+            # would re-rank history under a metric that did not exist when
+            # the bundle was published.
+            if any("vs_benchmark_pp" in r for r in old_leaderboard):
+                for key in ("vs_benchmark_pp", "vs_coinflip_pp", "fx_translation_pp"):
+                    if key in fresh_row:
+                        new_row[key] = fresh_row[key]
+                    else:
+                        new_row.pop(key, None)
             legacy_key = legacy_key_by_agent.get(agent_id)
             if legacy_key is not None:
                 # Re-derive the legacy EUR-value companion from the fresh
@@ -267,10 +280,10 @@ def restate_bundle_leaderboard(
                     )
                 )
 
-    merged = computed_rows + frozen_rows
-    merged.sort(key=lambda r: r["return_pct"], reverse=True)
-    for i, row in enumerate(merged, start=1):
-        row["rank"] = i
+    # The one definition of the board's order — a row without vs_benchmark_pp
+    # (every pre-2026-08-14 bundle) ranks on raw return exactly as it always
+    # did, so old-era bundles restate identically to before.
+    merged = rank_leaderboard_rows(computed_rows + frozen_rows)
 
     bundle["leaderboard"] = merged
     return result
