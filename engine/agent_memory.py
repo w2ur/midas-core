@@ -259,13 +259,26 @@ def build_narrator_memory_update_prompt(
         desk += "\n"
     desk = desk or "  (no agents ran this session)"
 
-    lb_s = (
-        "\n".join(
+    def _lb_line(e: dict) -> str:
+        # Rank orders on vs_benchmark_pp since 2026-08-14, so the narrator has
+        # to be shown the ranked quantity. Fed only the EUR return it sees
+        # "#1 Satoshi: -9.4%" above "#2 Steady Eddie USD: +16.8%", reads its
+        # own leaderboard as broken, and narrates around it — the Day 79-85
+        # fabrication class, and worse here than in the blog draft because
+        # this prompt writes the journal that the NEXT session carries
+        # forward, so the error compounds instead of passing. Mirrors
+        # engine.blog._lb_line deliberately; the two must not drift.
+        vs = e.get("vs_benchmark_pp")
+        if vs is not None:
+            return (
+                f"  #{e['rank']} {display_name(e['agent'])}: "
+                f"{vs:+.1f}pp vs benchmark (EUR return {e['return_pct']:+.1f}%)"
+            )
+        return (
             f"  #{e['rank']} {display_name(e['agent'])}: {e['return_pct']:+.1f}% (EUR)"
-            for e in leaderboard
         )
-        or "  (unavailable)"
-    )
+
+    lb_s = "\n".join(_lb_line(e) for e in leaderboard) or "  (unavailable)"
 
     posts_s = (
         "\n".join(f'- "{post_text(p)}"' for p in (posts_today or []))
@@ -285,7 +298,7 @@ YOUR CURRENT JOURNAL:
 
 THE DESK TODAY:{desk}
 
-CURRENT LEADERBOARD (EUR-normalized):
+CURRENT LEADERBOARD (ranked on return vs each agent's own benchmark):
 {lb_s}
 
 YOUR POSTS TODAY:

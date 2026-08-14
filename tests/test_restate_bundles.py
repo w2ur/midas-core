@@ -266,3 +266,35 @@ def test_old_era_bundle_keeps_raw_return_sort_and_gains_no_vs_fields(monkeypatch
     restate_bundle_leaderboard(bundle, "2026-06-01", {"a": _state("touched")})
 
     assert bundle["leaderboard"] == [{"agent": "a", "return_pct": 7.0, "rank": 1}]
+
+
+def test_metric_era_fields_covers_every_field_the_engine_emits(monkeypatch):
+    """The restatement refresh list is derived from the engine, not typed.
+
+    `_METRIC_ERA_FIELDS` enumerates what a post-2026-08-14 bundle's
+    restatement refreshes. If the engine gains a row field and this list does
+    not, that field is silently frozen at its originally-published value while
+    its siblings are refreshed — publishing a bundle whose own legs no longer
+    reconcile. Nothing else in the suite can see that, because a restatement
+    of a bundle that happens not to move looks identical either way.
+    """
+    from engine import leaderboard as lb
+
+    monkeypatch.setattr(lb, "portfolio_mtm_eur", lambda summary, on: 11_040.0)
+    monkeypatch.setattr(lb, "mtm_base_currency", lambda summary, on: 12_000.0)
+    monkeypatch.setattr(lb, "fx_convert", lambda amount, src, dst, on: amount * 1.10)
+    monkeypatch.setattr(lb, "_benchmark_return_pct", lambda agent_id, on: 3.0)
+    monkeypatch.setattr(lb, "_coinflip_return_pct", lambda agent_id, on: 1.0)
+    monkeypatch.setattr(lb, "_fx_translation_pp", lambda currency, on: 1.20)
+
+    # A non-EUR book, so the optional fx_translation_pp leg is present too.
+    row = lb.build_leaderboard_rows(
+        {"usd-book": {"agent_id": "usd-book", "currency": "USD"}},
+        on=date(2026, 8, 14),
+    )[0]
+
+    # `agent` identifies the row, `rank` is recomputed across the whole merged
+    # array after the merge, and `return_pct` is written explicitly above the
+    # era block. Everything else is what the era block has to carry.
+    handled_elsewhere = {"agent", "rank", "return_pct"}
+    assert set(row) - handled_elsewhere == set(rb._METRIC_ERA_FIELDS)

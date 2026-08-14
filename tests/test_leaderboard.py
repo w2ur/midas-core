@@ -106,7 +106,9 @@ def test_build_leaderboard_rows_without_baselines_sorts_by_eur_mtm(monkeypatch):
     assert rows[0] == {
         "rank": 1,
         "agent": "a",
+        "currency": "USD",
         "return_pct": 20.0,
+        "return_local_pct": None,
         "vs_benchmark_pp": None,
         "vs_coinflip_pp": None,
     }
@@ -317,7 +319,12 @@ def test_build_current_leaderboard_artifact_shape(monkeypatch):
             {
                 "rank": 1,
                 "agent": "a",
+                # No `currency` key on the summary: the row falls back to the
+                # same USD default portfolio_mtm_eur uses, so the two halves
+                # of a row cannot disagree about the book's denomination.
+                "currency": "USD",
                 "return_pct": 5.0,
+                "return_local_pct": None,
                 "vs_benchmark_pp": None,
                 "vs_coinflip_pp": None,
             }
@@ -368,3 +375,151 @@ def test_rank_leaderboard_rows_is_shared_and_era_tolerant():
     ranked = rank_leaderboard_rows(rows)
     assert [r["agent"] for r in ranked] == ["meas", "old"]
     assert ranked[0]["rank"] == 1 and ranked[1]["rank"] == 2
+
+
+def test_return_local_pct_is_published_on_every_row(monkeypatch):
+    """The figure both vs_* fields subtract on is published, not implied.
+
+    A reader could see `vs_benchmark_pp` and `return_pct` and had no way to
+    tell that the first is not a subtraction on the second — on a USD book it
+    is a subtraction on a different number entirely.
+    """
+    from engine import leaderboard as lb
+
+    monkeypatch.setattr(lb, "portfolio_mtm_eur", lambda summary, on: 11_683.53)
+    monkeypatch.setattr(lb, "_benchmark_return_pct", lambda agent_id, on: 8.78)
+    monkeypatch.setattr(lb, "_coinflip_return_pct", lambda agent_id, on: None)
+    monkeypatch.setattr(lb, "_local_return_pct", lambda agent_id, summary, on: 14.3296)
+    monkeypatch.setattr(lb, "_fx_translation_pp", lambda currency, on: 2.1916)
+
+    row = build_leaderboard_rows(
+        {"usd-book": {"agent_id": "usd-book", "currency": "USD"}},
+        on=date(2026, 8, 14),
+    )[0]
+
+    assert row["return_local_pct"] == 14.3296
+    assert row["currency"] == "USD"
+    # The published excess is the local figure minus the benchmark's — NOT
+    # the EUR one, which would read 16.84 - 8.78 = 8.06pp and overstate the
+    # book by the whole currency leg.
+    assert row["vs_benchmark_pp"] == round(14.3296 - 8.78, 4)
+    assert row["return_pct"] != round(14.3296 - 8.78, 4)
+
+
+def test_the_three_published_return_legs_reconcile(monkeypatch):
+    """(1 + return_pct) == (1 + return_local_pct) x (1 + fx_translation_pp).
+
+    The identity is what makes the board's decomposition checkable by a
+    reader rather than assertable only by us: it is why the front page can
+    show "+16.84% EUR = +14.33% USD earned, +2.19pp currency" and be held to
+    it. The three legs are computed by three separate helpers off two
+    different anchors, so nothing but this test makes them reconcile.
+    """
+    from engine import leaderboard as lb
+
+    # A self-consistent USD book, built from the rates outward so the identity
+    # is a property of the code rather than of hand-tuned literals:
+    #   day one   1 EUR = 1.10 USD, so the EUR 10,000 anchor became USD 11,000
+    #   today     1 USD = 0.92 EUR  ->  FX leg = 0.92 / (1/1.10) - 1 = +1.20%
+    #   book      USD 12,000        ->  local  = 12,000 / 11,000 - 1 = +9.0909%
+    #   EUR MTM   12,000 x 0.92 = 11,040  ->  EUR = +10.40%
+    # and 1.090909 x 1.012 == 1.1040 exactly.
+    monkeypatch.setattr(lb, "portfolio_mtm_eur", lambda summary, on: 11_040.0)
+    monkeypatch.setattr(lb, "mtm_base_currency", lambda summary, on: 12_000.0)
+    monkeypatch.setattr(lb, "fx_convert", lambda amount, src, dst, on: amount * 1.10)
+    monkeypatch.setattr(lb, "_benchmark_return_pct", lambda agent_id, on: None)
+    monkeypatch.setattr(lb, "_coinflip_return_pct", lambda agent_id, on: None)
+    monkeypatch.setattr(lb, "_fx_translation_pp", lambda currency, on: 1.20)
+
+    row = build_leaderboard_rows(
+        {"usd-book": {"agent_id": "usd-book", "currency": "USD"}},
+        on=date(2026, 8, 14),
+    )[0]
+
+    assert row["return_pct"] == 10.4
+    assert row["return_local_pct"] == pytest.approx(9.0909, abs=1e-4)
+
+    eur_leg = 1 + row["return_pct"] / 100
+    local_leg = 1 + row["return_local_pct"] / 100
+    fx_leg = 1 + row["fx_translation_pp"] / 100
+    assert eur_leg == pytest.approx(local_leg * fx_leg, rel=1e-6)
+
+
+def test_currency_defaults_match_the_valuation_half_of_the_row(monkeypatch):
+    """`currency` labels return_local_pct, so it must be the currency that
+    figure was actually measured in — including on the fallback path."""
+    from engine import leaderboard as lb
+
+    seen: list[str] = []
+
+    def _capture(agent_id, summary, on):
+        seen.append(summary.get("currency", "USD"))
+        return 1.0
+
+    monkeypatch.setattr(lb, "portfolio_mtm_eur", lambda summary, on: 10_500.0)
+    monkeypatch.setattr(lb, "_benchmark_return_pct", lambda agent_id, on: None)
+    monkeypatch.setattr(lb, "_coinflip_return_pct", lambda agent_id, on: None)
+    monkeypatch.setattr(lb, "_local_return_pct", _capture)
+    monkeypatch.setattr(lb, "_fx_translation_pp", lambda currency, on: None)
+
+    rows = build_leaderboard_rows(
+        {
+            "eur-book": {"agent_id": "eur-book", "currency": "EUR"},
+            "no-currency": {"agent_id": "no-currency"},
+        },
+        on=date(2026, 8, 14),
+    )
+    by_agent = {r["agent"]: r for r in rows}
+    assert by_agent["eur-book"]["currency"] == "EUR"
+    assert by_agent["no-currency"]["currency"] == "USD"
+    assert sorted(seen) == ["EUR", "USD"]
+
+
+def test_return_local_pct_is_none_when_the_book_will_not_value(monkeypatch):
+    """Null, never a silently-substituted return_pct: an unvaluable book must
+    not publish an EUR figure under a book-currency label."""
+    from engine import leaderboard as lb
+
+    monkeypatch.setattr(lb, "portfolio_mtm_eur", lambda summary, on: 10_500.0)
+    _patch_baselines_absent(monkeypatch)
+
+    row = build_leaderboard_rows({"a": {"agent_id": "a", "currency": "USD"}}, on=None)[
+        0
+    ]
+    assert row["return_local_pct"] is None
+    assert row["return_pct"] == 5.0
+
+
+def test_the_return_legs_reconcile_on_a_non_default_initial_capital(monkeypatch):
+    """The published identity must hold for ANY inception stake, not just 10,000.
+
+    Regression: `return_pct` divided by a literal 10_000 while
+    `return_local_pct` divided by the agent's own `initial_capital`, so the
+    identity this row publishes held only because every book on the live desk
+    starts at exactly 10,000 — a coincidence, not a property. A fork on
+    `initial_capital: 5000` published `return_pct` = -45% beside
+    `return_local_pct` = +10% for the same book, and the site renders those
+    two side by side in the "Ret EUR" and "Ret local" columns.
+    """
+    from engine import leaderboard as lb
+
+    # A fork on `initial_capital: 5000`. Patched at the helper both legs are
+    # supposed to share, which is exactly the coupling under test: before the
+    # fix only `return_local_pct` consulted it and `return_pct` used a literal.
+    monkeypatch.setattr(lb, "_initial_capital_base", lambda agent_id, currency: 5_000.0)
+    # A EUR book worth 5,500 on that 5,000 stake: +10%, on both legs.
+    monkeypatch.setattr(lb, "portfolio_mtm_eur", lambda summary, on: 5_500.0)
+    monkeypatch.setattr(lb, "mtm_base_currency", lambda summary, on: 5_500.0)
+    monkeypatch.setattr(lb, "_benchmark_return_pct", lambda agent_id, on: None)
+    monkeypatch.setattr(lb, "_coinflip_return_pct", lambda agent_id, on: None)
+    monkeypatch.setattr(lb, "_fx_translation_pp", lambda currency, on: None)
+
+    row = lb.build_leaderboard_rows(
+        {"satoshi": {"agent_id": "satoshi", "currency": "EUR"}},
+        on=date(2026, 8, 14),
+    )[0]
+
+    assert row["return_pct"] == 10.0
+    assert row["return_local_pct"] == 10.0
+    # An EUR book has no translation leg, so the identity reduces to equality.
+    assert row["return_pct"] == row["return_local_pct"]

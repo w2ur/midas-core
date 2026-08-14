@@ -93,6 +93,23 @@ from scripts.restate_valuations import (
 # modern 3-key row.
 _LEGACY_EUR_VALUE_KEYS = ("eur_mtm", "mtm_eur", "value_eur")
 
+# Every row field the 2026-08-14 benchmark-relative metric introduced, and
+# therefore every field a restatement of a post-2026-08-14 bundle must refresh
+# from the freshly-computed rows. Leaving one out is not cosmetic: the fields
+# are legs of one arithmetic — `return_pct`, `return_local_pct` and
+# `fx_translation_pp` reconcile as
+# `(1 + return_pct) = (1 + return_local_pct) x (1 + fx_translation_pp)`, and
+# both `vs_*` fields are subtractions on `return_local_pct` — so a refreshed
+# subset published beside a stale one is a bundle whose own numbers contradict
+# each other. `currency` is here because it labels `return_local_pct`.
+_METRIC_ERA_FIELDS = (
+    "currency",
+    "return_local_pct",
+    "vs_benchmark_pp",
+    "vs_coinflip_pp",
+    "fx_translation_pp",
+)
+
 
 @dataclass
 class AgentState:
@@ -255,7 +272,7 @@ def restate_bundle_leaderboard(
             # would re-rank history under a metric that did not exist when
             # the bundle was published.
             if any("vs_benchmark_pp" in r for r in old_leaderboard):
-                for key in ("vs_benchmark_pp", "vs_coinflip_pp", "fx_translation_pp"):
+                for key in _METRIC_ERA_FIELDS:
                     if key in fresh_row:
                         new_row[key] = fresh_row[key]
                     else:
