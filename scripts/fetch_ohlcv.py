@@ -29,7 +29,12 @@ import pandas as pd
 import yfinance as yf
 
 from engine.config import get_config
-from engine.corporate_actions import detect_split
+from engine.corporate_actions import (
+    CorporateAction,
+    detect_split,
+    explain_quarantine,
+    ratios_agree,
+)
 from engine.quotes import vendor_unit_scale
 from engine.ohlcv_ingest import (
     MergeResult,
@@ -338,6 +343,249 @@ def _read_store_rows(path: Path) -> list[dict]:
     return rows
 
 
+def _ledger_path() -> Path:
+    """Where adjudicated corporate actions are recorded.
+
+    Beside the store it describes, so it travels under the same push gate:
+    evidence that only exists on an ephemeral runner is no evidence.
+    """
+    return get_config().data_dir / "data" / "market" / "corporate_actions.jsonl"
+
+
+def _adjudicated_keys() -> set[tuple[str, str]] | None:
+    """Every (symbol, effective) already applied. ``None`` means UNREADABLE.
+
+    The distinction is load-bearing and the caller must not collapse it.
+    `apply_split` mutates real share counts, and both the nightly fetch and
+    the weekly resweep can see the same action; applying one twice halves a
+    book twice, silently, with the cost basis invariant hiding it. So a
+    ledger we cannot read has to stop adjudication altogether rather than
+    degrade to "assume nothing was applied" — the money path fails closed.
+    """
+    path = _ledger_path()
+    if not path.exists():
+        return set()
+    keys: set[tuple[str, str]] = set()
+    try:
+        with path.open() as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                record = json.loads(line)
+                keys.add((record["symbol"], record["effective"]))
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        print(
+            f"ERROR: corporate-action ledger at {path} is unreadable ({exc}); "
+            "refusing to adjudicate anything this run.",
+            file=sys.stderr,
+        )
+        return None
+    return keys
+
+
+def _record_adjudication(
+    action: CorporateAction, holders: list[str], refused_count: int
+) -> None:
+    """Append one row. The ledger is the disclosure artifact for this path."""
+    path = _ledger_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "symbol": action.symbol,
+        "effective": action.effective,
+        "shares_ratio": action.shares_ratio,
+        "price_ratio": action.price_ratio,
+        "source": "vendor-calendar",
+        "adjudicated_at": date.today().isoformat(),
+        "rows_explained": refused_count,
+        "holders_adjusted": holders,
+    }
+    with path.open("a") as f:
+        f.write(json.dumps(record) + "\n")
+
+
+def _fetch_actions(symbol: str) -> list[CorporateAction]:
+    """The vendor's split calendar for one symbol.
+
+    Fetched ONLY for symbols the tripwire actually refused — 0 on a healthy
+    night, 3 on the worst night this month. `yf.download` does not carry
+    corporate actions, so this is one extra request per symbol; doing it up
+    front for the whole ~1 150-symbol universe would not be affordable, and
+    that cost is the reason adjudication sits downstream of quarantine rather
+    than inside the merge.
+    """
+    try:
+        splits = yf.Ticker(symbol).splits
+    except Exception as exc:  # noqa: BLE001 - vendor errors are not our bug
+        print(f"WARN: could not read {symbol}'s action calendar ({exc})", file=sys.stderr)
+        return []
+    if splits is None or len(splits) == 0:
+        return []
+    actions: list[CorporateAction] = []
+    for ts, value in splits.items():
+        try:
+            ratio = float(value)
+        except (TypeError, ValueError):
+            continue
+        if ratio <= 0:
+            continue
+        effective = ts.date().isoformat() if hasattr(ts, "date") else str(ts)[:10]
+        actions.append(CorporateAction(symbol, effective, ratio))
+    return actions
+
+
+def _adjudicate(
+    refused_rows: dict[str, tuple], *, start: date, end: date
+) -> tuple[int, int]:
+    """Try to explain each symbol's refused rows by a real corporate action.
+
+    Returns ``(symbols_adjudicated, rows_explained)`` — explained, never
+    "still refused". The caller subtracts from the tripwire's own count, so
+    anything this function does not positively account for stays red. A
+    refused row whose detail never reached us (a MergeResult reporting a
+    count with no rows) must not be able to turn the run green by being
+    invisible: that is the "check that cannot fail" shape this repo keeps
+    paying for.
+
+    An explained symbol gets a scoped full-history re-merge with the tripwire
+    OFF, which accepts the new rows AND whatever back-history the vendor
+    restated as ONE decision. That is deliberate: the two limits are
+    asymmetric (a new row may move 40%, a revision only 20%), so a single
+    action could otherwise be half-ingested — JMAT.L's store took 08-13 at
+    +32% through the new-row door while its matching restatement of 08-12 was
+    refused, leaving the series straddling two bases. The asymmetry itself is
+    correct and is not being changed; what was missing is knowing the two
+    sides are one event.
+
+    Anything unexplained stays quarantined and the run still goes red. This
+    path can only ever turn a refusal into an ingest when the vendor's own
+    calendar says so.
+    """
+    if not refused_rows:
+        return 0, 0
+
+    already = _adjudicated_keys()
+    if already is None:
+        return 0, 0
+
+    adjudicated = 0
+    rows_explained = 0
+    for symbol in sorted(refused_rows):
+        rows = refused_rows[symbol]
+        calendar = _fetch_actions(symbol)
+        action = explain_quarantine(rows, calendar)
+        if action is None:
+            # Say WHICH of the two conditions failed. They call for different
+            # responses and the run's only other signal is a red X. The ratio
+            # case also degrades with time: a new row's ratio is measured
+            # against `latest_stored_close`, which is FROZEN for the length of
+            # the freeze, so the longer a symbol stays stuck the further the
+            # live price drifts from the implied ratio until no calendar entry
+            # can explain it any more. Silence there would read as "no
+            # corporate action" when it means "you left this too long".
+            if not calendar:
+                print(
+                    f"  ? {symbol}: {len(rows)} refused row(s), no corporate "
+                    "action on the vendor's calendar — left quarantined.",
+                    file=sys.stderr,
+                )
+            else:
+                observed = sorted({round(r.ratio, 4) for r in rows})
+                print(
+                    f"  ? {symbol}: {len(rows)} refused row(s) at ratio(s) "
+                    f"{observed} match no calendar action "
+                    f"{[(a.effective, round(a.price_ratio, 4)) for a in calendar]} "
+                    "— left quarantined.",
+                    file=sys.stderr,
+                )
+            continue
+        if (action.symbol, action.effective) in already:
+            # Already applied on an earlier run; the rows were refused again
+            # only because the store still carries the old basis. Re-merging
+            # is safe and idempotent, but the holdings must NOT move twice.
+            print(
+                f"  = {symbol}: {action.effective} action already adjudicated; "
+                "re-merging the store only.",
+                file=sys.stderr,
+            )
+            holders: list[str] = []
+        else:
+            holders = _apply_split_to_holders(symbol, action.shares_ratio)
+            _record_adjudication(action, holders, len(rows))
+            already.add((action.symbol, action.effective))
+
+        # The store side: re-fetch the full window and merge it with the
+        # tripwire OFF, revising from the window start so both the new rows
+        # and any restated history land together. Exactly what
+        # `--resweep --symbols <sym>` does — reused rather than reimplemented,
+        # so there is one rewrite path, not two.
+        df = _fetch_symbol(symbol, start, end)
+        if df is None:
+            print(
+                f"    (could not re-fetch {symbol}; store unchanged, "
+                "the action is recorded and will apply on the next run)",
+                file=sys.stderr,
+            )
+            continue
+        remerged = _write_rows(
+            symbol, df, revise_from=start.isoformat(), guard_anomalies=False
+        )
+        if not (remerged.appended or remerged.revised):
+            # The calendar explained the refusal but the re-merge landed
+            # nothing, so the store is STILL frozen on the pre-action close.
+            # Counting these rows as explained would drop `unadjudicated` to
+            # zero and exit 0 — and every later night would refuse the same
+            # rows, hit the `already` branch, and exit 0 again, making the
+            # freeze permanent AND invisible. That is exactly what the
+            # quarantine exit code exists to surface. Reachable: Yahoo serves
+            # a date over one window and not another, in both directions.
+            print(
+                f"    ({symbol}: re-merge wrote nothing — the store is still "
+                "frozen; leaving the rows refused so the run stays red)",
+                file=sys.stderr,
+            )
+            continue
+
+        print(
+            f"  ! {symbol}: ADJUDICATED — {action.effective} corporate action, "
+            f"shares x{action.shares_ratio:.6g} (price x{action.price_ratio:.6g}), "
+            f"{len(rows)} refused row(s) accepted; store re-merged "
+            f"(+{remerged.appended} rows, ~{remerged.revised} revised)"
+            + (f"; adjusted {', '.join(holders)}" if holders else ""),
+            file=sys.stderr,
+        )
+        adjudicated += 1
+        rows_explained += len(rows)
+    return adjudicated, rows_explained
+
+
+def _warn_if_unheld(symbol: str, adjusted: list[str]) -> None:
+    """Say so when a real split touched nobody's book — only where one was applied.
+
+    Printed on the branches that actually attempted an adjustment. On the
+    ledger-skip branches nothing was attempted, and "no agent currently holds
+    X" there would read as a fact about the roster rather than as the reason
+    the holdings were left alone.
+    """
+    if not adjusted:
+        print(f"    (no agent currently holds {symbol})", file=sys.stderr)
+
+
+def _match_detected_split(symbol: str, ratio: float) -> CorporateAction | None:
+    """Find the calendar action a drift-inferred ratio corresponds to.
+
+    `detect_split` returns a bare ratio with no effective date, and the ledger
+    is keyed on (symbol, effective) — so the calendar is what lets a
+    drift-inferred detection share an identity with a calendar-adjudicated
+    one. Compared on `shares_ratio`, which is the convention `detect_split`
+    already returns (0.75 for JMAT.L's 3:4, not its 1.3333 price ratio).
+    """
+    for action in _fetch_actions(symbol):
+        if ratios_agree(ratio, action.shares_ratio):
+            return action
+    return None
+
+
 def _apply_split_to_holders(symbol: str, ratio: float) -> list[str]:
     """Adjust every portfolio currently holding `symbol` for a detected split.
 
@@ -534,6 +782,8 @@ def main() -> int:
     total_new = 0
     total_revised = 0
     total_quarantined = 0
+    #: symbol -> the rows the tripwire refused this run, for adjudication.
+    refused_rows: dict[str, tuple] = {}
     # Split by whether the store already covers the symbol — see the exit path.
     # `considered_covered` counts every covered symbol the run formed a view on,
     # including those skipped as already-current: they are evidence the store is
@@ -622,22 +872,64 @@ def main() -> int:
                             f"  ! {symbol}: SPLIT DETECTED, ratio={ratio:.4f}",
                             file=sys.stderr,
                         )
-                        adjusted = _apply_split_to_holders(symbol, ratio)
-                        if not adjusted:
+                        # Route through the SAME ledger the nightly
+                        # adjudication uses, or one action gets applied twice.
+                        # Reachable and not hypothetical: an unrestated split
+                        # (MNST's shape) is adjudicated from the calendar on
+                        # the nightly path, which doubles the shares; days
+                        # later the vendor restates history (JMAT.L proves it
+                        # happens late), this resweep sees the drift, and
+                        # `detect_split` returns the same ratio again — shares
+                        # x4, with the cost-basis invariant hiding it on every
+                        # application. `detect_split` reports no effective
+                        # date, so the calendar supplies one; a drift-only
+                        # detection with no matching calendar entry keeps the
+                        # old unledgered behaviour and says so out loud.
+                        action = _match_detected_split(symbol, ratio)
+                        already = _adjudicated_keys()
+                        if action is None:
                             print(
-                                f"    (no agent currently holds {symbol})",
+                                "    (drift-inferred, no matching calendar "
+                                "entry — applying unledgered)",
                                 file=sys.stderr,
                             )
+                            adjusted = _apply_split_to_holders(symbol, ratio)
+                            _warn_if_unheld(symbol, adjusted)
+                        elif already is None:
+                            print(
+                                "    (ledger unreadable — refusing to adjust "
+                                "holdings this run)",
+                                file=sys.stderr,
+                            )
+                            adjusted = []
+                        elif (action.symbol, action.effective) in already:
+                            print(
+                                f"    ({action.effective} action already "
+                                "adjudicated; holdings left alone)",
+                                file=sys.stderr,
+                            )
+                            adjusted = []
+                        else:
+                            adjusted = _apply_split_to_holders(
+                                symbol, action.shares_ratio
+                            )
+                            _record_adjudication(action, adjusted, 0)
+                            _warn_if_unheld(symbol, adjusted)
                 # The tripwire is off on a resweep: a real corporate action
                 # legitimately rewrites hundreds of rows there, and detect_split
                 # above is what adjudicates them. On the nightly path a
                 # wholesale rewrite of history is never legitimate.
-                n, r, q = _write_rows(
+                merged = _write_rows(
                     symbol, df, revise_from, guard_anomalies=not args.resweep
                 )
+                n, r, q = merged.appended, merged.revised, merged.quarantined
                 total_new += n
                 total_revised += r
                 total_quarantined += q
+                if merged.refused:
+                    # Kept for the adjudication pass below, which needs the
+                    # dates and ratios rather than the count.
+                    refused_rows[symbol] = merged.refused
                 if i % 25 == 0 or n > 0 or r > 0 or q > 0:
                     suffix = f", !{q} quarantined" if q else ""
                     print(
@@ -652,10 +944,25 @@ def main() -> int:
         merged = _merge_registry(existing_reg, registry_updates)
         save_registry(merged)
         non_null = sum(1 for v in registry_updates.values() if v.get("name"))
+
         print(
             f"Refreshed tickers registry: {non_null}/{len(registry_updates)} "
             f"symbols resolved to a name."
         )
+
+    # A refused row is not necessarily a defect: a real corporate action has
+    # the same shape as the units flip the tripwire hunts. Ask the vendor's own
+    # calendar before going red, because nothing else in the system can turn a
+    # refusal back into an ingest — `resweep-held-tickers` sweeps HELD tickers
+    # only, so a universe ticker nobody holds froze indefinitely while staying
+    # tradable at its stale price. Unexplained rows still go red.
+    adjudicated_symbols, rows_explained = _adjudicate(
+        refused_rows, start=end - timedelta(days=args.history_days), end=end
+    )
+    # Subtracted from the tripwire's own count, not reported independently:
+    # only rows positively explained by the vendor's calendar come off the
+    # tally, so any refusal this pass did not account for still goes red.
+    unadjudicated = total_quarantined - rows_explained
 
     # Derived, not tracked in parallel: the two populations partition every
     # failure, so a separate counter could only ever disagree with them.
@@ -669,9 +976,15 @@ def main() -> int:
             f"across {len(symbols)} symbols. {failures} failures."
             + (f" {splits_detected} split(s) detected." if splits_detected else "")
             + (
-                f" {total_quarantined} row(s) QUARANTINED — see "
+                f" {adjudicated_symbols} symbol(s) ADJUDICATED against the "
+                "vendor's action calendar."
+                if adjudicated_symbols
+                else ""
+            )
+            + (
+                f" {unadjudicated} row(s) QUARANTINED — see "
                 "data/market/quarantine/."
-                if total_quarantined
+                if unadjudicated
                 else ""
             )
         )
@@ -747,7 +1060,7 @@ def main() -> int:
     # in a green run either: exiting non-zero routes it to the workflow's
     # failure-issue action, which files a persistent issue. Checked last so the
     # reports above are never cut off by an early return.
-    if total_quarantined:
+    if unadjudicated:
         return EXIT_QUARANTINED
     return 0
 

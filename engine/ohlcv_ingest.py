@@ -280,6 +280,11 @@ class MergeResult(NamedTuple):
     appended: int
     revised: int
     quarantined: int = 0
+    #: The rows actually refused, not just how many. The caller needs the
+    #: dates and ratios to adjudicate them against the vendor's action
+    #: calendar (engine.corporate_actions.explain_quarantine); a bare count
+    #: can only ever say "a human should look at this".
+    refused: tuple["QuarantinedRow", ...] = ()
 
 
 def _close_of(line: str) -> float | None:
@@ -501,4 +506,4 @@ def merge_rows(
         write_quarantine(quarantine, refused)
         for row in refused:
             print(f"  [QUARANTINED] {row.describe()}", file=sys.stderr)
-    return MergeResult(appended, revised, len(refused))
+    return MergeResult(appended, revised, len(refused), tuple(refused))

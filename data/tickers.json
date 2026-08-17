@@ -1099,7 +1099,7 @@
     "currency": "PLN"
   },
   "CDW": {
-    "name": "CDW Corporation",
+    "name": "CDW Corporation Common Stock",
     "type": "equity",
     "currency": "USD"
   },
@@ -3274,7 +3274,7 @@
     "currency": null
   },
   "MAR": {
-    "name": "Marriott International",
+    "name": "Marriot International Class A Common Stock",
     "type": "equity",
     "currency": "USD"
   },
@@ -3693,7 +3693,7 @@
   },
   "NOVO B.CO": {
     "name": null,
-    "type": "unknown",
+    "type": "equity",
     "currency": null
   },
   "NOW": {
@@ -3832,7 +3832,7 @@
     "currency": "EUR"
   },
   "ORA.PA": {
-    "name": "Orange S.A.",
+    "name": "ORANGE",
     "type": "equity",
     "currency": "EUR"
   },
@@ -3850,7 +3850,7 @@
     "type": "etf"
   },
   "ORK.OL": {
-    "name": "Orkla ASA",
+    "name": "ORKLA",
     "type": "equity",
     "currency": "NOK"
   },
@@ -3915,7 +3915,7 @@
     "currency": "USD"
   },
   "PCT.L": {
-    "name": "Polar Capital Technology Trust Plc",
+    "name": "Polar Capital Technology Ord",
     "type": "equity",
     "currency": "GBp"
   },
@@ -3940,17 +3940,17 @@
     "currency": null
   },
   "PFE": {
-    "name": "Pfizer Inc.",
+    "name": "Pfizer, Inc.",
     "type": "equity",
     "currency": "USD"
   },
   "PFG": {
-    "name": "Principal Financial Group, Inc.",
+    "name": "Principal Financial Group Inc",
     "type": "equity",
     "currency": "USD"
   },
   "PG": {
-    "name": "The Procter & Gamble Company",
+    "name": "Procter & Gamble Company (The)",
     "type": "equity",
     "currency": "USD"
   },
@@ -4019,7 +4019,7 @@
     "currency": "USD"
   },
   "PM": {
-    "name": "Philip Morris International Inc.",
+    "name": "Philip Morris International Inc",
     "type": "equity",
     "currency": "USD"
   },
@@ -4044,7 +4044,7 @@
     "currency": "USD"
   },
   "PNW": {
-    "name": "Pinnacle West Capital Corporation",
+    "name": "Pinnacle West Capital Corporati",
     "type": "equity",
     "currency": "USD"
   },
@@ -4088,7 +4088,7 @@
     "currency": "GBp"
   },
   "PRY.MI": {
-    "name": "Prysmian S.p.A.",
+    "name": "PRYSMIAN",
     "type": "equity",
     "currency": "EUR"
   },
@@ -4143,7 +4143,7 @@
     "currency": "USD"
   },
   "PUB.PA": {
-    "name": "Publicis Groupe S.A.",
+    "name": "PUBLICIS GROUPE SA",
     "type": "equity",
     "currency": "EUR"
   },
@@ -4153,7 +4153,7 @@
     "currency": "USD"
   },
   "PUM.DE": {
-    "name": "PUMA SE",
+    "name": "PUMA SE                       I",
     "type": "equity",
     "currency": "EUR"
   },
@@ -4208,7 +4208,7 @@
     "currency": "USD"
   },
   "RBI.VI": {
-    "name": "Raiffeisen Bank International AG",
+    "name": "Raiffeisen Bank Internat. AG",
     "type": "equity",
     "currency": "EUR"
   },
@@ -4218,7 +4218,7 @@
     "currency": "USD"
   },
   "RCO.PA": {
-    "name": "Rémy Cointreau SA",
+    "name": "REMY COINTREAU",
     "type": "equity",
     "currency": "EUR"
   },
@@ -4317,7 +4317,7 @@
     "currency": "USD"
   },
   "RMS.PA": {
-    "name": "Hermès International Société en commandite par actions",
+    "name": "HERMES INTL",
     "type": "equity",
     "currency": "EUR"
   },
@@ -4331,7 +4331,7 @@
     "type": "equity"
   },
   "RNO.PA": {
-    "name": "Renault SA",
+    "name": "RENAULT",
     "type": "equity",
     "currency": "EUR"
   },
@@ -4394,7 +4394,7 @@
     "currency": "USD"
   },
   "RWE.DE": {
-    "name": "RWE Aktiengesellschaft",
+    "name": "RWE AG                        I",
     "type": "equity",
     "currency": "EUR"
   },
@@ -4404,7 +4404,7 @@
     "currency": "USD"
   },
   "RXL.PA": {
-    "name": "Rexel S.A.",
+    "name": "REXEL",
     "type": "equity",
     "currency": "EUR"
   },
@@ -4414,12 +4414,12 @@
     "currency": null
   },
   "SAB.MC": {
-    "name": "Banco de Sabadell, S.A.",
+    "name": "BANCO DE SABADELL",
     "type": "equity",
     "currency": "EUR"
   },
   "SAF.PA": {
-    "name": "Safran SA",
+    "name": "SAFRAN",
     "type": "equity",
     "currency": "EUR"
   },
@@ -4629,7 +4629,7 @@
     "currency": "USD"
   },
   "SIE.DE": {
-    "name": "Siemens Aktiengesellschaft",
+    "name": "SIEMENS AG                    N",
     "type": "equity",
     "currency": "EUR"
   },
@@ -4712,7 +4712,7 @@
     "currency": "GBp"
   },
   "SMT.L": {
-    "name": "Scottish Mortgage Investment Trust Plc",
+    "name": "Scottish Mortgage Ord",
     "type": "equity",
     "currency": "GBp"
   },
@@ -4726,7 +4726,7 @@
     "currency": "GBp"
   },
   "SNA": {
-    "name": "Snap-on Incorporated",
+    "name": "Snap-On Incorporated",
     "type": "equity",
     "currency": "USD"
   },
@@ -4745,7 +4745,7 @@
     "type": "unknown"
   },
   "SO": {
-    "name": "The Southern Company",
+    "name": "Southern Company (The)",
     "type": "equity",
     "currency": "USD"
   },
@@ -4754,12 +4754,12 @@
     "type": "etf"
   },
   "SOL-EUR": {
-    "name": "Solana",
+    "name": "Solana EUR",
     "type": "crypto",
     "currency": "EUR"
   },
   "SOL-USD": {
-    "name": "Solana",
+    "name": "Solana USD",
     "type": "crypto",
     "currency": "USD"
   },
@@ -4843,7 +4843,7 @@
     "currency": null
   },
   "SRE": {
-    "name": "Sempra",
+    "name": "DBA Sempra",
     "type": "equity",
     "currency": "USD"
   },
@@ -4927,7 +4927,7 @@
     "currency": "USD"
   },
   "STX": {
-    "name": "Seagate Technology Holdings plc",
+    "name": "Seagate Technology Holdings PLC",
     "type": "equity",
     "currency": "USD"
   },
@@ -5027,12 +5027,12 @@
     "currency": "GBp"
   },
   "TDG": {
-    "name": "TransDigm Group Incorporated",
+    "name": "Transdigm Group Incorporated",
     "type": "equity",
     "currency": "USD"
   },
   "TDY": {
-    "name": "Teledyne Technologies Incorporated",
+    "name": "Teledyne Technologies Incorpora",
     "type": "equity",
     "currency": "USD"
   },
@@ -5052,7 +5052,7 @@
     "currency": "USD"
   },
   "TEL.OL": {
-    "name": "Telenor ASA",
+    "name": "TELENOR",
     "type": "equity",
     "currency": "NOK"
   },
@@ -5160,7 +5160,7 @@
     "currency": "EUR"
   },
   "TMO": {
-    "name": "Thermo Fisher Scientific Inc.",
+    "name": "Thermo Fisher Scientific Inc",
     "type": "equity",
     "currency": "USD"
   },
@@ -5315,7 +5315,7 @@
     "currency": "USD"
   },
   "UBI.PA": {
-    "name": "Ubisoft Entertainment SA",
+    "name": "UBISOFT ENTERTAIN",
     "type": "equity",
     "currency": "EUR"
   },
@@ -5360,7 +5360,7 @@
     "currency": "EUR"
   },
   "UMI.BR": {
-    "name": "Umicore SA",
+    "name": "UMICORE",
     "type": "equity",
     "currency": "EUR"
   },
@@ -5375,7 +5375,7 @@
     "currency": "USD"
   },
   "UNI-USD": {
-    "name": "Uniswap",
+    "name": "UNICORN Token USD",
     "type": "crypto",
     "currency": "USD"
   },
@@ -5435,7 +5435,7 @@
     "currency": "JPY"
   },
   "USO": {
-    "name": "United States Oil Fund, LP",
+    "name": "United States Oil Fund",
     "type": "etf",
     "currency": "USD"
   },
@@ -5485,7 +5485,7 @@
     "currency": "USD"
   },
   "VER.VI": {
-    "name": "VERBUND AG",
+    "name": "VERBUND AG Kat. A",
     "type": "equity",
     "currency": "EUR"
   },
@@ -5495,7 +5495,7 @@
     "currency": null
   },
   "VGK": {
-    "name": "Vanguard FTSE Europe ETF",
+    "name": "Vanguard FTSEEuropean ETF",
     "type": "etf",
     "currency": "USD"
   },
@@ -5510,7 +5510,7 @@
     "currency": "EUR"
   },
   "VIG.VI": {
-    "name": "Vienna Insurance Group AG",
+    "name": "VIENNA INSURANCE GROUP AG",
     "type": "equity",
     "currency": "EUR"
   },
@@ -5630,7 +5630,7 @@
     "currency": "USD"
   },
   "WAB": {
-    "name": "Westinghouse Air Brake Technologies Corporation",
+    "name": "Westinghouse Air Brake Technolo",
     "type": "equity",
     "currency": "USD"
   },
@@ -5735,7 +5735,7 @@
     "currency": "GBp"
   },
   "WRB": {
-    "name": "W. R. Berkley Corporation",
+    "name": "W.R. Berkley Corporation",
     "type": "equity",
     "currency": "USD"
   },
@@ -5805,17 +5805,17 @@
     "currency": "USD"
   },
   "XLK": {
-    "name": "State Street Technology Select Sector SPDR ETF",
+    "name": "State Street Technology Select",
     "type": "etf",
     "currency": "USD"
   },
   "XLM-EUR": {
-    "name": "Stellar",
+    "name": "Stellar EUR",
     "type": "crypto",
     "currency": "EUR"
   },
   "XLM-USD": {
-    "name": "Stellar",
+    "name": "Stellar USD",
     "type": "crypto",
     "currency": "USD"
   },
@@ -5835,12 +5835,12 @@
     "currency": "USD"
   },
   "XLV": {
-    "name": "State Street Health Care Select Sector SPDR ETF",
+    "name": "State Street Health Care Select",
     "type": "etf",
     "currency": "USD"
   },
   "XLY": {
-    "name": "State Street Consumer Discretionary Select Sector SPDR ETF",
+    "name": "State Street Consumer Discretio",
     "type": "etf",
     "currency": "USD"
   },
@@ -5850,12 +5850,12 @@
     "currency": "USD"
   },
   "XRP-EUR": {
-    "name": "XRP",
+    "name": "XRP EUR",
     "type": "crypto",
     "currency": "EUR"
   },
   "XRP-USD": {
-    "name": "XRP",
+    "name": "XRP USD",
     "type": "crypto",
     "currency": "USD"
   },
@@ -5880,7 +5880,7 @@
     "currency": "USD"
   },
   "ZAL.DE": {
-    "name": "Zalando SE",
+    "name": "Zalando SE                    I",
     "type": "equity",
     "currency": "EUR"
   },

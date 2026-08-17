@@ -68,8 +68,17 @@ from __future__ import annotations
 
 import math
 import statistics
+from collections.abc import Sequence
+from datetime import date, timedelta
+from typing import TYPE_CHECKING, NamedTuple
 
 import pandas as pd
+
+if TYPE_CHECKING:  # pragma: no cover
+    # Type-only: importing it at runtime would make this module depend on the
+    # ingest layer, and `engine.ohlcv_ingest` is the layer that will call back
+    # into the adjudication helpers below.
+    from engine.ohlcv_ingest import QuarantinedRow
 
 # A row counts as "drifted" once its ratio departs from 1.0 by more than
 # this. Real unchanged rows in this store are bit-identical (measured 0.0%
@@ -376,3 +385,145 @@ def apply_split(positions: list[dict], ticker: str, ratio: float) -> list[dict]:
         new_position["avg_cost"] = position["avg_cost"] / ratio
         adjusted.append(new_position)
     return adjusted
+
+
+# ---------------------------------------------------------------------------
+# Calendar-based adjudication
+# ---------------------------------------------------------------------------
+#
+# `detect_split` above INFERS a ratio from the disagreement between a stored
+# series and a re-fetched one. That works only when the vendor restates history,
+# and the vendor does not always restate: measured 2026-08-17, JMAT.L's 3:4
+# moved all 2 601 stored rows while MNST's 2:1 had moved nothing six days on
+# (its series still ran 90.36 -> 45.53 with adj_close equal to close on both
+# sides). So inference is dark precisely when it matters, and what the
+# unrestated split produces instead is a jump the ingest tripwire quarantines —
+# freezing that symbol's store until a human intervenes.
+#
+# The authoritative answer costs nothing extra: the vendor publishes the action
+# in its own calendar. These helpers are pure — the caller fetches the calendar
+# and passes it in, so the decision is unit-testable without network and
+# `engine.ohlcv_ingest` stays I/O-free.
+
+#: A refused row's observed ratio may differ from the action's implied ratio by
+#: this fraction and still be explained by it. The price genuinely moves on the
+#: day of the action: measured, MNST's 08-11 row came in 0.4% off its implied
+#: 0.5 and BYND's 08-13 row 1.7% off its implied 30. 10% clears those while
+#: still separating a 2x split from a 100x units flip by an order of magnitude.
+#: Erring tight fails SAFE — the row stays quarantined and a human adjudicates,
+#: which is the behaviour this whole mechanism replaces.
+RATIO_TOLERANCE = 0.10
+
+#: How far an action's effective date may sit from the refused rows it explains.
+#: Recency is the ONLY sound date constraint here — see `explain_quarantine`.
+#: 7 days covers the widest real gap measured (JMAT.L: a revision of 08-12
+#: explained by an action effective 08-17) with margin, while refusing an
+#: ancient split whose ratio happens to match.
+RECENCY_DAYS = 7
+
+
+class CorporateAction(NamedTuple):
+    """One action from the vendor's calendar.
+
+    ``shares_ratio`` is the vendor's own convention and the multiplier on a
+    HOLDING: 2.0 for a 2:1 split (twice the shares), 0.75 for a 3:4
+    consolidation, 1/30 for a 1:30 reverse. It is what `apply_split` consumes.
+
+    ``price_ratio`` is its inverse — the factor carrying a close from the old
+    basis to the new one, which is what a quarantined row's ratio records.
+    They are named rather than left as one bare float precisely because the
+    inversion is easy to get backwards, and getting it backwards halves a real
+    book's share count instead of doubling it.
+    """
+
+    symbol: str
+    effective: str  # ISO date
+    shares_ratio: float
+
+    @property
+    def price_ratio(self) -> float:
+        return 1.0 / self.shares_ratio
+
+
+def _within(observed: float, expected: float, tolerance: float) -> bool:
+    """Relative comparison — an absolute one is meaningless across ratios.
+
+    A 1:30 reverse implies a ratio of 30 where 10% is 3.0 wide; a 2:1 implies
+    0.5 where the same 10% is 0.05.
+    """
+    if expected == 0 or observed <= 0:
+        return False
+    return abs(observed / expected - 1.0) <= tolerance
+
+
+def ratios_agree(
+    observed: float, expected: float, tolerance: float = RATIO_TOLERANCE
+) -> bool:
+    """Public form of the relative ratio comparison used by adjudication.
+
+    Exported so the drift-inferred path (`detect_split`, which returns a bare
+    ratio) can be matched to a calendar action on the SAME tolerance the
+    calendar path uses. Two different tolerances for one question is how the
+    two paths would start disagreeing about whether an action had already been
+    applied — and the ledger key depends on that answer.
+    """
+    return _within(observed, expected, tolerance)
+
+
+def _is_recent(action: CorporateAction, dates: list[str], days: int) -> bool:
+    try:
+        effective = date.fromisoformat(action.effective)
+        first = date.fromisoformat(min(dates))
+        last = date.fromisoformat(max(dates))
+    except ValueError:
+        return False
+    return (first - timedelta(days=days)) <= effective <= (last + timedelta(days=days))
+
+
+def explain_quarantine(
+    rows: Sequence["QuarantinedRow"],
+    actions: Sequence[CorporateAction],
+    *,
+    tolerance: float = RATIO_TOLERANCE,
+    recency_days: int = RECENCY_DAYS,
+) -> CorporateAction | None:
+    """Return the single action explaining EVERY refused row, else ``None``.
+
+    Adjudication is deliberately all-or-nothing per symbol. It triggers a
+    full-history rewrite and a share-count mutation, and doing that while one
+    refused row remains unaccounted for is how a real defect rides in behind a
+    real corporate action.
+
+    There is no per-row rule about which side of the action's effective date a
+    row must fall on, and that is a finding rather than an omission. Two such
+    rules were written and each was refuted by a real August 2026 fixture:
+    JMAT.L's action POSTDATES the revision it explains (a revision is the
+    vendor restating history), and BYND's 08-13 NEW ROW PREDATES its 08-14
+    action (the vendor had already restated that bar and our store held no row
+    to revise). Whether a bar arrives as a new row or a revision depends on
+    what our store happens to hold; which basis it carries depends on whether
+    the vendor has restated yet. Those are independent, so all four
+    combinations are reachable and legitimate.
+
+    What discriminates is that every refused row agrees on ONE ratio matching
+    the action, and that the action belongs to this fetch window rather than to
+    history. Both a calendar entry and a ratio match are required, so a wrong
+    or stale calendar can never admit a bad row on its own.
+    """
+    if not rows:
+        # Vacuous truth is not a licence to rewrite a store.
+        return None
+
+    dates = [r.date for r in rows]
+    candidates = [
+        action
+        for action in actions
+        if _is_recent(action, dates, recency_days)
+        and all(_within(r.ratio, action.price_ratio, tolerance) for r in rows)
+    ]
+    # Exactly one, or nothing: two actions that each explain everything is an
+    # ambiguity no single ratio can resolve, which is the stacked-split shape
+    # `detect_split` already refuses.
+    if len(candidates) != 1:
+        return None
+    return candidates[0]

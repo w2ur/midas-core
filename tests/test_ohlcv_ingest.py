@@ -465,7 +465,7 @@ def test_merge_rows_revises_a_frozen_partial_bar(tmp_path: Path) -> None:
         }
     )
 
-    appended, revised, _quarantined = merge_rows(path, df, revise_from="2026-08-04")
+    appended, revised, _quarantined, *_ = merge_rows(path, df, revise_from="2026-08-04")
 
     assert (appended, revised) == (1, 1)
     closes = [json.loads(line)["close"] for line in path.read_text().splitlines()]
@@ -482,7 +482,7 @@ def test_merge_rows_leaves_rows_before_revise_from_untouched(tmp_path: Path) -> 
         }
     )
 
-    appended, revised, _quarantined = merge_rows(path, df, revise_from="2026-08-04")
+    appended, revised, _quarantined, *_ = merge_rows(path, df, revise_from="2026-08-04")
 
     assert (appended, revised) == (0, 1)
     closes = [json.loads(line)["close"] for line in path.read_text().splitlines()]
@@ -499,7 +499,7 @@ def test_merge_rows_without_revise_from_is_pure_append(tmp_path: Path) -> None:
         }
     )
 
-    assert merge_rows(path, df) == (1, 0, 0)
+    assert merge_rows(path, df)[:3] == (1, 0, 0)
     closes = [json.loads(line)["close"] for line in path.read_text().splitlines()]
     assert closes == [303.42, 309.38]
 
@@ -513,9 +513,9 @@ def test_merge_rows_is_idempotent(tmp_path: Path) -> None:
     # idempotency at all.
     df = _yf_frame({"2026-08-04": [55545.09] * 5 + [100]})
 
-    assert merge_rows(path, df, revise_from="2026-08-04") == (0, 0, 0)
+    assert merge_rows(path, df, revise_from="2026-08-04")[:3] == (0, 0, 0)
     before = path.read_text()
-    assert merge_rows(path, df, revise_from="2026-08-04") == (0, 0, 0)
+    assert merge_rows(path, df, revise_from="2026-08-04")[:3] == (0, 0, 0)
     assert path.read_text() == before
 
 
@@ -570,7 +570,7 @@ def test_merge_rows_keeps_an_untouched_row_byte_identical_during_a_mixed_rewrite
     )
     df = _yf_frame({"2026-08-04": [1, 2, 0.5, 55545.09, 55545.09, 100]})
 
-    appended, revised, _quarantined = merge_rows(path, df, revise_from="2026-08-04")
+    appended, revised, _quarantined, *_ = merge_rows(path, df, revise_from="2026-08-04")
 
     assert (appended, revised) == (0, 1)
     lines = path.read_text().splitlines()
@@ -606,7 +606,7 @@ def test_merge_rows_preserves_an_out_of_order_store(tmp_path: Path) -> None:
         }
     )
 
-    appended, revised, _quarantined = merge_rows(path, df, revise_from="2026-04-24")
+    appended, revised, _quarantined, *_ = merge_rows(path, df, revise_from="2026-04-24")
 
     assert (appended, revised) == (1, 1)
     dates = [json.loads(line)["date"] for line in path.read_text().splitlines()]
@@ -648,7 +648,7 @@ def test_merge_rows_appends_multiple_new_dates_in_ascending_order(
         }
     )
 
-    assert merge_rows(path, df, revise_from="2026-04-24") == (3, 0, 0)
+    assert merge_rows(path, df, revise_from="2026-04-24")[:3] == (3, 0, 0)
     dates = [json.loads(line)["date"] for line in path.read_text().splitlines()]
     assert dates == [
         "2026-04-24",
@@ -671,7 +671,7 @@ def test_merge_rows_writes_an_empty_store_in_ascending_order(tmp_path: Path) -> 
         }
     )
 
-    assert merge_rows(path, df, revise_from="2026-04-24") == (3, 0, 0)
+    assert merge_rows(path, df, revise_from="2026-04-24")[:3] == (3, 0, 0)
     dates = [json.loads(line)["date"] for line in path.read_text().splitlines()]
     assert dates == sorted(dates) == ["2026-04-24", "2026-04-25", "2026-04-26"]
 
@@ -688,7 +688,7 @@ def test_merge_rows_refuses_to_rewrite_a_store_with_unparseable_lines(
     )
     df = _yf_frame({"2026-08-04": [1, 2, 0.5, 55545.09, 55545.09, 100]})
 
-    assert merge_rows(path, df, revise_from="2026-08-04") == (0, 0, 0)
+    assert merge_rows(path, df, revise_from="2026-08-04")[:3] == (0, 0, 0)
     assert "not json at all" in path.read_text()
 
 
@@ -705,7 +705,7 @@ def test_merge_rows_treats_a_non_object_json_line_as_unparseable(
     )
     df = _yf_frame({"2026-08-04": [1, 2, 0.5, 55545.09, 55545.09, 100]})
 
-    assert merge_rows(path, df, revise_from="2026-08-04") == (0, 0, 0)
+    assert merge_rows(path, df, revise_from="2026-08-04")[:3] == (0, 0, 0)
     assert path.read_text().splitlines()[1] == "42"
 
 
@@ -738,7 +738,7 @@ def test_merge_rows_leaves_no_tmp_file_behind_on_success(tmp_path: Path) -> None
     path.write_text(json.dumps(_rec("2026-08-04", 55649.74)) + "\n", encoding="utf-8")
     df = _yf_frame({"2026-08-04": [1, 2, 0.5, 55545.09, 55545.09, 100]})
 
-    assert merge_rows(path, df, revise_from="2026-08-04") == (0, 1, 0)
+    assert merge_rows(path, df, revise_from="2026-08-04")[:3] == (0, 1, 0)
     assert list(tmp_path.glob("*.tmp")) == []
 
 

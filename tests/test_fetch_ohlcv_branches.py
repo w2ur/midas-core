@@ -38,6 +38,8 @@ import pandas as pd
 import pytest
 
 import scripts.fetch_ohlcv as fo
+from engine.corporate_actions import CorporateAction
+from engine.ohlcv_ingest import QuarantinedRow
 from engine.config import get_config
 from engine.portfolio import PortfolioManager
 from engine.types import Trade
@@ -1048,3 +1050,217 @@ class TestExitCodes:
 
 
 _MANY = [f"SYM{i}" for i in range(20)]
+
+
+class TestAdjudicationClosesTheQuarantineLoop:
+    """The tripwire could refuse a row but nothing could ever accept one.
+
+    A real corporate action has the same shape as the units flip the tripwire
+    hunts, and `resweep-held-tickers` sweeps HELD tickers only — so a universe
+    ticker nobody holds froze indefinitely (MNST: store stuck on 2026-08-10 at
+    91.43 through a 2:1 split, still buyable by four books at twice its price,
+    with `fetch-ohlcv` red on every full-universe run since 08-13).
+    """
+
+    ACTION = CorporateAction("MNST", "2026-08-11", shares_ratio=2.0)
+    REFUSED = (
+        QuarantinedRow("MNST", "2026-08-11", "new-row", 91.43, 45.53, 0.497976),
+    )
+
+    def _arrange(self, monkeypatch, refused, actions):
+        _cover(["MNST"])
+        monkeypatch.setattr(
+            fo,
+            "_fetch_symbol",
+            _make_fake_fetch_symbol({"MNST": {"2026-08-06": [1, 2, 0.5, 1.5, 1.5, 100]}}),
+        )
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+        # Stateful: the main loop's merge refuses rows; the adjudication
+        # re-merge that follows actually lands them. A stub that returned
+        # (0, 0) for BOTH would model a store still frozen, which is now its
+        # own test below.
+        calls: list[int] = []
+
+        def write_rows(*a, **k):
+            calls.append(1)
+            if len(calls) == 1:
+                return fo.MergeResult(0, 0, len(refused), refused)
+            return fo.MergeResult(len(refused) or 1, 0)
+
+        monkeypatch.setattr(fo, "_write_rows", write_rows)
+        monkeypatch.setattr(fo, "_fetch_actions", lambda symbol: list(actions))
+
+    def test_a_quarantined_row_the_calendar_explains_goes_green(self, midas_data_root, monkeypatch):
+        self._arrange(monkeypatch, self.REFUSED, [self.ACTION])
+        assert _run_main(monkeypatch, ["--symbols", "MNST"]) == 0
+
+    def test_a_quarantined_row_the_calendar_cannot_explain_stays_red(self, midas_data_root, monkeypatch):
+        """The tripwire's whole purpose survives: no calendar entry, no ingest."""
+        self._arrange(monkeypatch, self.REFUSED, [])
+        assert _run_main(monkeypatch, ["--symbols", "MNST"]) == fo.EXIT_QUARANTINED
+
+    def test_a_count_without_row_detail_still_goes_red(self, midas_data_root, monkeypatch):
+        """Fail closed when the refusal is invisible rather than explained.
+
+        Found while building this: keying the exit on the adjudication result
+        alone let a `MergeResult` that reports `quarantined=1` with no rows
+        attached exit 0 — a refused row turning the run GREEN by being
+        undescribed. The exit now subtracts only positively-explained rows
+        from the tripwire's own count, so anything unaccounted for stays red.
+        Same family as every other "check that cannot fail" in this repo.
+        """
+        self._arrange(monkeypatch, (), [self.ACTION])
+        monkeypatch.setattr(fo, "_write_rows", lambda *a, **k: fo.MergeResult(0, 0, 1))
+        assert _run_main(monkeypatch, ["--symbols", "MNST"]) == fo.EXIT_QUARANTINED
+
+    def test_an_explained_row_whose_remerge_lands_nothing_stays_red(
+        self, midas_data_root, monkeypatch
+    ):
+        """The calendar explaining a refusal is not proof the store moved.
+
+        If the wider re-fetch omits the refused dates — Yahoo serves a date
+        over one window and not another, in both directions — the store stays
+        frozen on the pre-action close. Counting those rows as explained would
+        exit 0, and every later night would refuse them, hit the `already`
+        branch and exit 0 again: a permanent freeze, invisible.
+        """
+        self._arrange(monkeypatch, self.REFUSED, [self.ACTION])
+        monkeypatch.setattr(
+            fo,
+            "_write_rows",
+            lambda *a, **k: fo.MergeResult(0, 0, len(self.REFUSED), self.REFUSED),
+        )
+        assert _run_main(monkeypatch, ["--symbols", "MNST"]) == fo.EXIT_QUARANTINED
+
+    def test_the_ledger_records_the_adjudication(self, midas_data_root, monkeypatch):
+        self._arrange(monkeypatch, self.REFUSED, [self.ACTION])
+        _run_main(monkeypatch, ["--symbols", "MNST"])
+        rows = [
+            json.loads(line)
+            for line in fo._ledger_path().read_text().splitlines()
+            if line.strip()
+        ]
+        assert len(rows) == 1
+        assert rows[0]["symbol"] == "MNST"
+        assert rows[0]["effective"] == "2026-08-11"
+        assert rows[0]["shares_ratio"] == 2.0
+        assert rows[0]["source"] == "vendor-calendar"
+
+    def test_the_same_action_is_never_applied_to_holdings_twice(
+        self, midas_data_root, monkeypatch
+    ):
+        """The money path. `apply_split` mutates real share counts.
+
+        The nightly fetch and the weekly resweep can both see one action; two
+        applications halve a book twice, and the cost-basis invariant hides it
+        (shares x avg_cost stays put on every application).
+        """
+        applied: list[float] = []
+        self._arrange(monkeypatch, self.REFUSED, [self.ACTION])
+        monkeypatch.setattr(
+            fo,
+            "_apply_split_to_holders",
+            lambda symbol, ratio: applied.append(ratio) or ["world"],
+        )
+        _run_main(monkeypatch, ["--symbols", "MNST"])
+        _run_main(monkeypatch, ["--symbols", "MNST"])
+        assert applied == [2.0], f"apply_split ran {len(applied)} times, expected 1"
+
+    def test_apply_split_receives_the_shares_ratio_not_the_price_ratio(
+        self, midas_data_root, monkeypatch
+    ):
+        """Feeding it 0.5 on a 2:1 would HALVE a real holding, silently."""
+        seen: list[float] = []
+        self._arrange(monkeypatch, self.REFUSED, [self.ACTION])
+        monkeypatch.setattr(
+            fo, "_apply_split_to_holders", lambda symbol, ratio: seen.append(ratio) or []
+        )
+        _run_main(monkeypatch, ["--symbols", "MNST"])
+        assert seen == [2.0]
+        assert seen != [self.ACTION.price_ratio]
+
+    def test_an_unreadable_ledger_refuses_to_adjudicate(self, midas_data_root, monkeypatch):
+        """Fail closed: cannot prove an action is unapplied, so do not apply it."""
+        self._arrange(monkeypatch, self.REFUSED, [self.ACTION])
+        path = fo._ledger_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{not json\n")
+        assert _run_main(monkeypatch, ["--symbols", "MNST"]) == fo.EXIT_QUARANTINED
+
+
+class TestBothSplitPathsShareOneLedger:
+    """`detect_split`'s resweep path bypassed the ledger entirely.
+
+    The nightly path adjudicates from the calendar and records the action;
+    the weekly resweep inferred a ratio from drift and applied it with no
+    ledger check and no ledger write. Both call `_apply_split_to_holders`, so
+    one real action could be applied twice — and the sequence is not
+    hypothetical: an unrestated split (MNST's shape) is adjudicated from the
+    calendar tonight, the vendor restates history days later (JMAT.L proves
+    that happens late), and Monday's resweep then finds exactly the drift
+    `detect_split` was built to find. Shares x4, with the cost-basis
+    invariant holding on every application so nothing looks wrong.
+    """
+
+    ACTION = CorporateAction("MNST", "2026-08-11", shares_ratio=2.0)
+
+    def _arrange(self, monkeypatch, actions):
+        _cover(["MNST"])
+        monkeypatch.setattr(
+            fo,
+            "_fetch_symbol",
+            _make_fake_fetch_symbol({"MNST": {"2026-08-06": [1, 2, 0.5, 1.5, 1.5, 100]}}),
+        )
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+        monkeypatch.setattr(fo, "_write_rows", lambda *a, **k: fo.MergeResult(1, 0))
+        monkeypatch.setattr(fo, "detect_split", lambda stored, df: 2.0)
+        monkeypatch.setattr(fo, "_fetch_actions", lambda symbol: list(actions))
+
+    def _run_resweep(self, monkeypatch, applied):
+        monkeypatch.setattr(
+            fo,
+            "_apply_split_to_holders",
+            lambda symbol, ratio: applied.append(ratio) or ["world"],
+        )
+        _run_main(monkeypatch, ["--resweep", "--symbols", "MNST"])
+
+    def test_the_resweep_records_what_it_applied(self, midas_data_root, monkeypatch):
+        self._arrange(monkeypatch, [self.ACTION])
+        self._run_resweep(monkeypatch, [])
+        rows = [
+            json.loads(line)
+            for line in fo._ledger_path().read_text().splitlines()
+            if line.strip()
+        ]
+        assert [(r["symbol"], r["effective"]) for r in rows] == [("MNST", "2026-08-11")]
+
+    def test_an_action_adjudicated_nightly_is_not_reapplied_by_the_resweep(
+        self, midas_data_root, monkeypatch
+    ):
+        """The money path, across BOTH entry points."""
+        self._arrange(monkeypatch, [self.ACTION])
+        applied: list[float] = []
+        # Stand in for last night's calendar adjudication.
+        fo._record_adjudication(self.ACTION, ["world"], 1)
+        self._run_resweep(monkeypatch, applied)
+        assert applied == [], "the resweep re-applied an action already in the ledger"
+
+    def test_a_drift_only_detection_still_applies(self, midas_data_root, monkeypatch):
+        """No calendar entry means no shared identity — keep the old behaviour.
+
+        Refusing here would silently drop the detection `detect_split` exists
+        for. It is applied unledgered and says so in the log.
+        """
+        self._arrange(monkeypatch, [])
+        applied: list[float] = []
+        self._run_resweep(monkeypatch, applied)
+        assert applied == [2.0]
+
+    def test_an_unreadable_ledger_leaves_holdings_alone(self, midas_data_root, monkeypatch):
+        self._arrange(monkeypatch, [self.ACTION])
+        path = fo._ledger_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{not json\n")
+        applied: list[float] = []
+        self._run_resweep(monkeypatch, applied)
+        assert applied == []
