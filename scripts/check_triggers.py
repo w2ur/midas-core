@@ -1,8 +1,12 @@
 """Conditional-order watcher.
 
-Runs every 15 min via .github/workflows/check-triggers.yml. Walks pending
-orders, fetches current prices, fires when triggers are hit, expires old
-ones. Blackout window 19:55-21:00 UTC to avoid commit-races with the
+Runs on two cadences (split 2026-08-17, see the workflow headers):
+check-triggers.yml daily over ALL pending orders, and
+check-triggers-crypto.yml hourly with --crypto-only. Crypto is the only
+class whose price moves intraday (live ccxt); everything else reads the
+once-daily OHLCV store, so an hourly full sweep re-read identical data.
+Walks pending orders, fetches current prices, fires when triggers are hit,
+expires old ones (expiry is date-based, so the daily sweep owns it). Blackout window 19:55-21:00 UTC to avoid commit-races with the
 20:00 UTC daily session (see BLACKOUT_END for why it tracks the session).
 
 Usage:
@@ -288,7 +292,12 @@ def _process_channel(
         summary["fired"] += 1
 
 
-def run(now: datetime, portfolio_manager: PortfolioManager | None) -> dict:
+def run(
+    now: datetime,
+    portfolio_manager: PortfolioManager | None,
+    *,
+    crypto_only: bool = False,
+) -> dict:
     """Process all pending orders across all channels. Returns a summary dict.
 
     All channels are processed into ONE summary: the public channel (default
@@ -298,6 +307,19 @@ def run(now: datetime, portfolio_manager: PortfolioManager | None) -> dict:
     loop runs zero times — correct opt-out for forks without an allocator role.
 
     portfolio_manager may be None ONLY during blackout (we short-circuit before use).
+
+    ``crypto_only`` restricts the sweep to tickers `is_crypto_ticker` accepts.
+    This exists for cadence, not correctness: crypto prices are a live 24/7 ccxt
+    fetch, so those orders are the only ones whose evaluation changes intraday.
+    Everything else reads `latest_close_on_or_before` from the OHLCV store that
+    fetch-ohlcv.yml refreshes once a day, so re-checking it hourly re-reads
+    byte-identical data. The two cadences are split across check-triggers.yml
+    (daily, full) and check-triggers-crypto.yml (hourly, crypto).
+
+    Filtering happens here rather than in `_process_channel` so a skipped order
+    is never touched at all — in particular it is NOT expired. Expiry is
+    date-based (`is_expired`), so the daily full sweep remains its sole owner
+    and an hourly crypto pass cannot retire a non-crypto order early.
     """
     from engine import orders as _orders
     from engine import triggers as _triggers
@@ -319,8 +341,13 @@ def run(now: datetime, portfolio_manager: PortfolioManager | None) -> dict:
 
     cfg = get_config()
 
+    def _select(orders: list[Order]) -> list[Order]:
+        if not crypto_only:
+            return orders
+        return [o for o in orders if _triggers.is_crypto_ticker(o.ticker)]
+
     # Public channel — default dirs, byte-identical legacy behavior.
-    public_pending = list_pending()
+    public_pending = _select(list_pending())
     # Allocator channels — one isolated pending/inbox per allocator; fills
     # never reach the public inbox the site joins by order_id.
     # For William (sole allocator the-manager, prefix "manager") this produces
@@ -328,9 +355,11 @@ def run(now: datetime, portfolio_manager: PortfolioManager | None) -> dict:
     allocator_channels = [
         (
             cfg.allocator_spec(aid).channels_prefix,
-            list_pending(
-                pending_dir=_triggers.allocator_channel_dir(
-                    cfg.allocator_spec(aid).channels_prefix, "pending"
+            _select(
+                list_pending(
+                    pending_dir=_triggers.allocator_channel_dir(
+                        cfg.allocator_spec(aid).channels_prefix, "pending"
+                    )
                 )
             ),
         )
@@ -455,11 +484,24 @@ def main() -> None:
     parser.add_argument(
         "--dry-run", action="store_true", help="Evaluate but don't commit."
     )
+    parser.add_argument(
+        "--crypto-only",
+        action="store_true",
+        help=(
+            "Only evaluate crypto tickers (live 24/7 ccxt price). Non-crypto "
+            "orders are left untouched, including expiry — the daily full "
+            "sweep owns those. See run() for why the cadences are split."
+        ),
+    )
     args = parser.parse_args()
 
     portfolio_manager = PortfolioManager(base_dir=get_config().portfolios_dir)
     now = datetime.now(timezone.utc)
-    summary = run(now=now, portfolio_manager=portfolio_manager)
+    summary = run(
+        now=now,
+        portfolio_manager=portfolio_manager,
+        crypto_only=args.crypto_only,
+    )
     logger.info("Watcher summary: %s", summary)
 
     if args.dry_run:

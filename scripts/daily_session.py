@@ -398,9 +398,9 @@ fields to any trade in your `trades` array:
 
 Supported `op` values (v1): ">=" and "<=". Comparisons are inclusive at the level.
 `expires` must be an ISO date (YYYY-MM-DD); on or after that date the order is
-cancelled with reason TRIGGER_EXPIRED. A watcher cron evaluates triggers every
-15 minutes against live prices (live for crypto via ccxt; daily-close for everything
-else via the committed OHLCV store).
+cancelled with reason TRIGGER_EXPIRED. A watcher cron evaluates triggers hourly for
+crypto (live via ccxt) and daily for everything else (daily-close via the committed
+OHLCV store, which only refreshes once a day).
 
 Safety rails (notional cap, cash check, position check, FX availability) are
 evaluated AT FIRE TIME, not declaration time — so a trigger that fires after

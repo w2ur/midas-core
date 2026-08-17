@@ -405,3 +405,81 @@ class TestManagerChannelIsolation:
         # Manager inbox stays empty for a public fire.
         assert read_inbox(fake_now.date(), inbox_dir=broker_env["manager_inbox"]) == []
         assert list_pending(pending_dir=MANAGER_PENDING_DIR) == []
+
+
+# ---------------------------------------------------------------------------
+# crypto-only cadence split
+# ---------------------------------------------------------------------------
+
+
+class TestCryptoOnly:
+    """Pins the --crypto-only sweep introduced when the watcher cadence split.
+
+    Context: check-triggers ran */15 24/7 on the belief (stated in the old
+    workflow comment) that midas was public and Actions minutes free. It is
+    private, and that one workflow burned 923 of 2000 monthly minutes. The
+    split gives crypto an hourly 24/7 pass and everything else a daily one,
+    because non-crypto prices only move once a day when fetch-ohlcv lands.
+    """
+
+    def test_crypto_only_skips_non_crypto(self, broker_env, monkeypatch) -> None:
+        from scripts import check_triggers
+        from engine import triggers as triggers_mod
+
+        _seed_pending(broker_env)  # BTC-EUR
+        _seed_pending(
+            broker_env,
+            order_id="ord_2026-05-10_satoshi_004",
+            ticker="AAPL",
+            currency="USD",
+        )
+        _write_config(broker_env["config_dir"], "satoshi")
+        pm = _init_portfolio(broker_env["pm_base"], "satoshi", cash=10_000.0)
+        monkeypatch.setattr(triggers_mod, "get_current_price", lambda t, today: 1.0)
+        fake_now = datetime(2026, 5, 17, 14, 30, tzinfo=timezone.utc)
+
+        result = check_triggers.run(
+            now=fake_now, portfolio_manager=pm, crypto_only=True
+        )
+        assert result["checked"] == 1  # only BTC-EUR
+
+        # Default stays the full sweep — the flag must be strictly opt-in.
+        result_all = check_triggers.run(now=fake_now, portfolio_manager=pm)
+        assert result_all["checked"] == 2
+
+    def test_crypto_only_does_not_expire_non_crypto(
+        self, broker_env, monkeypatch
+    ) -> None:
+        """The safety property: an hourly crypto pass must not retire an equity.
+
+        Expiry is date-based, so had filtering been done inside _process_channel
+        (after the is_expired branch) the hourly crypto job would have expired
+        every stale non-crypto order and written TRIGGER_EXPIRED rejections into
+        the ledger 24x a day. Filtering happens in run() precisely to stop that.
+        """
+        from scripts import check_triggers
+        from engine import triggers as triggers_mod
+
+        _seed_pending(
+            broker_env,
+            order_id="ord_2026-05-10_satoshi_005",
+            ticker="AAPL",
+            currency="USD",
+            expires="2026-05-11",  # long past relative to fake_now
+        )
+        _write_config(broker_env["config_dir"], "satoshi")
+        pm = _init_portfolio(broker_env["pm_base"], "satoshi", cash=10_000.0)
+        monkeypatch.setattr(triggers_mod, "get_current_price", lambda t, today: 1.0)
+        fake_now = datetime(2026, 5, 17, 14, 30, tzinfo=timezone.utc)
+
+        result = check_triggers.run(
+            now=fake_now, portfolio_manager=pm, crypto_only=True
+        )
+        assert result["expired"] == 0
+        assert len(list_pending()) == 1  # still pending, untouched
+        assert read_inbox(fake_now.date()) == []  # no rejection written
+
+        # The daily full sweep remains the sole owner of expiry.
+        result_all = check_triggers.run(now=fake_now, portfolio_manager=pm)
+        assert result_all["expired"] == 1
+        assert list_pending() == []
