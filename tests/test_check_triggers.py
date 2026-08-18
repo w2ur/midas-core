@@ -483,3 +483,318 @@ class TestCryptoOnly:
         result_all = check_triggers.run(now=fake_now, portfolio_manager=pm)
         assert result_all["expired"] == 1
         assert list_pending() == []
+
+
+# ---------------------------------------------------------------------------
+# A failed push must turn the run red
+# ---------------------------------------------------------------------------
+
+
+class TestFailedPushExitsNonZero:
+    """A watcher push that fails is a fact nobody was told.
+
+    Both push sites logged a warning and returned, inside a run that exited 0.
+    The self-healing story is real — the fill is local-only, but the pending
+    file still exists on origin and inbox-scoped idempotency means the next
+    evaluation legitimately re-fires it — so what was missing is not recovery,
+    it is VISIBILITY. With the watchers now wired to `.github/actions/
+    failure-issue`, a non-zero exit is what reaches a human.
+
+    Semantics deliberately preserved, and asserted below: every order is still
+    evaluated and every push still attempted before the process exits; a
+    blackout run and a no-op run both stay green.
+    """
+
+    def _fake_git(self, monkeypatch, *, push_rc: int, is_ancestor_rc: int | None = None):
+        """Intercept EVERY git call the watcher makes.
+
+        Not just push: the fixtures live under a tmp MIDAS_DATA_DIR, so a real
+        `git add` would either fail with "outside repository" or — worse, if
+        the paths ever did resolve — stage something in the actual checkout.
+        The watcher's own control flow is left intact, which is the point:
+        `diff --cached --quiet` answers 1 (there ARE staged changes) so the run
+        reaches commit and push exactly as it would in CI.
+        """
+        import subprocess as sp
+        import types
+
+        from scripts import check_triggers
+
+        seen: list[list[str]] = []
+
+        def fake(cmd, *a, **kw):
+            assert isinstance(cmd, (list, tuple)) and cmd[0] == "git", cmd
+            seen.append(list(cmd))
+            if cmd[1] == "diff":
+                return sp.CompletedProcess(cmd, 1)  # something is staged
+            if cmd[1] in {"push", "pull"}:
+                return sp.CompletedProcess(cmd, push_rc)
+            if cmd[1] == "merge-base":
+                # Models reality rather than answering 0 to everything: HEAD is
+                # an ancestor of origin/main exactly when a push landed. The
+                # default keeps the two in step; pass is_ancestor_rc to model
+                # the self-healed case, where an earlier failure's commit was
+                # carried to main by a later order's successful push.
+                rc = push_rc if is_ancestor_rc is None else is_ancestor_rc
+                return sp.CompletedProcess(cmd, rc)
+            return sp.CompletedProcess(cmd, 0)  # add, commit, fetch, rebase
+
+        # Replace the module's OWN `subprocess` reference, not `subprocess.run`
+        # itself: the latter is global and would also intercept
+        # paper_broker._current_commit_sha, which shells out to `git rev-parse`
+        # and would then stamp every fill with a None SHA.
+        monkeypatch.setattr(
+            check_triggers,
+            "subprocess",
+            types.SimpleNamespace(
+                run=fake,
+                CompletedProcess=sp.CompletedProcess,
+                CalledProcessError=sp.CalledProcessError,
+            ),
+        )
+        return seen
+
+    def _always_fail_push(self, monkeypatch):
+        return self._fake_git(monkeypatch, push_rc=1)
+
+    def _fireable(self, broker_env, monkeypatch):
+        from datetime import datetime as dt
+
+        from engine import triggers as triggers_mod
+        from engine.types import Trade
+
+        order = _seed_pending(broker_env)
+        _write_config(broker_env["config_dir"], "satoshi")
+        pm = _init_portfolio(
+            broker_env["pm_base"], "satoshi", cash=8000.0, currency="EUR"
+        )
+        pm.apply_trade(
+            "satoshi",
+            Trade(
+                id="seed_001",
+                timestamp=dt(2026, 5, 1, tzinfo=timezone.utc),
+                action="BUY",
+                ticker="BTC-EUR",
+                shares=0.1,
+                price=70000.0,
+                total=7000.0,
+                fees=0.0,
+                reasoning="seed",
+            ),
+        )
+        monkeypatch.setattr(
+            triggers_mod, "get_current_price", lambda t, today: 85123.45
+        )
+        return order, pm
+
+    def _run_main(self, monkeypatch, pm, now, argv=("check_triggers.py",)):
+        from datetime import datetime as dt
+
+        from scripts import check_triggers
+
+        monkeypatch.setattr(check_triggers.sys, "argv", list(argv))
+        monkeypatch.setattr(check_triggers, "PortfolioManager", lambda base_dir: pm)
+
+        class _Now(dt):
+            @classmethod
+            def now(cls, tz=None):
+                return now
+
+        monkeypatch.setattr(check_triggers, "datetime", _Now)
+        return check_triggers.main
+
+    def test_a_failed_push_exits_one(self, broker_env, monkeypatch) -> None:
+        """Regression: 2026-08-18 — a failed watcher push was a warning inside
+        a green run, so `failure-issue` never fired on the money path."""
+        from scripts import check_triggers
+
+        order, pm = self._fireable(broker_env, monkeypatch)
+        seen = self._always_fail_push(monkeypatch)
+        now = datetime(2026, 5, 17, 14, 30, tzinfo=timezone.utc)
+        main = self._run_main(monkeypatch, pm, now)
+
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 1
+
+        # (a) the batch was still fully processed before exiting, and the
+        # retry really was attempted — an early abort would lose the rest.
+        pushes = [c for c in seen if c[1] == "push"]
+        assert len(pushes) >= 2, f"no rebase-retry was attempted: {seen}"
+        assert any(c[1] == "pull" for c in seen), "the rebase retry never ran"
+        fills = read_inbox(now.date())
+        assert [f.order_id for f in fills] == [order.order_id]
+        assert fills[0].status == "filled"
+        assert list_pending() == []
+
+    def test_a_successful_push_still_exits_zero(self, broker_env, monkeypatch) -> None:
+        """The control. Without it, `exit 1` on every run would pass the test
+        above and break every watcher run in production."""
+        _order, pm = self._fireable(broker_env, monkeypatch)
+        self._fake_git(monkeypatch, push_rc=0)
+        now = datetime(2026, 5, 17, 14, 30, tzinfo=timezone.utc)
+        self._run_main(monkeypatch, pm, now)()  # must not raise SystemExit
+
+    def test_a_blackout_run_stays_green(self, broker_env, monkeypatch) -> None:
+        """A blackout is a deliberate no-op, not a failure."""
+        _order, pm = self._fireable(broker_env, monkeypatch)
+        self._always_fail_push(monkeypatch)
+        now = datetime(2026, 5, 17, 20, 15, tzinfo=timezone.utc)
+        self._run_main(monkeypatch, pm, now)()
+
+    def test_a_no_op_run_stays_green(self, broker_env, monkeypatch) -> None:
+        """Nothing pending, nothing fired, nothing pushed — nothing to report."""
+        from engine import triggers as triggers_mod
+
+        _write_config(broker_env["config_dir"], "satoshi")
+        pm = _init_portfolio(
+            broker_env["pm_base"], "satoshi", cash=8000.0, currency="EUR"
+        )
+        monkeypatch.setattr(triggers_mod, "get_current_price", lambda t, today: 1.0)
+        self._always_fail_push(monkeypatch)
+        now = datetime(2026, 5, 17, 14, 30, tzinfo=timezone.utc)
+        self._run_main(monkeypatch, pm, now)()
+
+    def test_a_self_healed_push_does_not_cry_wolf(self, broker_env, monkeypatch) -> None:
+        """A push pushes the whole branch, so a later order's successful push
+        carries an earlier order's rejected commit. Reporting "stranded" then
+        is noise on the one alert channel that has to stay trustworthy.
+
+        The verdict is taken from the published state, not from the counter:
+        every local commit is on origin/main, so nothing is stranded.
+        """
+        _order, pm = self._fireable(broker_env, monkeypatch)
+        self._fake_git(monkeypatch, push_rc=1, is_ancestor_rc=0)
+        now = datetime(2026, 5, 17, 14, 30, tzinfo=timezone.utc)
+        self._run_main(monkeypatch, pm, now)()  # must not raise SystemExit
+
+    def test_a_failed_commit_is_not_silent(self, broker_env, monkeypatch) -> None:
+        """`_git_add_commit` runs git-add and git-commit under check=True, and
+        process_fired_order swallows the exception so the batch continues. That
+        left a failed COMMIT invisible while a failed push was not — and it is
+        the worse case: the fill is on disk with no commit at all."""
+        import subprocess as sp
+        import types
+
+        from scripts import check_triggers
+
+        _order, pm = self._fireable(broker_env, monkeypatch)
+
+        def fake(cmd, *a, **kw):
+            if cmd[1] == "diff":
+                return sp.CompletedProcess(cmd, 1)
+            # ONLY the per-order commit fails. The tail commit_and_push must
+            # succeed, or it would set the failure flag by itself and this test
+            # would pass with the per-order counting removed — which is exactly
+            # what happened on the first attempt.
+            if cmd[1] == "commit" and "execute ord_" in " ".join(cmd):
+                raise sp.CalledProcessError(1, cmd)
+            if cmd[1] == "merge-base":
+                return sp.CompletedProcess(cmd, 1)
+            return sp.CompletedProcess(cmd, 0)
+
+        monkeypatch.setattr(
+            check_triggers,
+            "subprocess",
+            types.SimpleNamespace(
+                run=fake,
+                CompletedProcess=sp.CompletedProcess,
+                CalledProcessError=sp.CalledProcessError,
+            ),
+        )
+        now = datetime(2026, 5, 17, 14, 30, tzinfo=timezone.utc)
+        with pytest.raises(SystemExit) as exc:
+            self._run_main(monkeypatch, pm, now)()
+        assert exc.value.code == 1
+
+    def test_an_order_that_raises_turns_the_run_red(
+        self, broker_env, monkeypatch
+    ) -> None:
+        """`errors` is execute_triggered_order raising on a FIRED trigger — the
+        worst failure on this path, and it used to exit 0 while the Worker
+        re-dispatched the same order every hour."""
+        from scripts import check_triggers
+
+        _order, pm = self._fireable(broker_env, monkeypatch)
+        self._fake_git(monkeypatch, push_rc=0)
+
+        def boom(*a, **kw):
+            raise RuntimeError("broker exploded")
+
+        monkeypatch.setattr(check_triggers, "execute_triggered_order", boom)
+        now = datetime(2026, 5, 17, 14, 30, tzinfo=timezone.utc)
+        with pytest.raises(SystemExit) as exc:
+            self._run_main(monkeypatch, pm, now)()
+        assert exc.value.code == 1
+
+    def test_a_systemic_commit_failure_is_not_masked_by_the_ancestor_check(
+        self, broker_env, monkeypatch
+    ) -> None:
+        """Regression: 2026-08-18 — the self-heal check masked the failure it
+        sat next to.
+
+        `_nothing_is_stranded` asked "is anything committed-but-unpushed". When
+        git-commit fails outright NOTHING is committed, so HEAD is trivially an
+        ancestor of origin/main, the flag was cleared and the run exited 0 —
+        while the fill sat on disk, in no commit, and died with the runner.
+
+        `merge-base` answers 0 here on purpose: that is the TRUTHFUL answer
+        when nothing was committed, and the previous test's stub hard-coded 1,
+        which is why it could not see this.
+        """
+        import subprocess as sp
+        import types
+
+        from scripts import check_triggers
+
+        _order, pm = self._fireable(broker_env, monkeypatch)
+
+        def fake(cmd, *a, **kw):
+            if cmd[1] == "diff":
+                return sp.CompletedProcess(cmd, 1)
+            if cmd[1] == "commit":
+                raise sp.CalledProcessError(1, cmd)
+            if cmd[1] == "merge-base":
+                return sp.CompletedProcess(cmd, 0)  # truthful: nothing committed
+            if cmd[1] == "status":
+                return sp.CompletedProcess(cmd, 0, stdout="")
+            return sp.CompletedProcess(cmd, 0)
+
+        monkeypatch.setattr(
+            check_triggers,
+            "subprocess",
+            types.SimpleNamespace(
+                run=fake,
+                CompletedProcess=sp.CompletedProcess,
+                CalledProcessError=sp.CalledProcessError,
+            ),
+        )
+        now = datetime(2026, 5, 17, 14, 30, tzinfo=timezone.utc)
+        with pytest.raises(SystemExit) as exc:
+            self._run_main(monkeypatch, pm, now)()
+        assert exc.value.code == 1
+
+    def test_uncommitted_watcher_paths_mean_something_is_stranded(
+        self, broker_env, monkeypatch
+    ) -> None:
+        """The second lock: "unpushed" is only half of "stranded".
+
+        Even with the commit-failure counter cleared, a dirty worktree under
+        the paths the watcher writes must refuse to report all-clear.
+        """
+        import subprocess as sp
+        import types
+
+        from scripts import check_triggers
+
+        def fake(cmd, *a, **kw):
+            if cmd[1] == "status":
+                return sp.CompletedProcess(cmd, 0, stdout=" M data/orders/inbox/x.jsonl\n")
+            return sp.CompletedProcess(cmd, 0)
+
+        monkeypatch.setattr(
+            check_triggers,
+            "subprocess",
+            types.SimpleNamespace(run=fake, CompletedProcess=sp.CompletedProcess),
+        )
+        assert check_triggers._nothing_is_stranded() is False
