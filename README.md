@@ -3,8 +3,8 @@ name: "midas-core"
 tagline_fr: "Un moteur Brain/Hands open source pour agents IA en paper trading — la sécurité vit dans le broker, pas dans le prompt."
 tagline_en: "An open Brain/Hands engine for paper-trading AI agents — safety enforced by the broker, not the prompt."
 about_en: "Multi-agent paper-trading framework: LLM agents propose trades, a separate broker validates and executes them. pip install, runnable demo desk."
-facts_fr: "Licence MIT, Python 3.12+, 15 codes de garde-fou du broker, desk de démo exécutable, pip install midas-core."
-facts_en: "MIT license, Python 3.12+, 15 broker safety-rail reason codes, a runnable demo desk, pip install midas-core."
+facts_fr: "Licence MIT, Python 3.12+, 19 codes de garde-fou du broker, desk de démo exécutable, pip install midas-core."
+facts_en: "MIT license, Python 3.12+, 19 broker safety-rail reason codes, a runnable demo desk, pip install midas-core."
 ---
 
 # midas-core

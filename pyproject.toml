@@ -39,6 +39,28 @@ dependencies = [
 # requirements.in). These loose constraints are the core runtime subset of
 # requirements.in (a curated subset, not a full mirror) for `pip install -e .`.
 
+
+# uv must NOT manage this project, and this line ENFORCES that rather than
+# describing it. `requirements.txt` is the resolved lockfile every consumer
+# installs; the loose constraints above are a curated runtime subset for
+# `pip install -e .` and packaging metadata, never a second source of truth.
+#
+# Without this line, `uv sync` or a bare `uv run` anywhere in the tree writes
+# a `uv.lock` from those eight constraints and rebuilds `.venv` from it. That
+# is not hypothetical: a stray lock sat in the live desk for four days holding
+# 65 packages against requirements.txt's 108 — and none of pytest, hypothesis,
+# fastapi or plotly, so the environment it produces cannot run the test suite
+# while looking like a working venv. `uv sync` also installs the project
+# editable by default, whose frozen finder tables are the documented
+# `MultiplexedPath` / `NotADirectoryError` break.
+#
+# Everything this project actually uses is unaffected: `uv venv`,
+# `uv pip install -r requirements.txt`, `pip install -e .` and `uv build` all
+# work. Verified with a control — the same `uv sync` creates `.venv` and
+# `uv.lock` without this line and refuses with it.
+[tool.uv]
+managed = false
+
 [project.urls]
 Homepage = "https://midas.revah.paris"
 Source = "https://github.com/w2ur/midas-core"

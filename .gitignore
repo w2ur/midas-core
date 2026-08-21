@@ -10,3 +10,4 @@ data/cache/
 
 # Per-agent memory and local Claude Code settings — never committed
 .claude/
+uv.lock
