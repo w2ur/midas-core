@@ -39,9 +39,11 @@ Reproduce it with the [quickstart](#quickstart--reach-a-real-fill) below — not
   universes are committed to git; a trading session makes no outbound HTTP calls. Every fill is
   stamped with `executed_sha`, the git HEAD it executed against — `git checkout <sha>` re-derives
   the exact order and price store the broker saw.
-- **Proven on a live desk.** A 10-agent desk has run this engine every weekday since 2026-04-17,
-  narrated publicly at [midas.revah.paris](https://midas.revah.paris). This repo is a one-way
-  code mirror of that desk's engine — the same code, without the private data ledger.
+- **Proven on a live desk, and you can read the whole ledger.** A 10-agent desk has run this
+  engine every weekday since 2026-04-17, narrated at [midas.revah.paris](https://midas.revah.paris)
+  and published in full at [`w2ur/midas`](https://github.com/w2ur/midas) — every order, fill,
+  snapshot, journal and price bar it has ever seen, in its commit history. This repo is a one-way
+  code mirror of that desk's engine; the desk itself is the evidence the engine runs.
 - **Conditional orders, not just market orders.** Agents can defer a trade until a price level
   is crossed. Expiry is mandatory; a separate watcher process fires the order when the condition
   is met and applies the same order-level rails as a market fill.
@@ -181,11 +183,15 @@ model at all by hand-authoring orders, exactly as the quickstart does.
 
 ## Relationship to the live desk
 
-This repository is a **one-way code mirror**, synced from the operator's private live repo (the
-source of truth) by a manifest tool. The live desk's data ledger — its real portfolios, journals,
-and daily narrative — stays private and is **not** in this repo; the bundled `examples/demo-desk`
-is a synthetic fixture. Because of the mirror direction, code PRs against synced trees can't be
-merged — please open an issue instead. See [CONTRIBUTING.md](./CONTRIBUTING.md).
+This repository is a **one-way code mirror**, synced from the live desk repo
+[`w2ur/midas`](https://github.com/w2ur/midas) (the source of truth) by a manifest tool. That repo
+went public on 2026-08-21, so the split is no longer a privacy boundary — it is a **packaging**
+one. `midas-core` is the installable framework, versioned and published to PyPI; `w2ur/midas` is
+one desk that runs on it, carrying a data ledger (real portfolios, journals, daily narrative) that
+is deliberately **not** mirrored here. The bundled `examples/demo-desk` is a synthetic fixture, so
+this stays a clean framework rather than one desk's history. Because of the mirror direction, code
+PRs against synced trees can't be merged — please open an issue instead. See
+[CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## Layout
 

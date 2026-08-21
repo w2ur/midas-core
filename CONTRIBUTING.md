@@ -5,9 +5,11 @@ what kind of contribution can actually land.
 
 ## This repo is a one-way mirror
 
-midas-core is **generated**, not hand-edited. It is a one-way code mirror synced from a private
-"live" repo (the source of truth) by a manifest tool. The sync overwrites the mirrored trees on
-every run, so a code change made directly here would be silently reverted on the next sync.
+midas-core is **generated**, not hand-edited. It is a one-way code mirror synced from the live
+desk repo [`w2ur/midas`](https://github.com/w2ur/midas) (the source of truth) by a manifest tool.
+The sync overwrites the mirrored trees on every run, so a code change made directly here would be
+silently reverted on the next sync. That repo is public, so you can read the upstream of any file
+here — but it is still the upstream, and a change has to land there first.
 
 **Code PRs against synced trees cannot be merged.** That covers:
 
