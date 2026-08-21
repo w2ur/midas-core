@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from datetime import date
@@ -11,6 +12,8 @@ from pathlib import Path
 from engine.agent_memory import format_oracle_digest, truncate as _truncate
 from engine.config import get_config
 from engine.posts import display_name as _display_name, PostPayload
+
+logger = logging.getLogger(__name__)
 
 # Trim caps applied to the Oracle prompt so first-token latency stays under
 # the cloud streaming idle threshold. Verbatim agent commentary is not what
@@ -134,8 +137,20 @@ OUTPUT FORMAT — JSON object, no other text:
 """
 
 
-def parse_oracle_response(response: str) -> tuple[BlogDraft, list[PostPayload]]:
-    """Parse The Oracle's JSON response (handles code-fenced input)."""
+def parse_oracle_response(
+    response: str, agent_id: str | None = None
+) -> tuple[BlogDraft, list[PostPayload]]:
+    """Parse a narrator's JSON response (handles code-fenced input).
+
+    ``agent_id`` is the narrator the posts are attributed to. When omitted it
+    resolves from `role: narrator` in the roster rather than being hardcoded
+    to `the-oracle`: on a fork whose narrator is named anything else, every
+    post carried an author id no agent on that desk has, so display names and
+    crests resolved to nothing. Falls back to `the-oracle` only when the desk
+    declares no narrator at all, which is a configuration this function should
+    never be reached on — a warning, not a raise, because the module's whole
+    policy is to degrade rather than kill an unattended session.
+    """
     text = response.strip()
     if text.startswith("```"):
         lines = text.splitlines()
@@ -158,12 +173,24 @@ def parse_oracle_response(response: str) -> tuple[BlogDraft, list[PostPayload]]:
     raw_posts = data.get("posts")
     if not isinstance(raw_posts, list):
         raw_posts = []
+    narrator_id = agent_id
+    if narrator_id is None:
+        narrators = get_config().narrators
+        if narrators:
+            narrator_id = narrators[0]
+        else:
+            narrator_id = "the-oracle"
+            logger.warning(
+                "no agent declares role: narrator; attributing posts to "
+                "%r, which is almost certainly not an agent on this desk",
+                narrator_id,
+            )
     posts = []
     for p in raw_posts:
         if not isinstance(p, dict):
             continue
         try:
-            posts.append(PostPayload.from_agent_output("the-oracle", p))
+            posts.append(PostPayload.from_agent_output(narrator_id, p))
         except (KeyError, TypeError, ValueError):
             continue
     return draft, posts

@@ -650,20 +650,32 @@ def step_build_baseline_manager(
     if trade_date is None:
         trade_date = date.today()
 
+    # Resolved against THIS allocator, not against live-desk constants. The
+    # book is the control for one allocator's decisions, so a desk running two
+    # allocators needs two books, and a non-EUR desk needs its own currency —
+    # otherwise the comparison carries an FX leg it exists to remove.
+    baseline = get_config().baseline_params(aid)
+    strategy_id = baseline.strategy_id
+
     resolved_portfolios_dir = portfolios_dir or (get_config().portfolios_dir)
     resolved_ohlcv_store = ohlcv_store or bm_module._OHLCV_STORE
 
     manager = PortfolioManager(base_dir=resolved_portfolios_dir)
     portfolio_exists = (
-        resolved_portfolios_dir / STRATEGY_ID / "portfolio.json"
+        resolved_portfolios_dir / strategy_id / "portfolio.json"
     ).exists()
 
     is_first_run = not portfolio_exists
     if is_first_run:
         manager.initialize(
-            STRATEGY_ID, initial_capital=INITIAL_CAPITAL_EUR, currency="EUR"
+            strategy_id,
+            initial_capital=baseline.initial_capital,
+            currency=baseline.currency,
         )
-        print(f"  Initialized {STRATEGY_ID} portfolio (EUR {INITIAL_CAPITAL_EUR:.0f})")
+        print(
+            f"  Initialized {strategy_id} portfolio "
+            f"({baseline.currency} {baseline.initial_capital:.0f})"
+        )
 
     if not is_first_run and not is_rebalance_day(trade_date):
         print(
@@ -679,10 +691,10 @@ def step_build_baseline_manager(
         if note is not None:
             notes.append((agent_id, note))
 
-    target = eligible_tickers(notes)
+    target = eligible_tickers(notes, max_positions=baseline.max_positions)
     print(f"  Eligible tickers ({len(target)}): {target if target else '(none)'}")
 
-    portfolio_dict = manager.load(STRATEGY_ID).to_dict()
+    portfolio_dict = manager.load(strategy_id).to_dict()
 
     def _price_lookup(ticker: str, on: date) -> float | None:
         from engine.ohlcv_store import latest_close_on_or_before as _lcob
@@ -694,20 +706,21 @@ def step_build_baseline_manager(
         target_tickers=target,
         price_lookup=_price_lookup,
         on=trade_date,
-        position_size_eur=POSITION_SIZE_EUR,
+        position_size=baseline.position_size,
+        max_positions=baseline.max_positions,
     )
 
     for trade in trades:
         try:
-            manager.apply_trade(STRATEGY_ID, trade)
+            manager.apply_trade(strategy_id, trade)
         except ValueError as exc:
             print(
-                f"  [WARN] baseline-manager trade failed ({trade.ticker} {trade.action}): {exc}"
+                f"  [WARN] {strategy_id} trade failed ({trade.ticker} {trade.action}): {exc}"
             )
 
     sells = sum(1 for t in trades if t.action == "SELL")
     buys = sum(1 for t in trades if t.action == "BUY")
-    print(f"  Applied {sells} sell(s) + {buys} buy(s) to {STRATEGY_ID}")
+    print(f"  Applied {sells} sell(s) + {buys} buy(s) to {strategy_id}")
 
 
 # ---------------------------------------------------------------------------
@@ -1209,7 +1222,8 @@ def step_build_memory_update_prompts(
     (step_save_content / step_save_memories).
 
     Does NOT call Claude. Returns {agent_id: prompt} the orchestrator dispatches.
-    Covers all 11 agents (the 10 traders plus the-oracle). Each agent reads its
+    Covers every agent that ran plus every `role: narrator` on the desk (the
+    live cast: 10 traders and the Oracle). Each agent reads its
     current journal from disk in-prompt; we embed it here so the dispatched
     prompt is fully self-contained.
 
@@ -1218,10 +1232,16 @@ def step_build_memory_update_prompts(
     argument (the production contract); callers that already hold the day number
     may still pass it explicitly to avoid the extra I/O.
 
-    ``leaderboard`` and ``oracle_posts`` feed the narrator's prompt only. Pass
-    the same values given to ``step_build_oracle_prompt`` / ``step_save_content``
-    — without them the Oracle gets no session facts at all and narrates an empty
-    desk. ``agent_posts`` accepts PostPayload objects or plain dicts.
+    ``leaderboard`` and ``oracle_posts`` feed narrator prompts only. Pass the
+    same values given to ``step_build_oracle_prompt`` / ``step_save_content``
+    — without them a narrator gets no session facts at all and narrates an
+    empty desk. ``agent_posts`` accepts PostPayload objects or plain dicts.
+
+    ``oracle_posts`` may be a list (the single-narrator case, which is every
+    real desk) or a ``{narrator_id: posts}`` mapping. A list on a desk with
+    more than one narrator is given to the first in roster order and the rest
+    get none, with a warning — mis-attributing one narrator's posts to another
+    would be worse than an empty slot.
     """
     if day_number is None:
         day_number = get_day_number()
@@ -1237,18 +1257,34 @@ def step_build_memory_update_prompts(
             posts_today=agent_posts.get(agent_id, []),
             portfolio_summary=portfolio_summaries.get(agent_id, {}),
         )
-    # The Oracle narrates; it holds no book, so the trader template's fact slots
-    # are all empty for it and its posts are never in `agent_posts` (they live
-    # under bundle["narrator"]["posts"]). Fed that template it wrote about a
-    # dark desk on sessions that filled orders — see the narrator builder.
-    prompts["the-oracle"] = build_narrator_memory_update_prompt(
-        agent_id="the-oracle",
-        day_number=day_number,
-        current_journal=load_journal("the-oracle"),
-        agent_results=agent_results,
-        leaderboard=leaderboard or [],
-        posts_today=oracle_posts or [],
-    )
+    # A narrator holds no book, so the trader template's three fact slots are
+    # all structurally empty for it and its posts are never in `agent_posts`
+    # (they live under bundle["narrator"]["posts"]). Fed that template the
+    # Oracle wrote about a dark desk on sessions that filled orders. The id is
+    # resolved from `role: narrator` rather than hardcoded: a fork whose
+    # narrator is named anything else took the trader branch and reproduced
+    # that failure, and the protocol doc now invites forks.
+    narrators = get_config().narrators
+    for index, narrator_id in enumerate(narrators):
+        if isinstance(oracle_posts, dict):
+            posts_today = oracle_posts.get(narrator_id, [])
+        elif index == 0:
+            posts_today = oracle_posts or []
+        else:
+            posts_today = []
+            print(
+                f"  [WARN] {narrator_id}: oracle_posts was a list and this desk "
+                f"declares {len(narrators)} narrators; only {narrators[0]} got "
+                "posts. Pass a {narrator_id: posts} mapping to feed both."
+            )
+        prompts[narrator_id] = build_narrator_memory_update_prompt(
+            agent_id=narrator_id,
+            day_number=day_number,
+            current_journal=load_journal(narrator_id),
+            agent_results=agent_results,
+            leaderboard=leaderboard or [],
+            posts_today=posts_today,
+        )
     print(f"  Built {len(prompts)} memory-update prompts")
     return prompts
 

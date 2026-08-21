@@ -229,7 +229,7 @@ class TestRebalance:
             target_tickers=target,
             price_lookup=lookup,
             on=date(2026, 6, 1),
-            position_size_eur=300.0,
+            position_size=300.0,
             reasoning="baseline-manager monthly rebalance: ≥2-agent buy consensus",
         )
 
@@ -253,7 +253,7 @@ class TestRebalance:
             target_tickers=target,
             price_lookup=lookup,
             on=date(2026, 6, 1),
-            position_size_eur=300.0,
+            position_size=300.0,
             reasoning="baseline-manager monthly rebalance: ≥2-agent buy consensus",
         )
 
@@ -272,7 +272,7 @@ class TestRebalance:
             target_tickers=target,
             price_lookup=lookup,
             on=date(2026, 6, 1),
-            position_size_eur=300.0,
+            position_size=300.0,
             reasoning="baseline-manager monthly rebalance: ≥2-agent buy consensus",
         )
 
@@ -292,7 +292,7 @@ class TestRebalance:
             target_tickers=target,
             price_lookup=lookup,
             on=date(2026, 6, 1),
-            position_size_eur=300.0,
+            position_size=300.0,
             reasoning="baseline-manager monthly rebalance: ≥2-agent buy consensus",
         )
 
@@ -315,7 +315,7 @@ class TestRebalance:
             target_tickers=target,
             price_lookup=lookup,
             on=date(2026, 6, 1),
-            position_size_eur=300.0,
+            position_size=300.0,
             reasoning="baseline-manager monthly rebalance: ≥2-agent buy consensus",
         )
 
@@ -336,7 +336,7 @@ class TestRebalance:
             target_tickers=target,
             price_lookup=lookup,
             on=date(2026, 6, 1),
-            position_size_eur=300.0,
+            position_size=300.0,
             reasoning=reason,
         )
 
@@ -353,7 +353,7 @@ class TestRebalance:
             target_tickers=[],
             price_lookup=lookup,
             on=date(2026, 6, 1),
-            position_size_eur=300.0,
+            position_size=300.0,
             reasoning="baseline-manager monthly rebalance: ≥2-agent buy consensus",
         )
 
@@ -375,7 +375,7 @@ class TestRebalance:
             target_tickers=target,
             price_lookup=lookup,
             on=date(2026, 6, 1),
-            position_size_eur=300.0,
+            position_size=300.0,
             reasoning="baseline-manager monthly rebalance: ≥2-agent buy consensus",
         )
 
@@ -395,7 +395,7 @@ class TestRebalance:
             target_tickers=target,
             price_lookup=lookup,
             on=date(2026, 6, 1),
-            position_size_eur=300.0,
+            position_size=300.0,
             reasoning="test",
         )
 
@@ -403,7 +403,7 @@ class TestRebalance:
         assert len(ids) == len(set(ids))
 
     def test_buy_notional_approximately_position_size(self) -> None:
-        """BUY notional (total) is approximately position_size_eur."""
+        """BUY notional (total) is approximately position_size."""
         prices = {"AAPL": 150.0}
         lookup = _price_lookup(prices)
         portfolio = {"cash": 2000.0, "positions": []}
@@ -414,13 +414,13 @@ class TestRebalance:
             target_tickers=target,
             price_lookup=lookup,
             on=date(2026, 6, 1),
-            position_size_eur=300.0,
+            position_size=300.0,
             reasoning="test",
         )
 
         buy = next(t for t in trades if t.action == "BUY" and t.ticker == "AAPL")
         # Fractional shares guarantee: shares = position_size / price, total = shares * price
-        # so total == position_size_eur exactly (within float precision).
+        # so total == position_size exactly (within float precision).
         assert buy.total == pytest.approx(300.0)
 
 

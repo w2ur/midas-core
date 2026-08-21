@@ -269,7 +269,7 @@
     "currency": "USD"
   },
   "AKE.PA": {
-    "name": "Arkema S.A.",
+    "name": "ARKEMA",
     "type": "equity",
     "currency": "EUR"
   },
@@ -439,7 +439,7 @@
     "currency": "USD"
   },
   "APD": {
-    "name": "Air Products and Chemicals, Inc.",
+    "name": "Air Products and Chemicals, Inc",
     "type": "equity",
     "currency": "USD"
   },
@@ -574,12 +574,12 @@
     "currency": "USD"
   },
   "AWK": {
-    "name": "American Water Works Company, Inc.",
+    "name": "American Water Works Company, I",
     "type": "equity",
     "currency": "USD"
   },
   "AXON": {
-    "name": "Axon Enterprise, Inc.",
+    "name": "Axovant Sciences Ltd. Common Shares",
     "type": "equity",
     "currency": "USD"
   },
@@ -1244,7 +1244,7 @@
     "currency": "EUR"
   },
   "CON.DE": {
-    "name": "Continental Aktiengesellschaft",
+    "name": "CONTINENTAL AG                I",
     "type": "equity",
     "currency": "EUR"
   },
@@ -1283,7 +1283,7 @@
     "currency": "USD"
   },
   "CPR.MI": {
-    "name": "Davide Campari-Milano N.V.",
+    "name": "CAMPARI",
     "type": "equity",
     "currency": "EUR"
   },
@@ -1426,7 +1426,7 @@
     "type": "unknown"
   },
   "DB1.DE": {
-    "name": "Deutsche Börse AG",
+    "name": "DEUTSCHE BOERSE AG            N",
     "type": "equity",
     "currency": "EUR"
   },
@@ -1601,7 +1601,7 @@
     "currency": "GBp"
   },
   "DPZ": {
-    "name": "Domino's Pizza, Inc.",
+    "name": "Domino's Pizza Inc",
     "type": "equity",
     "currency": "USD"
   },
@@ -1947,7 +1947,7 @@
     "currency": "USD"
   },
   "EVT.DE": {
-    "name": "Evotec SE",
+    "name": "Evotec SE                     I",
     "type": "equity",
     "currency": "EUR"
   },
@@ -2127,7 +2127,7 @@
     "currency": null
   },
   "FME.DE": {
-    "name": "Fresenius Medical Care AG",
+    "name": "Fresenius Medical Care AG     I",
     "type": "equity",
     "currency": "EUR"
   },
@@ -2282,7 +2282,7 @@
     "currency": "USD"
   },
   "GET.PA": {
-    "name": "Getlink SE",
+    "name": "GETLINK SE",
     "type": "equity",
     "currency": "EUR"
   },
@@ -2630,7 +2630,7 @@
     "currency": "USD"
   },
   "HYG": {
-    "name": "iShares iBoxx $ High Yield Corporate Bond ETF",
+    "name": "iShares iBoxx $ High Yield Corp",
     "type": "etf",
     "currency": "USD"
   },
@@ -2919,7 +2919,7 @@
     "currency": "USD"
   },
   "JPM": {
-    "name": "JPMorgan Chase & Co.",
+    "name": "JP Morgan Chase & Co.",
     "type": "equity",
     "currency": "USD"
   },
@@ -3622,7 +3622,7 @@
     "currency": "CHF"
   },
   "NEX.PA": {
-    "name": "Nexans S.A.",
+    "name": "NEXANS",
     "type": "equity",
     "currency": "EUR"
   },
@@ -3930,7 +3930,7 @@
     "currency": "USD"
   },
   "PEP": {
-    "name": "PepsiCo, Inc.",
+    "name": "PepsiCo, Inc. Common Stock",
     "type": "equity",
     "currency": "USD"
   },
@@ -3945,12 +3945,12 @@
     "currency": "USD"
   },
   "PFG": {
-    "name": "Principal Financial Group Inc",
+    "name": "Principal Financial Group Inc Common Stock",
     "type": "equity",
     "currency": "USD"
   },
   "PG": {
-    "name": "The Procter & Gamble Company",
+    "name": "Procter & Gamble Company (The)",
     "type": "equity",
     "currency": "USD"
   },
@@ -4019,7 +4019,7 @@
     "currency": "USD"
   },
   "PM": {
-    "name": "Philip Morris International Inc.",
+    "name": "Philip Morris International Inc",
     "type": "equity",
     "currency": "USD"
   },
@@ -4546,7 +4546,7 @@
     "currency": null
   },
   "SFIX": {
-    "name": "Stitch Fix, Inc.",
+    "name": "Stitch Fix, Inc. Class A Common Stock",
     "type": "equity",
     "currency": "USD"
   },
@@ -4629,7 +4629,7 @@
     "currency": "USD"
   },
   "SIE.DE": {
-    "name": "Siemens Aktiengesellschaft",
+    "name": "SIEMENS AG                    N",
     "type": "equity",
     "currency": "EUR"
   },
@@ -4726,7 +4726,7 @@
     "currency": "GBp"
   },
   "SNA": {
-    "name": "Snap-on Incorporated",
+    "name": "Snap-On Incorporated",
     "type": "equity",
     "currency": "USD"
   },
@@ -4843,7 +4843,7 @@
     "currency": null
   },
   "SRE": {
-    "name": "Sempra",
+    "name": "DBA Sempra",
     "type": "equity",
     "currency": "USD"
   },
@@ -5160,7 +5160,7 @@
     "currency": "EUR"
   },
   "TMO": {
-    "name": "Thermo Fisher Scientific Inc.",
+    "name": "Thermo Fisher Scientific Inc",
     "type": "equity",
     "currency": "USD"
   },
@@ -5360,7 +5360,7 @@
     "currency": "EUR"
   },
   "UMI.BR": {
-    "name": "Umicore SA",
+    "name": "UMICORE",
     "type": "equity",
     "currency": "EUR"
   },
@@ -5495,7 +5495,7 @@
     "currency": null
   },
   "VGK": {
-    "name": "Vanguard FTSE Europe ETF",
+    "name": "Vanguard FTSEEuropean ETF",
     "type": "etf",
     "currency": "USD"
   },
@@ -5630,7 +5630,7 @@
     "currency": "USD"
   },
   "WAB": {
-    "name": "Westinghouse Air Brake Technologies Corporation",
+    "name": "Westinghouse Air Brake Technolo",
     "type": "equity",
     "currency": "USD"
   },
@@ -5645,7 +5645,7 @@
     "currency": "USD"
   },
   "WDAY": {
-    "name": "Workday, Inc.",
+    "name": "Workday, Inc. Class A Common Stock",
     "type": "equity",
     "currency": "USD"
   },
@@ -5735,7 +5735,7 @@
     "currency": "GBp"
   },
   "WRB": {
-    "name": "W. R. Berkley Corporation",
+    "name": "W.R. Berkley Corporation",
     "type": "equity",
     "currency": "USD"
   },
@@ -5775,7 +5775,7 @@
     "currency": "EUR"
   },
   "XEL": {
-    "name": "Xcel Energy Inc.",
+    "name": "Xcel Energy Inc. Common Stock",
     "type": "equity",
     "currency": "USD"
   },
@@ -5805,7 +5805,7 @@
     "currency": "USD"
   },
   "XLK": {
-    "name": "State Street Technology Select Sector SPDR ETF",
+    "name": "State Street Technology Select",
     "type": "etf",
     "currency": "USD"
   },
@@ -5835,7 +5835,7 @@
     "currency": "USD"
   },
   "XLV": {
-    "name": "State Street Health Care Select Sector SPDR ETF",
+    "name": "State Street Health Care Select",
     "type": "etf",
     "currency": "USD"
   },

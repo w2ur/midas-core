@@ -39,6 +39,22 @@ class TestStepLoadMemories:
         assert memories["goldfinger"] == ""
 
 
+def narrator_id() -> str:
+    """The desk's narrator, resolved rather than named.
+
+    These tests hardcoded `the-oracle` and passed on the demo desk only
+    because `step_build_memory_update_prompts` hardcoded it too — the test and
+    the code shared one wrong assumption, so neither could catch it. Core's
+    demo roster declares its own narrator under a different id; resolving here
+    means these run on both desks and actually exercise the resolution.
+    """
+    from engine.config import get_config
+
+    narrators = get_config().narrators
+    assert narrators, "this desk declares no role: narrator"
+    return narrators[0]
+
+
 class TestStepBuildMemoryUpdatePrompts:
     def test_includes_oracle_even_without_agent_result(
         self, tmp_journals: Path
@@ -53,11 +69,12 @@ class TestStepBuildMemoryUpdatePrompts:
             },
             day_number=1,
         )
+        oracle_id = narrator_id()
         assert "satoshi" in prompts
-        assert "the-oracle" in prompts
-        # The Oracle's prompt mentions its own id and the Day number.
-        assert "the-oracle" in prompts["the-oracle"]
-        assert "Day 1" in prompts["the-oracle"]
+        assert oracle_id in prompts
+        # The narrator's prompt mentions its own id and the Day number.
+        assert oracle_id in prompts[oracle_id]
+        assert "Day 1" in prompts[oracle_id]
 
     def test_trader_prompt_embeds_current_journal(self, tmp_journals: Path) -> None:
         agent_memory.save_journal("satoshi", "Day 0: BTC cycle theory.")
@@ -141,7 +158,7 @@ class TestNarratorPrompt:
     def test_oracle_prompt_carries_the_desks_activity(self, tmp_journals: Path) -> None:
         from engine.posts import display_name
 
-        oracle = self._prompts()["the-oracle"]
+        oracle = self._prompts()[narrator_id()]
 
         assert "BTC-EUR" in oracle
         assert "Re-armed the peel rungs" in oracle
@@ -152,7 +169,7 @@ class TestNarratorPrompt:
     def test_oracle_prompt_carries_leaderboard_and_own_posts(
         self, tmp_journals: Path
     ) -> None:
-        oracle = self._prompts()["the-oracle"]
+        oracle = self._prompts()[narrator_id()]
 
         assert "-9.7%" in oracle
         assert "-18.3%" in oracle
@@ -160,7 +177,7 @@ class TestNarratorPrompt:
 
     def test_oracle_prompt_never_claims_an_empty_desk(self, tmp_journals: Path) -> None:
         """The exact strings that produced the fabricated blank streak."""
-        oracle = self._prompts()["the-oracle"]
+        oracle = self._prompts()[narrator_id()]
 
         assert "(no trades today)" not in oracle
         assert "(no posts today)" not in oracle
@@ -175,7 +192,7 @@ class TestNarratorPrompt:
         from engine.posts import PostPayload
 
         payload = PostPayload(
-            agent_id="the-oracle",
+            agent_id=narrator_id(),
             text="Scoreboard: the twins are 15 points apart.",
             mentions=[],
             kind="scoreboard",
@@ -183,6 +200,6 @@ class TestNarratorPrompt:
             refs={},
             post_at="2026-08-03T20:00:00Z",
         )
-        oracle = self._prompts(oracle_posts=[payload])["the-oracle"]
+        oracle = self._prompts(oracle_posts=[payload])[narrator_id()]
 
         assert "the twins are 15 points apart" in oracle

@@ -63,15 +63,53 @@ class RiskBudget:
 
 
 @dataclass(frozen=True)
+class ResolvedBaseline:
+    """One allocator's control-book parameters after resolution.
+
+    What `baseline_params` returns: no field is Optional here, so a caller
+    cannot reach a live-desk constant by accident.
+    """
+
+    strategy_id: str
+    initial_capital: float
+    currency: str
+    position_size: float
+    max_positions: int
+
+
+@dataclass(frozen=True)
+class BaselineSpec:
+    """The deterministic control book for ONE allocator.
+
+    Every field is Optional and resolved against the allocator it controls
+    (see ``MidasConfig.baseline_params``) rather than defaulted to a live-desk
+    constant. Two allocators on one desk would otherwise share a single
+    control book, and a non-EUR desk would get an uncontrolled FX leg in the
+    very comparison the book exists to control for.
+    """
+
+    enabled: bool = True
+    strategy_id: str | None = None
+    initial_capital: float | None = None
+    position_size: float | None = None
+    max_positions: int | None = None
+
+
+@dataclass(frozen=True)
 class AllocatorSpec:
     channels_prefix: str = "manager"
     outcome_resolution_days: int = 10
     outcome_memory_same_max: int = 5
     outcome_memory_other_max: int = 3
-    baseline_enabled: bool = True
+    baseline: BaselineSpec = field(default_factory=BaselineSpec)
     risk_budget: RiskBudget = field(default_factory=RiskBudget)
     blocklist: tuple[str, ...] = ()
     policy_prose_override: str | None = None
+
+    @property
+    def baseline_enabled(self) -> bool:
+        """Back-compat alias — `baseline.enabled` is the field."""
+        return self.baseline.enabled
 
 
 @dataclass(frozen=True)
@@ -213,11 +251,53 @@ class MidasConfig:
             aid for aid, spec in self.roster.items() if spec.role == "allocator"
         )
 
+    @property
+    def narrators(self) -> tuple[str, ...]:
+        """Agents declared `role: narrator`, in roster order.
+
+        A desk may declare none (the demo desk does not), which is why every
+        caller iterates this rather than naming an id. Hardcoding `the-oracle`
+        is what fed the narrator the *trader* journal template on any fork
+        whose narrator is called something else — the template's three fact
+        slots are all structurally empty for an agent that holds no book, so
+        the narrator writes about a dark desk on sessions that traded.
+        """
+        return tuple(
+            aid for aid, spec in self.roster.items() if spec.role == "narrator"
+        )
+
     def allocator_spec(self, agent_id: str) -> "AllocatorSpec":
         spec = self.roster[agent_id].allocator
         if spec is None:
             raise ValueError(f"{agent_id!r} has no allocator config")
         return spec
+
+    def baseline_params(self, agent_id: str) -> "ResolvedBaseline":
+        """Resolve one allocator's control-book parameters.
+
+        Anything the roster leaves unset is derived from that allocator's own
+        block, never from a live-desk constant: the id from the agent id, the
+        capital and currency from the agent, the position count from its risk
+        budget, and the position size from capital / positions. The live desk
+        pins `strategy_id` and `position_size` explicitly because its book
+        predates this resolution and its published history must not move.
+        """
+        agent = self.roster[agent_id]
+        spec = self.allocator_spec(agent_id)
+        b = spec.baseline
+        max_positions = b.max_positions or spec.risk_budget.max_positions
+        capital = b.initial_capital if b.initial_capital is not None else agent.initial_capital
+        return ResolvedBaseline(
+            strategy_id=b.strategy_id or f"{agent_id}-baseline",
+            initial_capital=float(capital),
+            currency=agent.home_currency,
+            position_size=(
+                b.position_size
+                if b.position_size is not None
+                else float(capital) / max(1, max_positions)
+            ),
+            max_positions=max_positions,
+        )
 
 
 def _benchmark(raw: dict | None) -> BenchmarkSpec | None:
@@ -263,7 +343,27 @@ def _allocator(raw: dict | None) -> AllocatorSpec | None:
         outcome_resolution_days=int(raw.get("outcome_resolution_days", 10)),
         outcome_memory_same_max=int(mem.get("same_ticker_max", 5)),
         outcome_memory_other_max=int(mem.get("other_ticker_max", 3)),
-        baseline_enabled=bool(baseline.get("enabled", True)),
+        baseline=BaselineSpec(
+            enabled=bool(baseline.get("enabled", True)),
+            strategy_id=(
+                str(baseline["strategy_id"]) if baseline.get("strategy_id") else None
+            ),
+            initial_capital=(
+                float(baseline["initial_capital"])
+                if baseline.get("initial_capital") is not None
+                else None
+            ),
+            position_size=(
+                float(baseline["position_size"])
+                if baseline.get("position_size") is not None
+                else None
+            ),
+            max_positions=(
+                int(baseline["max_positions"])
+                if baseline.get("max_positions") is not None
+                else None
+            ),
+        ),
         risk_budget=_risk_budget(raw.get("risk_budget")),
         blocklist=tuple(policy.get("blocklist", []) or []),
         policy_prose_override=policy.get("prose_override"),

@@ -4,7 +4,15 @@ Internal comparison portfolio only. NOT a public trading agent.
 Excluded from roster.ts, the leaderboard, posts, journals, and the public
 output bundle by the ``trading_roster`` role filter (role != trader).
 
-Rules
+Every parameter below is resolved per-allocator by
+``MidasConfig.baseline_params`` and passed in; the module-level constants are
+the LIVE DESK's pinned values, kept as defaults so existing callers and tests
+are unchanged. They are not the module's opinion. A desk running two
+allocators gets two control books, and a non-EUR desk gets its own currency —
+without that, the book carries an uncontrolled FX leg in the exact comparison
+it exists to control for.
+
+Rules (live-desk values shown; all are configurable)
 -----
 - Capital: EUR 2,000 virtual, initialized on first run.
 - Signal: collect tickers whose research note has action_bias in
@@ -56,7 +64,10 @@ _REASONING = "baseline-manager monthly rebalance: ≥2-agent buy consensus"
 # ---------------------------------------------------------------------------
 
 
-def eligible_tickers(notes: list[tuple[str, ResearchNote]]) -> list[str]:
+def eligible_tickers(
+    notes: list[tuple[str, ResearchNote]],
+    max_positions: int = MAX_POSITIONS,
+) -> list[str]:
     """Compute ranked eligible tickers from the day's research notes.
 
     Eligibility: action_bias in {"strong_buy", "buy"} AND ≥2 distinct agents
@@ -67,7 +78,7 @@ def eligible_tickers(notes: list[tuple[str, ResearchNote]]) -> list[str]:
       2. strong_buy-weight sum (strong_buy=2, buy=1) across distinct agents.
       3. ticker alphabetical (ascending) — deterministic tie-break.
 
-    Returns at most MAX_POSITIONS (6) tickers.
+    Returns at most ``max_positions`` tickers (live desk: 6).
     """
     # Per-ticker per-agent tracking.
     # ticker → {agent_id → best_weight_for_that_agent}
@@ -96,7 +107,7 @@ def eligible_tickers(notes: list[tuple[str, ResearchNote]]) -> list[str]:
     # Sort: count desc, weight desc, ticker asc.
     eligible.sort(key=lambda x: (-x[1], -x[2], x[0]))
 
-    return [ticker for ticker, _, _ in eligible[:MAX_POSITIONS]]
+    return [ticker for ticker, _, _ in eligible[:max_positions]]
 
 
 def is_rebalance_day(d: date) -> bool:
@@ -114,8 +125,9 @@ def rebalance(
     target_tickers: list[str],
     price_lookup: Callable[[str, date], float | None],
     on: date,
-    position_size_eur: float = POSITION_SIZE_EUR,
+    position_size: float = POSITION_SIZE_EUR,
     reasoning: str = _REASONING,
+    max_positions: int = MAX_POSITIONS,
 ) -> list[Trade]:
     """Compute the list of Trades needed to reach the target allocation.
 
@@ -125,13 +137,16 @@ def rebalance(
         Dict with "cash" (float) and "positions" (list of dicts with
         "ticker", "shares", "avg_cost").
     target_tickers:
-        Ordered list of eligible tickers (already capped at MAX_POSITIONS).
+        Ordered list of eligible tickers (already capped at ``max_positions``).
     price_lookup:
         Callable(ticker, date) → float | None. Returns None when no price.
     on:
         The rebalance date (used for price lookup and trade timestamps).
-    position_size_eur:
-        Target notional per position in EUR.
+    position_size:
+        Target notional per position, in the control book's own currency
+        (which is the allocator's ``home_currency``, not necessarily EUR).
+    max_positions:
+        Cap on concurrent positions; defaults to the live desk's 6.
     reasoning:
         Reasoning string applied to every trade.
 
@@ -203,8 +218,8 @@ def rebalance(
         price = price_lookup(ticker, on)
         if price is None:
             continue
-        shares = position_size_eur / price
-        notional = shares * price  # == position_size_eur (floating-point safe)
+        shares = position_size / price
+        notional = shares * price  # == position_size (floating-point safe)
         fee = fee_for(ticker, notional)
         trades.append(
             Trade(
