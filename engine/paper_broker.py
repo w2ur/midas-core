@@ -68,7 +68,7 @@ logger = logging.getLogger(__name__)
 #: The complete set of rejection/cancel reason codes this broker can emit.
 #: The module docstring above documents what each one means; `tests/test_reason_codes.py`
 #: asserts the three views (this set, the docstring, the emitted literals) agree.
-#: The watcher in `scripts/check_triggers.py` owns a sixteenth code, TRIGGER_EXPIRED,
+#: The watcher in `scripts/check_triggers.py` owns a twentieth code, TRIGGER_EXPIRED,
 #: which is deliberately NOT in this set — it is a different enforcement point.
 REJECTION_REASON_CODES = frozenset(
     {

@@ -416,8 +416,11 @@ class TestCryptoOnly:
     """Pins the --crypto-only sweep introduced when the watcher cadence split.
 
     Context: check-triggers ran */15 24/7 on the belief (stated in the old
-    workflow comment) that midas was public and Actions minutes free. It is
-    private, and that one workflow burned 923 of 2000 monthly minutes. The
+    workflow comment) that midas was public and Actions minutes free. It was
+    private at the time — private from creation until 2026-08-19 — and that one
+    workflow burned 923 of 2000 monthly minutes. (The repo is public now, so
+    minutes are free and the cadence decision is worth revisiting; the split
+    below is unchanged.) The
     split gives crypto an hourly 24/7 pass and everything else a daily one,
     because non-crypto prices only move once a day when fetch-ohlcv lands.
     """
