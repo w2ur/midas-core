@@ -200,6 +200,10 @@ class MidasConfig:
         return self._data / "agent_config"
 
     @property
+    def desk_notices_path(self) -> Path:
+        return self._data / "desk_notices.json"
+
+    @property
     def orders_dir(self) -> Path:
         return self._data / "orders"
 
@@ -286,7 +290,11 @@ class MidasConfig:
         spec = self.allocator_spec(agent_id)
         b = spec.baseline
         max_positions = b.max_positions or spec.risk_budget.max_positions
-        capital = b.initial_capital if b.initial_capital is not None else agent.initial_capital
+        capital = (
+            b.initial_capital
+            if b.initial_capital is not None
+            else agent.initial_capital
+        )
         return ResolvedBaseline(
             strategy_id=b.strategy_id or f"{agent_id}-baseline",
             initial_capital=float(capital),

@@ -19,8 +19,10 @@ from __future__ import annotations
 
 import re
 import sys
+from datetime import date
 
 from engine.config import get_config
+from engine.desk_notices import render_notice_block
 from engine.token_cost import record_dispatch
 
 _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n", re.DOTALL)
@@ -35,7 +37,7 @@ being an AI or about the dispatch mechanism.
 --- PERSONA ({agent_id}) ---
 {persona_body}
 --- END PERSONA ---
-
+{notice_block}
 --- TASK ---
 {task_prompt}
 """
@@ -68,7 +70,9 @@ def load_persona(agent_id: str) -> tuple[str, str | None]:
     return body, model
 
 
-def wrap_persona_prompt(agent_id: str, task_prompt: str) -> tuple[str, str | None]:
+def wrap_persona_prompt(
+    agent_id: str, task_prompt: str, today: date | None = None
+) -> tuple[str, str | None]:
     """Wrap a task prompt with the persona's body for general-purpose dispatch.
 
     Returns (wrapped_prompt, model). Callers dispatch via:
@@ -76,11 +80,20 @@ def wrap_persona_prompt(agent_id: str, task_prompt: str) -> tuple[str, str | Non
 
     `model` may be None when the persona has no `model:` frontmatter — in that
     case omit the `model` parameter and let the harness pick the default.
+
+    Any in-window desk notice addressed to this persona (see
+    `engine.desk_notices`) is injected between the persona body and the task, so
+    a time-boxed operational fact reaches every agent without the owner
+    re-pasting the live RemoteTrigger prompt. `today` overrides the UTC date the
+    notice window is evaluated against; production passes nothing. With no
+    notice in window the wrapped prompt is byte-identical to what this function
+    produced before notices existed.
     """
     body, model = load_persona(agent_id)
     wrapped = _WRAPPER_TEMPLATE.format(
         agent_id=agent_id,
         persona_body=body,
+        notice_block=render_notice_block(agent_id, today),
         task_prompt=task_prompt,
     )
     # Token/cost visibility: record the character-count proxy (len/4) for this
