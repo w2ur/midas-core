@@ -148,9 +148,11 @@ def refresh_insider() -> list[str]:
 # Last refreshed 2026-04-17: removed BBBY, PRTY, JWN, OSTK, WISH, EXPR
 # (delisted / bankrupt between 2023-2025).
 # 2026-09-10: removed RIDE (Lordstown Motors — Chapter 11 in 2023, delisted
-# from Nasdaq). The symbol carried no OHLCV file in the committed store and
-# sat in `data/tickers.json` as `unknown`/`null` currency, so every read of it
-# was a ticker the desk could neither price nor resolve.
+# from Nasdaq) and NKLA (Nikola — Chapter 11 in 2025, delisted from Nasdaq).
+# Neither could be priced: RIDE had no OHLCV file in the committed store at
+# all, NKLA a single 2026-03-02 row with zero open/high/low and zero volume,
+# and both sat in `data/tickers.json` as `unknown`/`null` currency. A ticker
+# the desk can neither price nor resolve is not a short-interest candidate.
 _HIGH_SHORT_FALLBACK: list[str] = [
     "GME",
     "AMC",
@@ -158,7 +160,6 @@ _HIGH_SHORT_FALLBACK: list[str] = [
     "PLTR",
     "RIVN",
     "LCID",
-    "NKLA",
     "WKHS",
     "BYND",
     "CVNA",

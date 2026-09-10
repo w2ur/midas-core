@@ -4521,11 +4521,6 @@
     "type": "equity",
     "currency": "USD"
   },
-  "NKLA": {
-    "name": null,
-    "type": "unknown",
-    "currency": null
-  },
   "NKT.CO": {
     "name": "NKT A/S",
     "type": "equity",
