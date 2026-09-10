@@ -143,6 +143,22 @@ class TestEUIndices:
         for t in tickers:
             assert t.endswith(".L"), f"{t!r} missing .L suffix"
 
+    def test_ftse100_carries_no_dotted_share_class(self):
+        """Regression: the committed universe listed BT Group as "BT.A.L".
+
+        `test_ftse100_all_lse_suffix` above passes on "BT.A.L" — it ends in
+        ".L" — which is why it never caught this. Yahoo spells an LSE share
+        class with a dash, so the symbol resolved to nothing: no OHLCV file in
+        the committed store and an `unknown`/`null`-currency row in
+        `data/tickers.json`, while `stoxx600.json` (ISIN-resolved) carried
+        "BT-A.L" correctly the whole time. A dot anywhere but the final ".L"
+        is the signature.
+        """
+        from engine.universes.index import get_ftse100_tickers
+
+        for t in get_ftse100_tickers():
+            assert t.count(".") == 1, f"{t!r} has a dotted share class"
+
     def test_stoxx600_committed(self):
         from engine.universes.index import get_stoxx600_tickers
 
@@ -168,6 +184,30 @@ class TestRefreshFunctions:
         assert result == sorted(fresh)
         assert (fake_dir / "sp500.json").exists()
         assert json.loads((fake_dir / "sp500.json").read_text()) == sorted(fresh)
+
+    def test_refresh_ftse100_dashes_a_share_class_before_the_lse_suffix(
+        self, midas_data_root, monkeypatch
+    ):
+        """Regression: "BT.A" became "BT.A.L" instead of Yahoo's "BT-A.L"."""
+        import engine.universes.index as ix_mod
+        import pandas as pd
+
+        fake_dir = get_config().universes_dir
+        fake_dir.mkdir(parents=True, exist_ok=True)
+
+        # 80 plain tickers to clear the layout-change floor, plus the two
+        # shapes that matter: a dotted share class, and one already suffixed.
+        rows = [f"T{i:03d}" for i in range(80)] + ["BT.A", "HSBA.L"]
+        monkeypatch.setattr(
+            ix_mod, "_fetch_html_tables", lambda url: [pd.DataFrame({"Ticker": rows})]
+        )
+
+        result = ix_mod.refresh_ftse100()
+        assert "BT-A.L" in result
+        assert "BT.A.L" not in result
+        # An already-suffixed ticker is passed through, not re-suffixed.
+        assert "HSBA.L" in result
+        assert all(t.count(".") == 1 for t in result)
 
     def test_refresh_nasdaq100_reads_slickcharts_symbol_column(
         self, midas_data_root, monkeypatch

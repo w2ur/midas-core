@@ -316,7 +316,12 @@ def refresh_ftse100() -> list[str]:
         if t is None:
             continue
         if not t.endswith(".L"):
-            t = f"{t}.L"
+            # Yahoo spells an LSE share-class suffix with a dash, not a dot:
+            # Wikipedia's "BT.A" is "BT-A.L". Appending ".L" verbatim produced
+            # "BT.A.L", which resolves to nothing — the store has no such file
+            # and the ticker registry carried it as `unknown` forever, while
+            # the ISIN-based STOXX 600 resolver had "BT-A.L" right all along.
+            t = f"{_normalise(t)}.L"
         tickers.add(t)
     result = sorted(tickers)
     if len(result) < 80:

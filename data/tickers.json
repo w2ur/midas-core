@@ -1214,11 +1214,6 @@
     "type": "equity",
     "currency": "GBp"
   },
-  "BT.A.L": {
-    "name": null,
-    "type": "unknown",
-    "currency": null
-  },
   "BTC-EUR": {
     "name": "Bitcoin EUR",
     "type": "crypto",
@@ -5271,11 +5266,6 @@
     "type": "equity",
     "currency": "EUR"
   },
-  "RIDE": {
-    "name": null,
-    "type": "unknown",
-    "currency": null
-  },
   "RIGN.SW": {
     "name": null,
     "type": "unknown",
@@ -5894,12 +5884,12 @@
     "currency": "EUR"
   },
   "SOL-EUR": {
-    "name": "Solana",
+    "name": "Solana EUR",
     "type": "crypto",
     "currency": "EUR"
   },
   "SOL-USD": {
-    "name": "Solana",
+    "name": "Solana USD",
     "type": "crypto",
     "currency": "USD"
   },
@@ -6665,7 +6655,7 @@
     "currency": "USD"
   },
   "UNI-USD": {
-    "name": "Uniswap",
+    "name": "UNICORN Token USD",
     "type": "crypto",
     "currency": "USD"
   },
@@ -6860,7 +6850,7 @@
     "currency": "USD"
   },
   "VMRK": {
-    "name": "AvalonBay Communities, Inc.",
+    "name": "Vivmark Residential",
     "type": "equity",
     "currency": "USD"
   },
@@ -7160,12 +7150,12 @@
     "currency": "USD"
   },
   "XLM-EUR": {
-    "name": "Stellar",
+    "name": "Stellar EUR",
     "type": "crypto",
     "currency": "EUR"
   },
   "XLM-USD": {
-    "name": "Stellar",
+    "name": "Stellar USD",
     "type": "crypto",
     "currency": "USD"
   },
@@ -7200,12 +7190,12 @@
     "currency": "USD"
   },
   "XRP-EUR": {
-    "name": "XRP",
+    "name": "XRP EUR",
     "type": "crypto",
     "currency": "EUR"
   },
   "XRP-USD": {
-    "name": "XRP",
+    "name": "XRP USD",
     "type": "crypto",
     "currency": "USD"
   },
