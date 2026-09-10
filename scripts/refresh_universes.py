@@ -2,7 +2,13 @@
 
 Index universes (S&P 500, CAC 40, etc.) re-fetch from Wikipedia; Nasdaq-100
 re-fetches from Slickcharts (Wikipedia dropped its constituents table on
-2026-07-13). Alternative universes (congressional, insider, high-short)
+2026-07-13); STOXX 600 re-fetches DWS's constituent export and resolves each
+ISIN through Yahoo's lookup (2026-09-09 — Wikipedia's ticker column is
+Reuters-style and 120 of the symbols it produced never resolved, issue #36).
+That last one is throttled and takes a few minutes, and refuses to overwrite
+the committed list when the result differs from it by more than
+`MAX_UNIVERSE_CHURN_RATE` — set `MIDAS_ACCEPT_UNIVERSE_CHURN=1` on a deliberate
+local rebuild to accept it. Alternative universes (congressional, insider, high-short)
 re-seed from the curated fallback constants in `engine/universes/alternative.py`.
 
 Run manually after an upstream layout change, or via the weekly GitHub
@@ -28,7 +34,7 @@ from engine.universes.index import INDEX_REFRESHERS, refresh_all_indexes
 
 
 def main() -> int:
-    print("Refreshing index universes from Wikipedia/Slickcharts...")
+    print("Refreshing index universes from Wikipedia/Slickcharts/DWS+Yahoo...")
     indexes = refresh_all_indexes()
     print(json.dumps(indexes, indent=2))
     skipped = [name for name in INDEX_REFRESHERS if name not in indexes]

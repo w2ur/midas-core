@@ -246,6 +246,31 @@ def test_ingest_scales_a_vendor_pence_frame_into_the_store(
     assert out["Volume"].iloc[0] == 7_107_333
 
 
+def test_first_ingest_scales_by_the_vendor_unit_not_the_suffix(
+    midas_data_root: Path,
+) -> None:
+    """Regression: a symbol's FIRST ingest happens before the registry has its
+    entry, so resolution fell through to the suffix heuristic, which calls
+    every `.L` line pence. Compass (`CPG.L`) quotes in USD: its first ingest
+    would have been stored at 1/100, permanently. The vendor's own answer for
+    the frame outranks the layers."""
+    import pandas as pd
+
+    from engine.quotes import vendor_unit_scale
+    from scripts.fetch_ohlcv import _normalise_vendor_units
+
+    _seed_registry({})  # no entry yet: exactly the first-ingest state
+    assert vendor_unit_scale("CPG.L") == pytest.approx(0.01)  # the heuristic's answer
+    assert vendor_unit_scale("CPG.L", unit="USD") == 1.0
+    assert vendor_unit_scale("LLOY.L", unit="GBp") == pytest.approx(0.01)  # control
+    frame = pd.DataFrame(
+        {"Open": [24.0], "High": [24.5], "Low": [23.5], "Close": [24.2], "Volume": [1]},
+        index=[pd.Timestamp("2026-06-01")],
+    )
+    assert _normalise_vendor_units("CPG.L", frame, vendor_unit="USD")["Close"].iloc[0] == 24.2
+    assert _normalise_vendor_units("CPG.L", frame)["Close"].iloc[0] == pytest.approx(0.242)
+
+
 def test_latest_price_is_none_when_the_store_has_no_row(midas_data_root: Path) -> None:
     _seed_registry({"LLOY.L": "GBp"})
     assert latest_price("LLOY.L", date(2026, 6, 1)) is None

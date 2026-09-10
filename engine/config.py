@@ -485,8 +485,12 @@ def resolve_agent_universe(spec: AgentSpec) -> list[str]:
 
     try:
         resolved = [resolve_universe(n) for n in names]
-    except KeyError:
-        return list(names)  # not registry names → treat as literal tickers
+    except (KeyError, FileNotFoundError):
+        # KeyError: not registry names → treat as literal tickers.
+        # FileNotFoundError: a registry name whose committed file is absent
+        # (STOXX 600 refuses to refresh itself on the session path) — same
+        # outcome, and the session must not die on it.
+        return list(names)
     if len(names) == 1:
         return resolved[0]  # single registered name → native order (unchanged)
     return sorted({t for lst in resolved for t in lst})  # multi → sorted union

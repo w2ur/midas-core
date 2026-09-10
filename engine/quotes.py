@@ -319,7 +319,7 @@ def ticker_currency(ticker: str) -> str | None:
     return _iso_and_scale(vendor_quote_unit(ticker))[0]
 
 
-def vendor_unit_scale(ticker: str) -> float:
+def vendor_unit_scale(ticker: str, *, unit: str | None = None) -> float:
     """Multiplier taking a VENDOR price for `ticker` to its ISO currency.
 
     `0.01` for a pence-quoted LSE line, `1.0` for everything else. This is
@@ -327,7 +327,19 @@ def vendor_unit_scale(ticker: str) -> float:
     caller should ever need it is to normalise a freshly fetched frame —
     `scripts.fetch_ohlcv._fetch_symbol` does exactly that, which is what
     keeps the store ISO-denominated.
+
+    `unit` is the vendor's own answer for THIS frame, when the caller has
+    just fetched it. On a symbol's first ingest the registry (layer 2) has
+    no entry yet and the three-layer resolution falls through to the suffix
+    heuristic — which calls every `.L` line pence. Three of the 167
+    non-ETP `.L` entries in the committed registry quote in USD or EUR
+    (Compass, IHG, Metlen), and a first ingest scaled by the heuristic
+    would store them at 1/100 permanently: the division happens once, at
+    ingest, and the read path never rescales. A vendor unit the caller
+    holds therefore outranks the layers; `None` means "resolve as usual".
     """
+    if unit is not None:
+        return _iso_and_scale(unit)[1]
     return _iso_and_scale(vendor_quote_unit(ticker))[1]
 
 

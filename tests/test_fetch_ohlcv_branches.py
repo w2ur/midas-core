@@ -76,7 +76,9 @@ def _make_fake_fetch_symbol(frames: dict[str, dict[str, list]]):
     coming back, not as an untested no-op.
     """
 
-    def fake(symbol: str, start: date, end: date) -> pd.DataFrame | None:
+    def fake(
+        symbol: str, start: date, end: date, *, vendor_unit: str | None = None
+    ) -> pd.DataFrame | None:
         series = frames.get(symbol)
         if not series:
             return None
@@ -295,7 +297,9 @@ def test_the_run_never_asks_the_vendor_for_todays_bar(
     """
     requested: list[date] = []
 
-    def fake(symbol: str, start: date, end: date) -> pd.DataFrame | None:
+    def fake(
+        symbol: str, start: date, end: date, *, vendor_unit: str | None = None
+    ) -> pd.DataFrame | None:
         requested.append(end)
         return None
 
@@ -324,7 +328,9 @@ def test_skip_path_no_fetch_no_mutation_when_store_covers_end(
     _write_raw(path, [end_line])
     before = path.read_text(encoding="utf-8")
 
-    def fake(symbol: str, start: date, end: date) -> pd.DataFrame | None:
+    def fake(
+        symbol: str, start: date, end: date, *, vendor_unit: str | None = None
+    ) -> pd.DataFrame | None:
         raise AssertionError("must not fetch when the store already covers end")
 
     monkeypatch.setattr(fo, "_fetch_symbol", fake)
@@ -678,7 +684,7 @@ def test_resweep_held_with_no_open_positions_is_a_clean_no_op(
     called at all."""
     monkeypatch.setattr(fo, "_collect_holdings", lambda: set())
 
-    def fail_if_called(symbol: str, start: date, end: date):
+    def fail_if_called(symbol: str, start: date, end: date, **_kw):
         raise AssertionError("must not fetch when no positions are held")
 
     monkeypatch.setattr(fo, "_fetch_symbol", fail_if_called)
@@ -748,7 +754,7 @@ def test_resweep_held_detects_a_split_within_a_90_day_window(
 # ---------------------------------------------------------------------------
 
 
-def _all_symbols_fail(symbol: str, start: date, end: date):
+def _all_symbols_fail(symbol: str, start: date, end: date, **_kw):
     return None
 
 

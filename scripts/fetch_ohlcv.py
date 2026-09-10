@@ -238,8 +238,15 @@ EXIT_VENDOR_OUTAGE = 3
 COMMITTABLE_EXITS = (0, EXIT_QUARANTINED, EXIT_VENDOR_OUTAGE)
 
 
-def _fetch_symbol(symbol: str, start: date, end: date) -> pd.DataFrame | None:
-    """Fetch OHLCV for a single symbol. Returns None on failure."""
+def _fetch_symbol(
+    symbol: str, start: date, end: date, *, vendor_unit: str | None = None
+) -> pd.DataFrame | None:
+    """Fetch OHLCV for a single symbol. Returns None on failure.
+
+    ``vendor_unit`` is the quote unit the vendor reports for the symbol, passed
+    on a FIRST ingest when the registry has no entry yet — see
+    `engine.quotes.vendor_unit_scale`.
+    """
     try:
         df = yf.download(
             symbol,
@@ -260,7 +267,7 @@ def _fetch_symbol(symbol: str, start: date, end: date) -> pd.DataFrame | None:
         # signal the exit code below is built on.
         print(f"  ! {symbol}: vendor returned no rows", file=sys.stderr)
         return None
-    return _normalise_vendor_units(symbol, flatten_columns(df))
+    return _normalise_vendor_units(symbol, flatten_columns(df), vendor_unit=vendor_unit)
 
 
 #: Price columns yfinance serves in the vendor's quote unit. `Volume` is a
@@ -268,7 +275,9 @@ def _fetch_symbol(symbol: str, start: date, end: date) -> pd.DataFrame | None:
 _PRICE_COLUMNS = ("Open", "High", "Low", "Close", "Adj Close")
 
 
-def _normalise_vendor_units(symbol: str, df: pd.DataFrame) -> pd.DataFrame:
+def _normalise_vendor_units(
+    symbol: str, df: pd.DataFrame, *, vendor_unit: str | None = None
+) -> pd.DataFrame:
     """Scale a fetched frame from the vendor's quote unit into ISO currency.
 
     The LSE quotes in pence, so yfinance serves `LLOY.L` at 116.60 meaning
@@ -283,7 +292,7 @@ def _normalise_vendor_units(symbol: str, df: pd.DataFrame) -> pd.DataFrame:
     the two stay in the same units and a normalised store does not read as a
     clean 100:1 "split" on every London ticker.
     """
-    scale = vendor_unit_scale(symbol)
+    scale = vendor_unit_scale(symbol, unit=vendor_unit)
     if scale == 1.0:
         return df
     out = df.copy()
@@ -845,7 +854,18 @@ def main() -> int:
             if covered:
                 considered_covered += 1
 
-            df = _fetch_symbol(symbol, start, end)
+            # A FIRST ingest is scaled by whatever the vendor says the symbol
+            # quotes in, not by the suffix heuristic: the registry (currency
+            # layer 2) has no entry yet — it is written after this loop — and
+            # the heuristic calls every `.L` line pence, which would store a
+            # USD- or EUR-quoted London name (Compass, IHG, Metlen) at 1/100
+            # permanently. The info is fetched once and reused for the name.
+            vendor_unit: str | None = None
+            if not covered:
+                registry_updates[symbol] = resolve_name(symbol, _fetch_ticker_info(symbol))
+                vendor_unit = registry_updates[symbol].get("currency")
+
+            df = _fetch_symbol(symbol, start, end, vendor_unit=vendor_unit)
             if df is None:
                 if covered:
                     covered_failures += 1
@@ -937,7 +957,8 @@ def main() -> int:
                         f"~{r} revised{suffix}"
                     )
 
-        registry_updates[symbol] = resolve_name(symbol, _fetch_ticker_info(symbol))
+        if symbol not in registry_updates:  # a first ingest fetched it above
+            registry_updates[symbol] = resolve_name(symbol, _fetch_ticker_info(symbol))
 
     if registry_updates:
         existing_reg = load_registry()
@@ -993,10 +1014,15 @@ def main() -> int:
     # below unusable. 118 of the 120 failures on 2026-08-07 were Refinitiv-style
     # codes in data/universes/stoxx600.json that Yahoo has no route for at all
     # (AIRP.PA, BNPP.PA, CAGR.PA, ATCOa.ST — Yahoo wants AI.PA, BNP.PA, ACA.PA,
-    # ATCO-A.ST). They will never resolve, so failing the run on them would
-    # freeze the store permanently. They are reported instead, because a
-    # universe carrying ~120 unfetchable tickers is a real defect — just not
-    # this script's, and not one a red run can fix.
+    # ATCO-A.ST). They would never resolve, so failing the run on them would
+    # have frozen the store permanently. They are reported instead, because a
+    # universe carrying unfetchable tickers is a real defect — just not this
+    # script's, and not one a red run can fix. That particular defect was
+    # closed on 2026-09-09 (issue #36): the STOXX 600 resolver now keys on
+    # ISIN and asks Yahoo which listing it serves, so a symbol reaches the
+    # universe file only if the vendor can price it. What this WARN names
+    # from now on is a symbol the vendor has since dropped, or a universe
+    # entry added by hand.
     if unresolved:
         print(
             f"\nWARN: {len(unresolved)} symbol(s) have never served a row and "

@@ -9,6 +9,7 @@ session aborted as a downstream consequence.
 
 from __future__ import annotations
 
+import io
 import json
 
 from engine.config import get_config
@@ -407,3 +408,529 @@ class TestHighShortTickers:
 
     def test_result_is_sorted(self):
         assert get_high_short_tickers() == sorted(get_high_short_tickers())
+
+
+# ---------------------------------------------------------------------------
+# STOXX 600 — ISIN-keyed resolution (issue #36)
+# ---------------------------------------------------------------------------
+
+
+def _quote(symbol: str, exchange: str | None, quote_type: str = "EQUITY") -> dict:
+    q = {"symbol": symbol, "quoteType": quote_type}
+    if exchange is not None:
+        q["exchange"] = exchange
+    return q
+
+
+def _row(isin: str, name: str = "Some Co", country: str = "France") -> dict[str, str]:
+    return {
+        "Constituent ISIN": isin,
+        "Constituent Name": name,
+        "Constituent Country": country,
+    }
+
+
+class TestStoxx600PickSymbol:
+    """Regression: issue #36 — Wikipedia's ticker column produced 120 symbols
+    Yahoo had no route for. Resolution is now keyed on ISIN, and these pin the
+    listing-selection rule against the vendor answers measured 2026-09-09."""
+
+    def test_home_market_suffix_beats_first_returned(self):
+        from engine.universes.index import _pick_symbol
+
+        # Yahoo listed Stuttgart's placeholder first for Inchcape.
+        quotes = [_quote("GB00B61TVQ02.SG", "STU"), _quote("INCH.L", "LSE")]
+        assert _pick_symbol("GB00B61TVQ02", "United Kingdom", quotes) == "INCH.L"
+
+    def test_xetra_beats_frankfurt_floor_for_a_german_name(self):
+        from engine.universes.index import _pick_symbol
+
+        quotes = [_quote("G1A.F", "FRA"), _quote("G1A.DE", "GER")]
+        assert _pick_symbol("DE0006602006", "Germany", quotes) == "G1A.DE"
+
+    def test_frankfurt_floor_accepted_for_a_german_name_over_a_foreign_venue(self):
+        from engine.universes.index import _pick_symbol
+
+        # Fresenius' new ISIN answered only with its Frankfurt quote; and when a
+        # foreign venue is offered too, Frankfurt is still the home market.
+        assert _pick_symbol("DE000FRE5EN2", "Germany", [_quote("FRE.F", "FRA")]) == "FRE.F"
+        quotes = [_quote("FRE.VI", "VIE"), _quote("FRE.F", "FRA")]
+        assert _pick_symbol("DE000FRE5EN2", "Germany", quotes) == "FRE.F"
+
+    def test_german_venues_refused_for_a_foreign_name(self):
+        from engine.universes.index import _pick_symbol
+
+        # SAGAX B (Stockholm) answered only as a Frankfurt regional print.
+        assert _pick_symbol("SE0005127818", "Sweden", [_quote("EFE.F", "FRA")]) is None
+        # A Xetra secondary line for a CHF name is the wrong instrument in the
+        # right currency — refused too, and the home listing wins when offered.
+        assert _pick_symbol("CH0012032048", "Switzerland", [_quote("RHO5.DE", "GER")]) is None
+        quotes = [_quote("RHO5.DE", "GER"), _quote("ROG.SW", "EBS")]
+        assert _pick_symbol("CH0012032048", "Switzerland", quotes) == "ROG.SW"
+        # Control: the same Xetra line IS the home market for a German name.
+        assert _pick_symbol("DE0007236101", "Germany", [_quote("SIE.DE", "GER")]) == "SIE.DE"
+        # A domicile the map cannot place (the export files Delivery Hero under
+        # Korea) keeps its Xetra answer — but still not a regional floor.
+        assert _pick_symbol("DE000A2E4K43", "Korea, Republic of", [_quote("DHER.DE", "GER")]) == "DHER.DE"
+        assert _pick_symbol("DE000A2E4K43", "Korea, Republic of", [_quote("DHER.F", "FRA")]) is None
+
+    def test_domicile_without_a_home_listing_takes_the_real_symbol(self):
+        from engine.universes.index import _pick_symbol
+
+        # Prosus is domiciled "China" in the export; no suffix preference applies.
+        quotes = [_quote("PRX.AS", "AMS"), _quote("NL0013654783.SG", "STU")]
+        assert _pick_symbol("NL0013654783", "China", quotes) == "PRX.AS"
+
+    def test_placeholder_only_is_refused(self):
+        from engine.universes.index import _pick_symbol
+
+        quotes = [_quote("GB0000000001.SG", "STU")]
+        assert _pick_symbol("GB0000000001", "United Kingdom", quotes) is None
+
+    def test_otc_and_non_equity_are_refused(self):
+        from engine.universes.index import _pick_symbol
+
+        # NMC Health: the only answer was a pink-sheet line typed MUTUALFUND.
+        quotes = [_quote("NMMCF", "PNK", "MUTUALFUND")]
+        assert _pick_symbol("GB00B7FC0762", "United Kingdom", quotes) is None
+        assert _pick_symbol("GB00B7FC0762", "United Kingdom", []) is None
+        # The other two US OTC tiers are OTC as well: a dotless ADR symbol the
+        # currency heuristic would otherwise call USD.
+        for tier in ("OQX", "OQB"):
+            assert _pick_symbol("SE0000000001", "Sweden", [_quote("XXXXY", tier)]) is None
+        # Control: the same dotless shape on a real US exchange is accepted.
+        assert _pick_symbol("SE0000000001", "Sweden", [_quote("XXXXY", "NMS")]) == "XXXXY"
+
+    def test_quote_without_an_exchange_is_refused(self):
+        from engine.universes.index import _pick_symbol
+
+        # yfinance's Search.quotes only guarantees "symbol"; an unattributed
+        # listing must not outrank a real one.
+        quotes = [_quote("FRE.F", "FRA"), _quote("FREG.XX", None)]
+        assert _pick_symbol("DE000FRE5EN2", "Germany", quotes) == "FRE.F"
+        assert _pick_symbol("DE000FRE5EN2", "Germany", [_quote("FREG.XX", None)]) is None
+
+    def test_unknown_suffix_is_refused(self):
+        """A suffix `engine.quotes` cannot denominate would reach the broker
+        only to die with CURRENCY_UNRESOLVED, so it never enters the file."""
+        from engine.quotes import _heuristic_unit
+        from engine.universes.index import _pick_symbol
+
+        assert _heuristic_unit("HIK.JO") is None  # control: the suffix really is unknown
+        assert _pick_symbol("GB00B0LCW083", "Jordan", [_quote("HIK.JO", "JNB")]) is None
+        quotes = [_quote("HIK.JO", "JNB"), _quote("HIK.L", "LSE")]
+        assert _pick_symbol("GB00B0LCW083", "Jordan", quotes) == "HIK.L"
+
+    def test_us_primary_listing_without_suffix_is_accepted(self):
+        from engine.universes.index import _pick_symbol
+
+        assert _pick_symbol("NL0015002SN0", "Netherlands", [_quote("QGEN", "NYQ")]) == "QGEN"
+
+    def test_european_venue_beats_a_us_listing_and_ties_break_on_the_symbol(self):
+        """Without a home-market answer, the venue — and so the currency a EUR
+        book is exposed to — must not be decided by sort order between a EUR
+        and a USD line, nor by the order the vendor happened to list them."""
+        from engine.universes.index import _pick_symbol
+
+        a = [_quote("QGEN", "NYQ"), _quote("QIA.PA", "PAR")]
+        assert _pick_symbol("NL0012169213", "Jersey", a) == "QIA.PA"
+        assert _pick_symbol("NL0012169213", "Jersey", list(reversed(a))) == "QIA.PA"
+        # Two European venues, neither the home market: the symbol decides,
+        # identically in both orders.
+        b = [_quote("CPG.MI", "MIL"), _quote("CPG.L", "LSE")]
+        assert _pick_symbol("GB00BD6K4575", "Cayman Islands", b) == "CPG.L"
+        assert _pick_symbol("GB00BD6K4575", "Cayman Islands", list(reversed(b))) == "CPG.L"
+        # Control: with a home-market suffix the preference, not the tie-break, decides.
+        assert _pick_symbol("GB00BD6K4575", "Italy", b) == "CPG.MI"
+
+
+class TestStoxx600ResolveIsins:
+    def test_maps_each_isin_and_lists_the_unresolved(self):
+        from engine.universes.index import ISIN_LOOKUP_SPACING_S, resolve_isins
+
+        answers = {
+            "FR0000120073": [_quote("AI.PA", "PAR")],
+            "FR0014010OO5": [],  # Air Liquide's bonus-share line
+            "SE0011166610": [_quote("ATCO-A.ST", "STO")],
+        }
+        sleeps: list[float] = []
+        rows = [
+            _row("FR0000120073", "Air Liquide"),
+            _row("FR0014010OO5", "L AIR LIQUIDE"),
+            _row("SE0011166610", "Atlas Copco A", "Sweden"),
+        ]
+        resolved, unresolved = resolve_isins(
+            rows, lookup=lambda isin: answers[isin], sleep=sleeps.append
+        )
+        assert resolved == {"FR0000120073": "AI.PA", "SE0011166610": "ATCO-A.ST"}
+        assert unresolved == [("FR0014010OO5", "L AIR LIQUIDE")]
+        # Throttled BETWEEN lookups: n-1 sleeps of the documented spacing.
+        assert sleeps == [ISIN_LOOKUP_SPACING_S] * 2
+
+    def test_stops_as_soon_as_the_unresolved_budget_is_exceeded(self):
+        """An outage must not be crawled to the end: 605 x the retry schedule
+        is longer than the workflow timeout, and a cancelled job commits
+        nothing — not even the six indexes already refreshed to disk."""
+        from engine.universes.index import resolve_isins
+
+        rows = [_row(f"FR{i:010d}") for i in range(50)]
+        calls: list[str] = []
+
+        def lookup(isin: str) -> list[dict]:
+            calls.append(isin)
+            return []
+
+        with pytest.raises(RuntimeError, match="unresolved"):
+            resolve_isins(rows, max_unresolved=3, lookup=lookup, sleep=lambda s: None)
+        assert len(calls) == 4
+
+    def test_stops_after_consecutive_lookup_failures(self):
+        from engine.universes.index import MAX_CONSECUTIVE_LOOKUP_FAILURES, resolve_isins
+
+        rows = [_row(f"FR{i:010d}") for i in range(50)]
+        calls: list[str] = []
+
+        def lookup(isin: str) -> None:
+            calls.append(isin)
+            return None  # the lookup itself failed
+
+        with pytest.raises(RuntimeError, match="lookup unavailable"):
+            resolve_isins(rows, lookup=lookup, sleep=lambda s: None)
+        assert len(calls) == MAX_CONSECUTIVE_LOOKUP_FAILURES
+
+    def test_scattered_failures_reset_the_consecutive_count(self):
+        """More failures in total than MAX_CONSECUTIVE_LOOKUP_FAILURES, never
+        two in a row: the run completes. Deleting the reset makes this raise
+        — verified, which is what makes the test evidence."""
+        from engine.universes.index import MAX_CONSECUTIVE_LOOKUP_FAILURES, resolve_isins
+
+        n = 2 * MAX_CONSECUTIVE_LOOKUP_FAILURES + 2
+        answers = [None if i % 2 == 0 else [_quote(f"S{i}.PA", "PAR")] for i in range(n)]
+        rows = [_row(f"FR{i:010d}", f"Co {i}") for i in range(n)]
+        resolved, unresolved = resolve_isins(
+            rows, lookup=lambda isin: answers.pop(0), sleep=lambda s: None
+        )
+        assert len(resolved) == n // 2
+        assert len(unresolved) == n // 2
+        assert all(int(isin[2:]) % 2 == 0 for isin, _ in unresolved)
+
+    def test_stops_when_the_wall_clock_budget_is_spent(self):
+        """Every lookup succeeding after a back-off bounds nothing above: the
+        crawl must stop on elapsed time, or the job is cancelled and the six
+        indexes already refreshed to disk die with the runner."""
+        from engine.universes.index import resolve_isins
+
+        rows = [_row(f"FR{i:010d}") for i in range(50)]
+        ticks = iter(range(0, 10_000, 10))  # each lookup "costs" 10 s
+        calls: list[str] = []
+
+        def lookup(isin: str) -> list[dict]:
+            calls.append(isin)
+            return [_quote("A.PA", "PAR")]
+
+        with pytest.raises(RuntimeError, match="budget exhausted"):
+            resolve_isins(
+                rows, budget_s=35, lookup=lookup, sleep=lambda s: None, clock=lambda: next(ticks)
+            )
+        # Clock reads 0 at start, then 10/20/30 before lookups 1-3, 40 > 35 stops.
+        assert len(calls) == 3
+        # Control: no budget, the same crawl completes.
+        calls.clear()
+        resolved, _ = resolve_isins(
+            rows, budget_s=None, lookup=lookup, sleep=lambda s: None, clock=lambda: 0.0
+        )
+        assert len(calls) == 50 and len(resolved) == 50
+
+
+class TestStoxx600SearchIsinQuotes:
+    def test_retries_a_rate_limit_then_gives_up(self, monkeypatch):
+        import yfinance
+        from yfinance.exceptions import YFRateLimitError
+
+        import engine.universes.index as ix_mod
+
+        class FlakyOnce:
+            calls = 0
+
+            def __init__(self, query, **kwargs):
+                FlakyOnce.calls += 1
+                if FlakyOnce.calls == 1:
+                    raise YFRateLimitError()
+                self.quotes = [_quote("AI.PA", "PAR")]
+
+        monkeypatch.setattr(yfinance, "Search", FlakyOnce)
+        sleeps: list[float] = []
+        assert ix_mod._search_isin_quotes("FR0000120073", sleep=sleeps.append) == [
+            _quote("AI.PA", "PAR")
+        ]
+        assert sleeps == [ix_mod.ISIN_LOOKUP_RETRY_SLEEPS_S[0]]
+
+        class AlwaysLimited:
+            def __init__(self, query, **kwargs):
+                raise YFRateLimitError()
+
+        monkeypatch.setattr(yfinance, "Search", AlwaysLimited)
+        sleeps.clear()
+        assert ix_mod._search_isin_quotes("FR0000120073", sleep=sleeps.append) is None
+        assert sleeps == list(ix_mod.ISIN_LOOKUP_RETRY_SLEEPS_S)
+
+    def test_transport_errors_retry_and_other_errors_propagate(self, monkeypatch):
+        """A signature change in yfinance or Yahoo's own "currently down"
+        exception is a fact about the run, not the ISIN: it must surface at
+        once instead of burning the retry schedule on all ~605 lines."""
+        import yfinance
+
+        import engine.universes.index as ix_mod
+
+        class Unreachable:
+            def __init__(self, query, **kwargs):
+                raise ConnectionError("no route to host")
+
+        monkeypatch.setattr(yfinance, "Search", Unreachable)
+        sleeps: list[float] = []
+        assert ix_mod._search_isin_quotes("FR0000120073", sleep=sleeps.append) is None
+        assert sleeps == list(ix_mod.ISIN_LOOKUP_RETRY_SLEEPS_S)
+
+        class HtmlBody:
+            def __init__(self, query, **kwargs):
+                raise json.JSONDecodeError("Expecting value", "<html>", 0)
+
+        # An HTML 5xx or captcha page: yfinance would swallow it into an
+        # empty answer by default, which reads as "no listing". Not here.
+        monkeypatch.setattr(yfinance, "Search", HtmlBody)
+        sleeps.clear()
+        assert ix_mod._search_isin_quotes("FR0000120073", sleep=sleeps.append) is None
+        assert sleeps == list(ix_mod.ISIN_LOOKUP_RETRY_SLEEPS_S)
+
+        class SignatureChanged:
+            def __init__(self, query, **kwargs):
+                raise TypeError("unexpected keyword argument 'news_count'")
+
+        monkeypatch.setattr(yfinance, "Search", SignatureChanged)
+        sleeps.clear()
+        with pytest.raises(TypeError):
+            ix_mod._search_isin_quotes("FR0000120073", sleep=sleeps.append)
+        assert sleeps == []
+
+    def test_yfinance_is_told_not_to_hide_a_faulty_body(self, monkeypatch):
+        import yfinance
+        from yfinance.config import YfConfig
+
+        import engine.universes.index as ix_mod
+
+        seen: list[bool] = []
+
+        class Recording:
+            def __init__(self, query, **kwargs):
+                seen.append(YfConfig.debug.hide_exceptions)
+                self.quotes = []
+
+        monkeypatch.setattr(yfinance, "Search", Recording)
+        monkeypatch.setattr(YfConfig.debug, "hide_exceptions", True)
+        assert ix_mod._search_isin_quotes("FR0000120073", sleep=lambda s: None) == []
+        assert seen == [False]
+        assert YfConfig.debug.hide_exceptions is True  # restored
+
+
+class TestStoxx600Constituents:
+    def test_keeps_only_isin_shaped_lines(self, monkeypatch):
+        import engine.universes.index as ix_mod
+
+        csv_text = "﻿" + "\n".join(
+            [
+                "ShareClass ISIN;Constituent ISIN;Constituent Name;Constituent Country;"
+                "Constituent Currency ISO Code;Constituent Weighting",
+                "LU0328475792;NL0010273215;ASML Holding NV;Netherlands;EUR;0.04",
+                "LU0328475792;_CURRENCYEUR;EURO CURRENCY;;EUR;0.001",
+                "LU0328475792;___ADI2V9YR9;STOXX EUROPE 600  SEP26;Germany;EUR;0.002",
+                "LU0328475792;IE00BZ3FDF20;;Ireland;EUR;0.0001",
+            ]
+        )
+        monkeypatch.setattr(
+            ix_mod.urllib.request,
+            "urlopen",
+            lambda req, timeout: io.BytesIO(csv_text.encode("utf-8")),
+        )
+        rows = ix_mod._fetch_stoxx600_constituents()
+        assert [r["Constituent ISIN"] for r in rows] == ["NL0010273215", "IE00BZ3FDF20"]
+        assert rows[0]["Constituent Name"] == "ASML Holding NV"
+
+    def test_missing_column_is_a_layout_change(self, monkeypatch):
+        import engine.universes.index as ix_mod
+
+        csv_text = "ShareClass ISIN;ISIN;Name\nLU0328475792;NL0010273215;ASML\n"
+        monkeypatch.setattr(
+            ix_mod.urllib.request,
+            "urlopen",
+            lambda req, timeout: io.BytesIO(csv_text.encode("utf-8")),
+        )
+        with pytest.raises(RuntimeError, match="layout changed"):
+            ix_mod._fetch_stoxx600_constituents()
+
+
+class TestRefreshStoxx600:
+    @staticmethod
+    def _rows(n: int) -> list[dict[str, str]]:
+        return [_row(f"FR{i:010d}", f"Co {i}") for i in range(n)]
+
+    @staticmethod
+    def _install(monkeypatch, rows, lookup) -> None:
+        import engine.universes.index as ix_mod
+
+        monkeypatch.setattr(ix_mod, "_fetch_stoxx600_constituents", lambda: rows)
+        monkeypatch.setattr(ix_mod, "_search_isin_quotes", lookup)
+        monkeypatch.setattr(ix_mod.time, "sleep", lambda s: None)
+
+    @staticmethod
+    def _lookup_unresolving_first(n: int):
+        def lookup(isin: str) -> list[dict]:
+            i = int(isin[2:])
+            return [] if i < n else [_quote(f"C{i:04d}.PA", "PAR")]
+
+        return lookup
+
+    def test_writes_sorted_deduped_symbols_and_tolerates_a_small_residual(
+        self, midas_data_root, monkeypatch
+    ):
+        import engine.universes.index as ix_mod
+
+        rows = self._rows(500)
+
+        # Two ISINs answering the same symbol (a loyalty-share line that DOES
+        # resolve) collapse to one; one line answers nothing.
+        def lookup(isin: str) -> list[dict]:
+            i = int(isin[2:])
+            if i == 7:
+                return []
+            if i == 8:
+                return [_quote("C0006.PA", "PAR")]
+            return [_quote(f"C{i:04d}.PA", "PAR")]
+
+        self._install(monkeypatch, rows, lookup)
+        result = ix_mod.refresh_stoxx600()
+        assert result == sorted(set(result))
+        assert len(result) == 498
+        assert "C0007.PA" not in result
+        written = json.loads((get_config().universes_dir / "stoxx600.json").read_text())
+        assert written == result
+
+    def test_refuses_to_overwrite_when_the_vendor_lookup_is_down(
+        self, midas_data_root, monkeypatch
+    ):
+        """A rate limit that outlasts the retry schedule, or an outage, must
+        leave the committed file at its last known-good value rather than
+        shrink it to whatever trickled through."""
+        import engine.universes.index as ix_mod
+
+        fake_dir = get_config().universes_dir
+        fake_dir.mkdir(parents=True, exist_ok=True)
+        (fake_dir / "stoxx600.json").write_text(json.dumps(["KEEP.PA"]))
+
+        rows = self._rows(500)
+        unresolved_n = int(len(rows) * ix_mod.MAX_UNRESOLVED_ISIN_RATE) + 1
+        self._install(monkeypatch, rows, self._lookup_unresolving_first(unresolved_n))
+        with pytest.raises(RuntimeError, match="unresolved"):
+            ix_mod.refresh_stoxx600()
+        assert json.loads((fake_dir / "stoxx600.json").read_text()) == ["KEEP.PA"]
+
+    def test_control_the_unresolved_gate_can_pass(self, midas_data_root, monkeypatch):
+        """Falsifying control for the test above: one fewer unresolved line and
+        the same setup writes the file."""
+        import engine.universes.index as ix_mod
+
+        rows = self._rows(500)
+        unresolved_n = int(len(rows) * ix_mod.MAX_UNRESOLVED_ISIN_RATE)
+        self._install(monkeypatch, rows, self._lookup_unresolving_first(unresolved_n))
+        assert len(ix_mod.refresh_stoxx600()) == 500 - unresolved_n
+
+    def test_refuses_a_result_that_churns_the_committed_list(
+        self, midas_data_root, monkeypatch
+    ):
+        """The refresh commits to main unattended. A selection regression that
+        swaps ~200 names for their Frankfurt or US twins keeps the count near
+        600 and passes every other gate; only a comparison with the file being
+        overwritten can see it."""
+        import engine.universes.index as ix_mod
+
+        fake_dir = get_config().universes_dir
+        fake_dir.mkdir(parents=True, exist_ok=True)
+        previous = [f"C{i:04d}.PA" for i in range(500)]
+        (fake_dir / "stoxx600.json").write_text(json.dumps(previous))
+
+        rows = self._rows(500)
+        moved = int(500 * ix_mod.MAX_UNIVERSE_CHURN_RATE / 2) + 1  # add + remove
+
+        def lookup(isin: str) -> list[dict]:
+            i = int(isin[2:])
+            # The first `moved` lines resolve to a DIFFERENT symbol than the
+            # committed one: each is one added plus one removed, the count is
+            # unchanged, and every other gate passes.
+            prefix = "X" if i < moved else "C"
+            return [_quote(f"{prefix}{i:04d}.PA", "PAR")]
+
+        self._install(monkeypatch, rows, lookup)
+        monkeypatch.delenv(ix_mod._ACCEPT_CHURN_ENV, raising=False)
+        with pytest.raises(RuntimeError, match="refusing to overwrite"):
+            ix_mod.refresh_stoxx600()
+        assert json.loads((fake_dir / "stoxx600.json").read_text()) == previous
+
+        # "0" and "false" are refusals, not consent — engine.live_switch's
+        # convention, which a bare truthiness test would have inverted.
+        for value in ("0", "false"):
+            monkeypatch.setenv(ix_mod._ACCEPT_CHURN_ENV, value)
+            with pytest.raises(RuntimeError, match="refusing to overwrite"):
+                ix_mod.refresh_stoxx600()
+        # Control: the documented override, set by a human on a deliberate
+        # rebuild, lets the same result through.
+        monkeypatch.setenv(ix_mod._ACCEPT_CHURN_ENV, "1")
+        result = ix_mod.refresh_stoxx600()
+        assert json.loads((fake_dir / "stoxx600.json").read_text()) == result
+        assert len(result) == 500
+
+    def test_control_a_rebalance_sized_change_passes_the_churn_gate(
+        self, midas_data_root, monkeypatch
+    ):
+        import engine.universes.index as ix_mod
+
+        fake_dir = get_config().universes_dir
+        fake_dir.mkdir(parents=True, exist_ok=True)
+        previous = [f"C{i:04d}.PA" for i in range(500)]
+        (fake_dir / "stoxx600.json").write_text(json.dumps(previous))
+        # 10 names leave, 10 arrive: a quarter's rebalance, 4% churn.
+        rows = self._rows(510)[10:]
+        self._install(
+            monkeypatch,
+            rows,
+            lambda isin: [_quote(f"C{int(isin[2:]):04d}.PA", "PAR")],
+        )
+        monkeypatch.delenv(ix_mod._ACCEPT_CHURN_ENV, raising=False)
+        assert len(ix_mod.refresh_stoxx600()) == 500
+
+    def test_missing_committed_file_fails_fast_instead_of_crawling(
+        self, midas_data_root, monkeypatch
+    ):
+        """The other indexes fall back to a 15 s page fetch; this one would
+        fall back to a seven-minute vendor crawl on the session path."""
+        import engine.universes.index as ix_mod
+
+        def boom(*a, **kw):
+            raise AssertionError("network must not be called")
+
+        monkeypatch.setattr(ix_mod, "_fetch_stoxx600_constituents", boom)
+        monkeypatch.setattr(ix_mod, "_search_isin_quotes", boom)
+        with pytest.raises(FileNotFoundError, match="refresh_universes"):
+            ix_mod.get_stoxx600_tickers()
+
+    def test_no_network_call_when_file_exists(self, midas_data_root, monkeypatch):
+        import engine.universes.index as ix_mod
+
+        fake_dir = get_config().universes_dir
+        fake_dir.mkdir(parents=True, exist_ok=True)
+        (fake_dir / "stoxx600.json").write_text(json.dumps(["AI.PA"]))
+
+        def boom(*a, **kw):
+            raise AssertionError("network must not be called when data file exists")
+
+        monkeypatch.setattr(ix_mod, "_fetch_stoxx600_constituents", boom)
+        monkeypatch.setattr(ix_mod, "_search_isin_quotes", boom)
+        assert ix_mod.get_stoxx600_tickers() == ["AI.PA"]
