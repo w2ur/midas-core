@@ -143,21 +143,32 @@ class TestEUIndices:
         for t in tickers:
             assert t.endswith(".L"), f"{t!r} missing .L suffix"
 
-    def test_ftse100_carries_no_dotted_share_class(self):
-        """Regression: the committed universe listed BT Group as "BT.A.L".
+    def test_no_committed_universe_carries_a_dotted_share_class(self):
+        """Regression: the committed universes listed BT Group as "BT.A.L".
 
         `test_ftse100_all_lse_suffix` above passes on "BT.A.L" — it ends in
         ".L" — which is why it never caught this. Yahoo spells an LSE share
         class with a dash, so the symbol resolved to nothing: no OHLCV file in
         the committed store and an `unknown`/`null`-currency row in
-        `data/tickers.json`, while `stoxx600.json` (ISIN-resolved) carried
-        "BT-A.L" correctly the whole time. A dot anywhere but the final ".L"
-        is the signature.
-        """
-        from engine.universes.index import get_ftse100_tickers
+        `data/tickers.json`. A dot anywhere but the final suffix is the
+        signature.
 
-        for t in get_ftse100_tickers():
-            assert t.count(".") == 1, f"{t!r} has a dotted share class"
+        Both `.L`-bearing universes are checked, not just the one the scraper
+        broke. `examples/demo-desk/data/universes/` is a second committed copy
+        that no manifest compares against live, and it was carrying the bad
+        spelling in *both* files — the FTSE 100 one from the same scraper bug,
+        the STOXX 600 one frozen from before the ISIN resolver landed. A guard
+        that reads whatever `MIDAS_DATA_DIR` points at covers both copies; one
+        pinned to a single universe covers neither reliably.
+        """
+        from engine.universes.index import (
+            get_ftse100_tickers,
+            get_stoxx600_tickers,
+        )
+
+        for resolver in (get_ftse100_tickers, get_stoxx600_tickers):
+            for t in resolver():
+                assert t.count(".") <= 1, f"{t!r} has a dotted share class"
 
     def test_stoxx600_committed(self):
         from engine.universes.index import get_stoxx600_tickers
