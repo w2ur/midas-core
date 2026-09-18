@@ -140,7 +140,12 @@ def get_dow30_tickers() -> list[str]:
 
 def refresh_dow30() -> list[str]:
     """Re-fetch Dow 30 from Wikipedia and overwrite the committed file."""
-    url = "https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average"
+    # 2026-09-18: Wikipedia split the Components table OUT of the index
+    # article, which now carries no constituents table at all — so
+    # `_largest_table_with_column(tables, "Symbol")` returned None and the
+    # weekly refresh-universes run was red every Monday from 2026-08-17
+    # ("Dow 30: no 'Symbol' column on Wikipedia page", issue #47).
+    url = "https://en.wikipedia.org/wiki/List_of_Dow_Jones_Industrial_Average_companies"
     tables = _fetch_html_tables(url)
     table = _largest_table_with_column(tables, "Symbol")
     if table is None:

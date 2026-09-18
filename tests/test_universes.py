@@ -242,6 +242,38 @@ class TestRefreshFunctions:
         result = ix_mod.refresh_nasdaq100()
         assert result == sorted(fresh)
 
+    def test_refresh_dow30_reads_the_split_out_list_page(
+        self, midas_data_root, monkeypatch
+    ):
+        """Regression: Wikipedia split the Components table out of the index
+        article (2026-09-18 fix). The article
+        `Dow_Jones_Industrial_Average` now has no constituents table at all,
+        so `_largest_table_with_column(tables, "Symbol")` returned None and
+        the weekly refresh-universes run was red on every Monday from
+        2026-08-17 to 09-14 with `Dow 30: no 'Symbol' column on Wikipedia
+        page` (issue #47, 3 recurrence comments).
+
+        This pins only the URL the code asks for. The detector for the NEXT
+        move is `scripts/refresh_universes.main()`'s non-zero exit feeding
+        `.github/actions/failure-issue`, plus the `len(tickers) < 20` layout
+        tripwire — not this test.
+        """
+        import engine.universes.index as ix_mod
+        import pandas as pd
+
+        fake_dir = get_config().universes_dir
+        fake_dir.mkdir(parents=True, exist_ok=True)
+        fresh = [f"D{i:02d}" for i in range(30)]
+
+        def fake_fetch(url):
+            assert "List_of_Dow_Jones_Industrial_Average_companies" in url, url
+            # The real page's largest Symbol table, plus the stray repeated
+            # header row the `!= "Symbol"` filter exists for.
+            return [pd.DataFrame({"Symbol": ["Symbol", *fresh]})]
+
+        monkeypatch.setattr(ix_mod, "_fetch_html_tables", fake_fetch)
+        assert ix_mod.refresh_dow30() == sorted(fresh)
+
     def test_refresh_nasdaq100_falls_back_to_ticker_column(
         self, midas_data_root, monkeypatch
     ):

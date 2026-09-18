@@ -5879,12 +5879,12 @@
     "currency": "EUR"
   },
   "SOL-EUR": {
-    "name": "Solana EUR",
+    "name": "Solana",
     "type": "crypto",
     "currency": "EUR"
   },
   "SOL-USD": {
-    "name": "Solana USD",
+    "name": "Solana",
     "type": "crypto",
     "currency": "USD"
   },
@@ -6650,7 +6650,7 @@
     "currency": "USD"
   },
   "UNI-USD": {
-    "name": "UNICORN Token USD",
+    "name": "Uniswap",
     "type": "crypto",
     "currency": "USD"
   },
@@ -6845,7 +6845,7 @@
     "currency": "USD"
   },
   "VMRK": {
-    "name": "Vivmark Residential",
+    "name": "AvalonBay Communities, Inc.",
     "type": "equity",
     "currency": "USD"
   },
@@ -7145,12 +7145,12 @@
     "currency": "USD"
   },
   "XLM-EUR": {
-    "name": "Stellar EUR",
+    "name": "Stellar",
     "type": "crypto",
     "currency": "EUR"
   },
   "XLM-USD": {
-    "name": "Stellar USD",
+    "name": "Stellar",
     "type": "crypto",
     "currency": "USD"
   },
@@ -7185,12 +7185,12 @@
     "currency": "USD"
   },
   "XRP-EUR": {
-    "name": "XRP EUR",
+    "name": "XRP",
     "type": "crypto",
     "currency": "EUR"
   },
   "XRP-USD": {
-    "name": "XRP USD",
+    "name": "XRP",
     "type": "crypto",
     "currency": "USD"
   },
