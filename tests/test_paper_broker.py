@@ -1439,3 +1439,133 @@ class TestValuationUnavailable:
         append_order(TRADE_DATE, _make_order("o1", "a1", "BUY", "AAPL", 1.0, "EUR"))
         fills = fill_day(TRADE_DATE, pm)
         assert [f.reason for f in fills] == ["VALUATION_UNAVAILABLE"]
+
+
+# ---------------------------------------------------------------------------
+# Denied tickers — the broker-side PRIIPs rail (J6 money review round 1, I3)
+# ---------------------------------------------------------------------------
+
+
+class TestDeniedTickers:
+    """Regression: c74f7e062 — J6 money review round 1, I3. The Manager's
+    `policy.blocklist` (SH, PSQ and the other PRIIPs-blocked US ETFs) was
+    prose only: the broker never read it, and with `prose_override` set it
+    was not even rendered, so `{"ticker": "SH", "action": "BUY"}` filled into
+    the book the desk treats as real-money-bound. `safety.denied_tickers` is
+    the rail: the broker refuses a BUY of a denied ticker on every path that
+    can open a position. A SELL is never refused by it — a deny-list that
+    trapped a position already held would turn a safety rail into a loss."""
+
+    def test_a_buy_of_a_denied_ticker_is_refused(self, broker_env):
+        from engine.paper_broker import fill_day
+
+        _seed_ohlcv(broker_env["ohlcv"], "SH", [("2026-04-17", 40.0)])
+        _write_config(broker_env["config_dir"], "agent1", denied_tickers=["SH", "PSQ"])
+        pm = _init_portfolio(broker_env["pm_base"], "agent1", cash=10_000.0)
+        append_order(TRADE_DATE, _make_order("ord_sh", "agent1", "BUY", "SH", 5))
+
+        fills = fill_day(TRADE_DATE, pm)
+        assert fills[0].status == "rejected"
+        assert fills[0].reason == "TICKER_DENIED"
+        assert pm.load("agent1").positions == []
+
+    def test_an_agent_without_a_deny_list_still_buys_it(self, broker_env):
+        # Control: the same order fills when nothing denies it, so the refusal
+        # above is the rail and not the fixture.
+        from engine.paper_broker import fill_day
+
+        _seed_ohlcv(broker_env["ohlcv"], "SH", [("2026-04-17", 40.0)])
+        _write_config(broker_env["config_dir"], "agent1")
+        pm = _init_portfolio(broker_env["pm_base"], "agent1", cash=10_000.0)
+        append_order(TRADE_DATE, _make_order("ord_sh", "agent1", "BUY", "SH", 5))
+
+        assert fill_day(TRADE_DATE, pm)[0].status == "filled"
+
+    def test_a_sell_of_a_denied_ticker_already_held_still_fills(self, broker_env):
+        from engine.paper_broker import fill_day
+
+        _seed_ohlcv(broker_env["ohlcv"], "SH", [("2026-04-16", 40.0), ("2026-04-17", 40.0)])
+        _write_config(broker_env["config_dir"], "agent1")
+        pm = _init_portfolio(broker_env["pm_base"], "agent1", cash=10_000.0)
+        append_order(date(2026, 4, 16), _make_order("ord_in", "agent1", "BUY", "SH", 5))
+        assert fill_day(date(2026, 4, 16), pm)[0].status == "filled"
+
+        _write_config(broker_env["config_dir"], "agent1", denied_tickers=["SH"])
+        append_order(TRADE_DATE, _make_order("ord_out", "agent1", "SELL", "SH", 5))
+        assert fill_day(TRADE_DATE, pm)[0].status == "filled"
+
+    def test_a_conditional_buy_of_a_denied_ticker_never_arms(self, broker_env):
+        from engine.orders import read_inbox
+        from engine.paper_broker import fill_day
+        from engine.triggers import list_pending
+
+        _seed_ohlcv(broker_env["ohlcv"], "SH", [("2026-04-17", 40.0)])
+        _write_config(broker_env["config_dir"], "agent1", denied_tickers=["SH"])
+        pm = _init_portfolio(broker_env["pm_base"], "agent1", cash=10_000.0)
+        order = _make_order("ord_trig", "agent1", "BUY", "SH", 5)
+        order.trigger = {"op": "<=", "level": 39.0}
+        order.expires = "2026-05-17"
+        append_order(TRADE_DATE, order)
+
+        fill_day(TRADE_DATE, pm)
+        assert [f.reason for f in read_inbox(TRADE_DATE)] == ["TICKER_DENIED"]
+        assert list_pending() == []
+
+    def test_a_fired_buy_of_a_denied_ticker_is_refused(self, broker_env):
+        # A trigger armed before the rail existed must not fill when it fires.
+        from engine.paper_broker import execute_triggered_order
+
+        _seed_ohlcv(broker_env["ohlcv"], "SH", [("2026-04-17", 40.0)])
+        _write_config(broker_env["config_dir"], "agent1", denied_tickers=["SH"])
+        pm = _init_portfolio(broker_env["pm_base"], "agent1", cash=10_000.0)
+        order = _make_order("ord_fire", "agent1", "BUY", "SH", 5)
+        order.trigger = {"op": "<=", "level": 40.0}
+        order.expires = "2026-05-17"
+
+        fill = execute_triggered_order(order, TRADE_DATE, pm, fire_price=40.0)
+        assert fill is not None and fill.status == "rejected"
+        assert fill.reason == "TICKER_DENIED" and fill.trigger_fired
+        assert pm.load("agent1").positions == []
+
+    @pytest.mark.live_cast
+    def test_the_managers_buy_of_sh_is_refused_through_its_own_channel(self, broker_env):
+        """The review's missing test, on the LIVE roster's Manager rails and
+        the Manager's isolated channel — not a fixture's agent."""
+        from engine.orders import (
+            MANAGER_INBOX_DIR,
+            MANAGER_OUTBOX_DIR,
+            append_order as append,
+        )
+        from engine.paper_broker import fill_day
+        from engine.triggers import MANAGER_CANCELS_DIR, MANAGER_PENDING_DIR
+
+        for ticker in ("SH", "PSQ"):
+            _seed_ohlcv(broker_env["ohlcv"], ticker, [("2026-04-17", 40.0)])
+        pm = _init_portfolio(broker_env["pm_base"], "the-manager", cash=2000.0, currency="EUR")
+        for n, ticker in enumerate(("SH", "PSQ")):
+            append(
+                TRADE_DATE,
+                _make_order(f"ord_m{n}", "the-manager", "BUY", ticker, 1),
+                outbox_dir=MANAGER_OUTBOX_DIR,
+            )
+
+        fills = fill_day(
+            TRADE_DATE,
+            pm,
+            outbox_dir=MANAGER_OUTBOX_DIR,
+            inbox_dir=MANAGER_INBOX_DIR,
+            pending_dir=MANAGER_PENDING_DIR,
+            cancels_dir=MANAGER_CANCELS_DIR,
+        )
+        assert [(f.status, f.reason) for f in fills] == [("rejected", "TICKER_DENIED")] * 2
+
+    @pytest.mark.live_cast
+    def test_the_managers_rail_denies_every_ticker_its_policy_names(self, midas_data_root):
+        """One list, two readers: the prose the Manager reads and the rail the
+        broker enforces must not drift apart."""
+        from engine.config import get_config
+
+        manager = get_config().roster["the-manager"]
+        denied = set(manager.safety.denied_tickers)
+        assert {"SH", "PSQ"} <= denied
+        assert set(manager.allocator.blocklist) <= denied

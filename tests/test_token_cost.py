@@ -187,3 +187,112 @@ def test_resolve_model_id_reads_the_harness_alias_override(monkeypatch) -> None:
     assert token_cost.resolve_model_id(None) is None
     monkeypatch.delenv("ANTHROPIC_DEFAULT_HAIKU_MODEL", raising=False)
     assert token_cost.resolve_model_id("haiku") is None
+
+
+# ---------------------------------------------------------------------------
+# The release that answered, read from the session's subagent transcripts.
+# ---------------------------------------------------------------------------
+
+
+def _transcript(root: Path, session: str, agent: str, alias: str | None, models: list[str]) -> None:
+    """Write one subagent transcript the way Claude Code lays it out:
+    ``projects/<project>/<session>/subagents/agent-<id>.jsonl`` plus its
+    ``.meta.json``, whose ``model`` is the value the Task call passed."""
+    import json
+
+    sub = root / "projects" / "-home-user-midas" / session / "subagents"
+    sub.mkdir(parents=True, exist_ok=True)
+    meta = {"agentType": "general-purpose"}
+    if alias is not None:
+        meta["model"] = alias
+    (sub / f"agent-{agent}.meta.json").write_text(json.dumps(meta))
+    lines = [json.dumps({"type": "user", "message": {"role": "user"}})]
+    lines += [
+        json.dumps({"type": "assistant", "sessionId": session, "message": {"model": m}})
+        for m in models
+    ]
+    (sub / f"agent-{agent}.jsonl").write_text("\n".join(lines) + "\n")
+
+
+class TestTranscriptModelCapture:
+    """Regression: a760dceba — the dispatch ledger recorded `model_id` from ANTHROPIC_DEFAULT_<ALIAS>_MODEL,
+    a prediction made before the dispatch that is null in the cloud, where the
+    routine pins nothing — while each subagent transcript names the release
+    that actually answered (J6 spec review, Important #1). The totals now read
+    that observation back."""
+
+    SESSION = "sess-1"
+
+    @pytest.fixture
+    def transcripts(self, tmp_path, monkeypatch):
+        root = tmp_path / "claude-config"
+        monkeypatch.setattr(token_cost, "_TRANSCRIPT_ROOT", root)
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", self.SESSION)
+        monkeypatch.delenv("ANTHROPIC_DEFAULT_OPUS_MODEL", raising=False)
+        monkeypatch.delenv("ANTHROPIC_DEFAULT_SONNET_MODEL", raising=False)
+        reset_session_costs()
+        return root
+
+    def test_an_unpinned_alias_gets_the_id_its_transcripts_name(self, transcripts) -> None:
+        _transcript(transcripts, self.SESSION, "a1", "opus", ["claude-opus-5-5", "claude-opus-5-5"])
+        _transcript(transcripts, self.SESSION, "a2", "sonnet", ["claude-sonnet-5"])
+        record_dispatch("satoshi", "x" * 40, model="opus")
+        record_dispatch("the-oracle", "x" * 40, model="sonnet")
+        totals = session_cost_totals()
+        assert [r["model_id"] for r in totals["dispatches"]] == ["claude-opus-5-5", "claude-sonnet-5"]
+        assert totals["observed_model_ids"] == {
+            "opus": ["claude-opus-5-5"],
+            "sonnet": ["claude-sonnet-5"],
+        }
+
+    def test_without_transcripts_unknown_stays_unknown(self, transcripts) -> None:
+        # Control: the same dispatch with nothing to read records null.
+        record_dispatch("satoshi", "x" * 40, model="opus")
+        totals = session_cost_totals()
+        assert totals["dispatches"][0]["model_id"] is None
+        assert totals["observed_model_ids"] == {}
+
+    def test_an_alias_that_answered_as_two_releases_is_not_guessed(self, transcripts) -> None:
+        # The alias moved mid-session: which dispatch ran on which cannot be
+        # told from the alias, so no row claims either; both are listed.
+        _transcript(transcripts, self.SESSION, "a1", "opus", ["claude-opus-5"])
+        _transcript(transcripts, self.SESSION, "a2", "opus", ["claude-opus-5-5"])
+        record_dispatch("satoshi", "x" * 40, model="opus")
+        totals = session_cost_totals()
+        assert totals["dispatches"][0]["model_id"] is None
+        assert totals["observed_model_ids"] == {"opus": ["claude-opus-5", "claude-opus-5-5"]}
+
+    def test_another_sessions_transcripts_are_ignored(self, transcripts) -> None:
+        _transcript(transcripts, "an-earlier-session", "a1", "opus", ["claude-opus-4"])
+        record_dispatch("satoshi", "x" * 40, model="opus")
+        assert session_cost_totals()["dispatches"][0]["model_id"] is None
+
+    def test_synthetic_messages_and_uncalled_aliases_are_not_evidence(self, transcripts) -> None:
+        # "<synthetic>" is Claude Code's own placeholder, not a release; a
+        # transcript whose Task call named no model inherited one and says
+        # nothing about any alias.
+        _transcript(transcripts, self.SESSION, "a1", "opus", ["<synthetic>", "claude-opus-5-5"])
+        _transcript(transcripts, self.SESSION, "a2", None, ["claude-opus-4"])
+        record_dispatch("satoshi", "x" * 40, model="opus")
+        assert session_cost_totals()["observed_model_ids"] == {"opus": ["claude-opus-5-5"]}
+
+    def test_the_observation_beats_the_prediction(self, transcripts, monkeypatch) -> None:
+        monkeypatch.setenv("ANTHROPIC_DEFAULT_OPUS_MODEL", "claude-opus-pinned")
+        _transcript(transcripts, self.SESSION, "a1", "opus", ["claude-opus-5-5"])
+        record_dispatch("satoshi", "x" * 40, model="opus")
+        assert session_cost_totals()["dispatches"][0]["model_id"] == "claude-opus-5-5"
+
+    def test_an_unreadable_transcript_is_skipped_not_fatal(self, transcripts) -> None:
+        _transcript(transcripts, self.SESSION, "a1", "opus", ["claude-opus-5-5"])
+        sub = next(transcripts.glob("projects/*/*/subagents"))
+        (sub / "agent-a1.jsonl").write_text("{not json\n" + (sub / "agent-a1.jsonl").read_text())
+        (sub / "agent-bad.meta.json").write_text("{nope")
+        (sub / "agent-bad.jsonl").write_text("")
+        record_dispatch("satoshi", "x" * 40, model="opus")
+        assert session_cost_totals()["dispatches"][0]["model_id"] == "claude-opus-5-5"
+
+    def test_no_session_id_reads_nothing(self, transcripts, monkeypatch) -> None:
+        _transcript(transcripts, self.SESSION, "a1", "opus", ["claude-opus-5-5"])
+        monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+        record_dispatch("satoshi", "x" * 40, model="opus")
+        assert session_cost_totals()["dispatches"][0]["model_id"] is None

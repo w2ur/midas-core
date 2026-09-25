@@ -70,9 +70,9 @@ def assemble_output_bundle(
     proxy accumulated by the persona dispatch path). When None, the persisted
     ledger totals are read via `engine.token_cost.session_cost_totals`. Its
     `total_dispatches` counts prompt wraps (`wrap_persona_prompt` calls), not API
-    dispatches, and each row's `model_id` is what the environment pins the alias
-    to (null when unpinned), not the release that answered — see
-    `engine.token_cost`.
+    dispatches, and each row's `model_id` is the release the session's subagent
+    transcripts show for its alias when they show exactly one, else what the
+    environment pins the alias to, else null — see `engine.token_cost`.
     """
     agents = {}
     for aid in get_config().trading_roster:

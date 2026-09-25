@@ -84,6 +84,9 @@ def _isolated_session_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(
         tc, "_LEDGER_PATH", tmp_path / "session_state" / tc.LEDGER_FILENAME
     )
+    # And its model capture reads Claude Code's transcripts: from inside a
+    # Claude Code session the suite would otherwise read that session's own.
+    monkeypatch.setattr(tc, "_TRANSCRIPT_ROOT", tmp_path / "no-claude-transcripts")
 
 
 def _running_live_cast() -> bool:

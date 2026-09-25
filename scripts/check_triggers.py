@@ -89,6 +89,7 @@ from engine.leaderboard import build_leaderboard_rows as _build_leaderboard_rows
 from scripts.daily_session import (
     build_portfolio_summaries as _build_portfolio_summaries,
 )
+from scripts.landed_on_main import record_landed_on_main
 
 logger = logging.getLogger(__name__)
 
@@ -519,6 +520,9 @@ def _push_head(label: str) -> str:
     )
     if result.returncode == 0:
         logger.info("Committed + pushed %s.", label)
+        # The sha dispatch-session-integrity checks — recorded only here, where
+        # main took it (money review round 5, M-a).
+        record_landed_on_main(_PROJECT_ROOT)
         return COMMIT_OK
 
     logger.warning("Push failed for %s; retrying after git pull --rebase.", label)
@@ -536,6 +540,7 @@ def _push_head(label: str) -> str:
         )
         if retry.returncode == 0:
             logger.info("Committed + pushed %s after rebase.", label)
+            record_landed_on_main(_PROJECT_ROOT)
             return COMMIT_OK
         logger.warning("Retry push also failed for %s.", label)
 

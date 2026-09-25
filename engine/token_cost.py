@@ -28,13 +28,29 @@ The model is recorded per dispatch
 Each row carries the ``model`` the dispatch was made with (the persona's
 frontmatter alias, e.g. ``"opus"``) and ``model_id``. The personas follow
 floating aliases on purpose (decision D4, 2026-09-24), so the alias alone does
-not say which release wrote a record. ``model_id`` is NOT an observation of the
-release that answered: ``resolve_model_id`` reads what the harness's alias
-override (``ANTHROPIC_DEFAULT_<ALIAS>_MODEL``) pins in this process's
-environment, before the dispatch, and records ``None`` when nothing pins it —
-the expected value in the cloud. The real id is in the session transcript and
-is not captured yet (deferred 2026-09-25: it cannot be validated outside the
-cloud sandbox). Unknown is recorded as unknown, never guessed.
+not say which release wrote a record.
+
+``model_id`` has two sources, and the observation wins:
+
+- **Observed** (``transcript_model_ids``): Claude Code writes every subagent's
+  transcript to ``<config>/projects/<project>/<session id>/subagents/agent-*.jsonl``,
+  each assistant line naming the release that answered, beside an
+  ``agent-*.meta.json`` holding the ``model`` the Task call passed. When this
+  session's transcripts show exactly ONE release for an alias, every dispatch
+  on that alias records it. The totals also carry ``observed_model_ids`` —
+  alias to every release seen — so an alias that answered as two releases in
+  one session (the alias moved mid-session) is visible, and no row claims
+  either.
+- **Predicted** (``resolve_model_id``): what the harness's alias override
+  (``ANTHROPIC_DEFAULT_<ALIAS>_MODEL``) pins in this process's environment,
+  read before the dispatch. ``None`` when nothing pins it — the expected value
+  in the cloud, where the routine pins nothing.
+
+When neither answers, ``model_id`` is ``None``: unknown is recorded as unknown,
+never guessed. The transcript path was built and tested locally; whether the
+cloud sandbox writes those transcripts and exposes ``CLAUDE_CODE_SESSION_ID``
+to the orchestrator's Python is proven only by the first cloud session's
+bundle — a ``null`` there means it does not.
 
 ``total_dispatches`` counts ``wrap_persona_prompt`` calls — prompt wraps, not
 API dispatches. They are equal when the orchestrator follows the prompt; a
@@ -197,6 +213,59 @@ def record_dispatch(agent_id: str, prompt: str, model: str | None = None) -> int
     return est
 
 
+#: Test override for Claude Code's config directory (the transcripts' root).
+#: ``None`` resolves it at call time: ``$CLAUDE_CONFIG_DIR``, else ``~/.claude``.
+#: The suite points it at an empty tmp directory, so a test run from inside a
+#: Claude Code session never reads that session's real transcripts.
+_TRANSCRIPT_ROOT: Path | None = None
+
+#: Claude Code's placeholder for a message no model wrote.
+_SYNTHETIC_MODEL = "<synthetic>"
+
+
+def _transcript_root() -> Path:
+    if _TRANSCRIPT_ROOT is not None:
+        return Path(_TRANSCRIPT_ROOT)
+    configured = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(configured) if configured else Path.home() / ".claude"
+
+
+def transcript_model_ids() -> dict[str, list[str]]:
+    """Map each alias this session dispatched on to the releases that answered.
+
+    Reads this session's subagent transcripts only (``CLAUDE_CODE_SESSION_ID``;
+    none set, nothing read). A transcript whose Task call named no model
+    inherited one and is not evidence about any alias. Unreadable files and
+    lines are skipped: a visibility record must never cost the session.
+    """
+    session = os.environ.get("CLAUDE_CODE_SESSION_ID")
+    if not session:
+        return {}
+    observed: dict[str, set[str]] = {}
+    for transcript in sorted(
+        _transcript_root().glob(f"projects/*/{session}/subagents/agent-*.jsonl")
+    ):
+        try:
+            meta = json.loads(
+                transcript.with_suffix(".meta.json").read_text(encoding="utf-8")
+            )
+            lines = transcript.read_text(encoding="utf-8").splitlines()
+        except (OSError, json.JSONDecodeError):
+            continue
+        alias = meta.get("model") if isinstance(meta, dict) else None
+        if not isinstance(alias, str) or not alias:
+            continue
+        for line in lines:
+            try:
+                entry = json.loads(line)
+                model = entry["message"]["model"] if entry.get("type") == "assistant" else None
+            except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
+                continue
+            if isinstance(model, str) and model and model != _SYNTHETIC_MODEL:
+                observed.setdefault(alias, set()).add(model)
+    return {alias: sorted(ids) for alias, ids in sorted(observed.items())}
+
+
 def _load_ledger() -> SessionCostLedger:
     ledger = SessionCostLedger()
     path = _ledger_path()
@@ -226,8 +295,20 @@ def _load_ledger() -> SessionCostLedger:
 
 
 def session_cost_totals() -> dict:
-    """Return the session totals block, rebuilt from the persisted ledger."""
-    return _load_ledger().totals()
+    """Return the session totals block, rebuilt from the persisted ledger.
+
+    Each dispatch's ``model_id`` is the release its transcripts show when they
+    show exactly one for its alias (see the module docstring); the block also
+    carries ``observed_model_ids``, everything the transcripts showed.
+    """
+    totals = _load_ledger().totals()
+    observed = transcript_model_ids()
+    for row in totals["dispatches"]:
+        seen = observed.get(row.get("model") or "")
+        if seen and len(seen) == 1:
+            row["model_id"] = seen[0]
+    totals["observed_model_ids"] = observed
+    return totals
 
 
 def reset_session_costs() -> None:

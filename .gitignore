@@ -11,3 +11,6 @@ data/cache/
 # Per-agent memory and local Claude Code settings — never committed
 .claude/
 uv.lock
+
+# Required by the mirrored engine (scripts/sync_core.py CORE_REQUIRED_IGNORES)
+data/session_state/

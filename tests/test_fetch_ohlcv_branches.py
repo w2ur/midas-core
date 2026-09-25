@@ -1351,3 +1351,65 @@ class TestVendorWideHoleNeedsAPopulation:
         monkeypatch.setattr(fo, "_fetch_symbol", fake)
         monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
         assert _run_main(monkeypatch, ["--symbols", ",".join(covered)]) == 0
+
+
+class TestExchangeWideHole:
+    """Regression: b4d562949 — J6 money review round 2, N4. MAX_HOLE_RATE is taken over
+    every covered symbol (~1,320), so the vendor serving every `.PA` name (82)
+    or every `.DE` name (83) with no close for D-1 read ~6% and exited 0 — the
+    CAC and DAX books, and the Manager's DSP5.PA/BX4.PA hedges, priced a day
+    stale that evening. The same rate, with the same population floor, is now
+    also taken per exchange suffix."""
+
+    def _run(self, monkeypatch, us: int, exchange: str, listed: int, holed: int) -> int:
+        covered = [f"US{i}" for i in range(us)] + [f"EU{i}{exchange}" for i in range(listed)]
+        _cover(covered)
+        d = _fetch_end().isoformat()
+        nan = float("nan")
+        eu_holed = {f"EU{i}{exchange}" for i in range(holed)}
+        frames = {
+            s: {d: [1, 2, 0.5, nan, nan, 100] if s in eu_holed else [1, 2, 0.5, 1.5, 1.5, 100]}
+            for s in covered
+        }
+        monkeypatch.setattr(fo, "_fetch_symbol", _make_fake_fetch_symbol(frames))
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+        return _run_main(monkeypatch, ["--symbols", ",".join(covered)])
+
+    def test_a_hole_across_one_exchange_fails_the_run(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        # 20 of 220 covered symbols is 9.1%: under the aggregate limit.
+        rc = self._run(monkeypatch, us=200, exchange=".PA", listed=20, holed=20)
+        assert rc == fo.EXIT_VENDOR_OUTAGE
+        err = capsys.readouterr().err
+        assert "exchange-wide hole" in err and ".PA" in err
+        assert _fetch_end().isoformat() in err
+
+    def test_an_exchange_below_the_floor_is_not_measured(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Control: 19 names is below MIN_HOLE_POPULATION, as for the aggregate.
+        n = fo.MIN_HOLE_POPULATION - 1
+        assert self._run(monkeypatch, us=200, exchange=".VI", listed=n, holed=n) == 0
+
+    def test_a_few_chronic_names_on_one_exchange_do_not_fire(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Control: exactly 10% of an exchange is not over the rate. The 17
+        # UCITS ETFs the vendor serves a day late sit at 3-6% per exchange.
+        assert self._run(monkeypatch, us=200, exchange=".PA", listed=20, holed=2) == 0
+
+
+def test_exchange_of_reads_the_yahoo_suffix() -> None:
+    assert fo.exchange_of("AIR.PA") == ".PA"
+    assert fo.exchange_of("BT.A.L") == ".L"  # the last dot is the exchange
+    # No suffix: US listings, crypto pairs and FX share one bucket.
+    assert fo.exchange_of("AAPL") == ""
+    assert fo.exchange_of("BTC-EUR") == ""
+    assert fo.exchange_of("EURUSD=X") == ""
+
+
+def test_exchange_wide_holes_applies_the_rate_and_floor_per_exchange() -> None:
+    holes = {".PA": {"2026-09-22": 20}, ".VI": {"2026-09-22": 10}, "": {"2026-09-22": 3}}
+    covered = {".PA": 82, ".VI": 10, "": 600}
+    assert fo.exchange_wide_holes(holes, covered) == {".PA": {"2026-09-22": 20}}

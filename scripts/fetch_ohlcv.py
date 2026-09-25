@@ -256,6 +256,38 @@ def vendor_wide_holes(
     }
 
 
+def exchange_of(symbol: str) -> str:
+    """The Yahoo exchange suffix of ``symbol`` (``".PA"``), or ``""`` for none.
+
+    The suffix is what follows the LAST dot (``BT.A.L`` lists on ``.L``). US
+    listings, crypto pairs (``BTC-EUR``) and FX (``EURUSD=X``) carry no
+    exchange suffix and share the ``""`` bucket.
+    """
+    head, dot, tail = symbol.rpartition(".")
+    return f".{tail}" if dot and head and tail else ""
+
+
+def exchange_wide_holes(
+    holes_by_exchange: dict[str, dict[str, int]],
+    covered_by_exchange: dict[str, int],
+) -> dict[str, dict[str, int]]:
+    """``vendor_wide_holes`` taken per exchange suffix: the same rate, the same
+    population floor, over each exchange's own covered symbols.
+
+    J6 money review round 2, N4: over the whole universe (~1,320 covered
+    symbols) a hole across every `.PA` (82) or `.DE` (83) name reads ~6%,
+    under MAX_HOLE_RATE, and the run exited 0 while those books priced a day
+    stale. The 17 UCITS ETFs the vendor serves a day late (round 1, I4) sit at
+    3-6% of their exchange, so they stay under the rate here too.
+    """
+    wide: dict[str, dict[str, int]] = {}
+    for exchange, holes in sorted(holes_by_exchange.items()):
+        found = vendor_wide_holes(holes, covered_by_exchange.get(exchange, 0))
+        if found:
+            wide[exchange] = found
+    return wide
+
+
 #: Deliberate non-zero exits. Distinct from 1 on purpose: 1 is what an
 #: unhandled traceback exits with, and the workflow must be able to tell "I
 #: refused this data, commit the rest and go red" from "I crashed at symbol 500
@@ -832,6 +864,9 @@ def main() -> int:
     # healthy, and dropping them collapses the denominator.
     considered_covered = 0
     holes_by_date: dict[str, int] = {}
+    # The same two counts per exchange suffix, for `exchange_wide_holes`.
+    covered_by_exchange: dict[str, int] = {}
+    holes_by_exchange: dict[str, dict[str, int]] = {}
     covered_failures = 0
     unresolved: list[str] = []
     served = 0
@@ -876,6 +911,8 @@ def main() -> int:
                     # also Saturday, asks for them.
                     if path.exists():
                         considered_covered += 1
+                        ex = exchange_of(symbol)
+                        covered_by_exchange[ex] = covered_by_exchange.get(ex, 0) + 1
                     continue  # OHLCV already up to date; still refresh name
                 start = window_start
                 if revise_days and last is not None:
@@ -887,6 +924,8 @@ def main() -> int:
             covered = path.exists()
             if covered:
                 considered_covered += 1
+                ex = exchange_of(symbol)
+                covered_by_exchange[ex] = covered_by_exchange.get(ex, 0) + 1
 
             # A FIRST ingest is scaled by whatever the vendor says the symbol
             # quotes in, not by the suffix heuristic: the registry (currency
@@ -990,6 +1029,8 @@ def main() -> int:
                     # This script never stores it, so it is never a hole.
                     if hole <= end.isoformat():
                         holes_by_date[hole] = holes_by_date.get(hole, 0) + 1
+                        by_date = holes_by_exchange.setdefault(exchange_of(symbol), {})
+                        by_date[hole] = by_date.get(hole, 0) + 1
                 if i % 25 == 0 or n > 0 or r > 0 or q > 0:
                     suffix = f", !{q} quarantined" if q else ""
                     print(
@@ -1121,6 +1162,30 @@ def main() -> int:
                 f"{MAX_HOLE_RATE:.0%}). The store did not advance for that date; "
                 "a session tonight prices those books a day stale. Retry with "
                 "`--resweep` over a longer window before the session.",
+                file=sys.stderr,
+            )
+            return EXIT_VENDOR_OUTAGE
+
+        # The same hole confined to one exchange (money review round 2, N4):
+        # every `.PA` name is ~6% of the universe, under the rate above, and
+        # its books price a day stale just the same.
+        by_exchange = exchange_wide_holes(holes_by_exchange, covered_by_exchange)
+        if by_exchange:
+            listed = "; ".join(
+                f"{ex or '(no suffix)'}: "
+                + ", ".join(
+                    f"{d} ({n} of {covered_by_exchange[ex]} symbols)"
+                    for d, n in holes.items()
+                )
+                for ex, holes in by_exchange.items()
+            )
+            print(
+                f"\nFAILED: exchange-wide hole — {listed} came back with no "
+                f"close (limit {MAX_HOLE_RATE:.0%} of an exchange's covered "
+                "symbols). The store did not advance for that date on that "
+                "exchange; a session tonight prices its books a day stale. "
+                "Retry with `--resweep` over a longer window before the "
+                "session.",
                 file=sys.stderr,
             )
             return EXIT_VENDOR_OUTAGE

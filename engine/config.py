@@ -50,6 +50,9 @@ class SafetyRails:
     max_orders_per_day: int = 5
     daily_drawdown_halt_pct: float = -5.0
     allowed_universe: tuple[str, ...] = ()
+    # Tickers this agent may never BUY (the broker refuses TICKER_DENIED); a
+    # SELL of one already held still fills. The Manager's is its PRIIPs list.
+    denied_tickers: tuple[str, ...] = ()
     dry_run: bool = False
 
 
@@ -103,8 +106,9 @@ class AllocatorSpec:
     outcome_memory_other_max: int = 3
     baseline: BaselineSpec = field(default_factory=BaselineSpec)
     risk_budget: RiskBudget = field(default_factory=RiskBudget)
-    # Prompt-only: rendered by manager_context.render_policy_prose when there is
-    # no prose_override. The broker does not enforce it (see roster.yaml).
+    # The prose side: rendered by manager_context.render_policy_prose when
+    # there is no prose_override. The broker enforces the same list through
+    # the allocator's `safety.denied_tickers` (see roster.yaml).
     blocklist: tuple[str, ...] = ()
     policy_prose_override: str | None = None
 
@@ -327,6 +331,7 @@ def _safety(raw: dict | None) -> SafetyRails:
         max_orders_per_day=int(raw.get("max_orders_per_day", 5)),
         daily_drawdown_halt_pct=float(raw.get("daily_drawdown_halt_pct", -5.0)),
         allowed_universe=tuple(raw.get("allowed_universe", []) or []),
+        denied_tickers=tuple(raw.get("denied_tickers", []) or []),
         dry_run=bool(raw.get("dry_run", False)),
     )
 

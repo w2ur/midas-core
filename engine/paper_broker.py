@@ -11,6 +11,7 @@ Rejection reason codes:
 - MAX_ORDERS_PER_DAY: per-agent daily order cap exceeded
 - MAX_ORDER_NOTIONAL: order notional (base currency) > per-agent cap
 - TICKER_NOT_IN_UNIVERSE: allowed_universe is non-empty and ticker not in union
+- TICKER_DENIED: BUY of a ticker in the agent's denied_tickers (at intake for a conditional)
 - NO_PRICE_DATA: no row in OHLCV store for ticker <= trade_date
 - CURRENCY_UNRESOLVED: ticker's quote currency is in neither map and its suffix is unknown
 - PRICE_IMPLAUSIBLE: fill price outside [1/5, 5]x its reference (prior close on BUY, avg_cost on SELL)
@@ -68,7 +69,7 @@ logger = logging.getLogger(__name__)
 #: The complete set of rejection/cancel reason codes this broker can emit.
 #: The module docstring above documents what each one means; `tests/test_reason_codes.py`
 #: asserts the three views (this set, the docstring, the emitted literals) agree.
-#: The watcher in `scripts/check_triggers.py` owns a twentieth code, TRIGGER_EXPIRED,
+#: The watcher in `scripts/check_triggers.py` owns a twenty-first code, TRIGGER_EXPIRED,
 #: which is deliberately NOT in this set — it is a different enforcement point.
 REJECTION_REASON_CODES = frozenset(
     {
@@ -76,6 +77,7 @@ REJECTION_REASON_CODES = frozenset(
         "MAX_ORDERS_PER_DAY",
         "MAX_ORDER_NOTIONAL",
         "TICKER_NOT_IN_UNIVERSE",
+        "TICKER_DENIED",
         "NO_PRICE_DATA",
         "CURRENCY_UNRESOLVED",
         "PRICE_IMPLAUSIBLE",
@@ -120,6 +122,7 @@ class AgentConfig:
     allowed_universe: list[str]
     dry_run: bool
     max_order_notional_pct: float | None = None
+    denied_tickers: frozenset[str] = frozenset()
 
     @classmethod
     def load(cls, agent_id: str) -> "AgentConfig":
@@ -139,6 +142,7 @@ class AgentConfig:
             max_orders_per_day=s.max_orders_per_day,
             daily_drawdown_halt_pct=s.daily_drawdown_halt_pct,
             allowed_universe=list(s.allowed_universe),
+            denied_tickers=frozenset(s.denied_tickers),
             dry_run=s.dry_run,
         )
 
@@ -340,6 +344,17 @@ def _reject(order_id: str, reason: str) -> Fill:
     )
 
 
+def _denied(order: Order, config: AgentConfig) -> bool:
+    """True when ``order`` would OPEN or ADD TO a position in a denied ticker.
+
+    Only a BUY is denied (J6 money review round 1, I3: the Manager's PRIIPs
+    blocklist was prose the broker never read). A SELL of a denied ticker
+    already held is an exit, and a rail that refused it would trap the
+    position it exists to keep out of the book.
+    """
+    return order.action == "BUY" and order.ticker in config.denied_tickers
+
+
 def _resolve_allowed_tickers(allowed_universe: list[str], agent_id: str) -> set[str]:
     """Resolve an agent's allowed_universe list to a set of tickers.
 
@@ -439,6 +454,9 @@ def _process_one(
 
     if allowed_tickers and order.ticker not in allowed_tickers:
         return _reject(order.order_id, "TICKER_NOT_IN_UNIVERSE")
+
+    if _denied(order, config):
+        return _reject(order.order_id, "TICKER_DENIED")
 
     # Asked before the price read, so the two failures stay distinguishable:
     # latest_price returns None both for "no row in the store" and for "no
@@ -626,6 +644,12 @@ def fill_day(
             _emit(_reject(o.order_id, "TRIGGER_LEVEL_IMPLAUSIBLE"))
             already_processed.add(o.order_id)
             continue
+        # Refused at intake, like an implausible level: a denied BUY must never
+        # become an armed instruction that fills weeks later.
+        if _denied(o, AgentConfig.load(o.agent_id)):
+            _emit(_reject(o.order_id, "TICKER_DENIED"))
+            already_processed.add(o.order_id)
+            continue
         save_pending(o, pending_dir=pending_dir)
         # No inbox record on successful registration — the agent sees it
         # next session in their "Active triggers" prompt section.
@@ -718,7 +742,7 @@ def _execute_triggered_order(
         level, not inside _process_one. A triggered fire that should be halted by
         drawdown will still fire here; the agent sees the fill in their inbox and
         can re-author cautiously next session. Revisit if this becomes a problem.
-        Does still respect MAX_ORDER_NOTIONAL, TICKER_NOT_IN_UNIVERSE, INSUFFICIENT_CASH,
+        Does still respect MAX_ORDER_NOTIONAL, TICKER_NOT_IN_UNIVERSE, TICKER_DENIED, INSUFFICIENT_CASH,
         NO_POSITION_TO_SELL, INSUFFICIENT_SHARES, NO_FX_RATE, APPLY_TRADE_FAILED.
 
     ``inbox_dir`` scopes the idempotency scan. Defaults to the public INBOX_DIR;
@@ -791,6 +815,12 @@ def _execute_triggered_order(
 
     if allowed_tickers and order.ticker not in allowed_tickers:
         f = _reject(order.order_id, "TICKER_NOT_IN_UNIVERSE")
+        f.trigger_fired = True
+        return f
+
+    # A trigger armed before its ticker was denied must not fill when it fires.
+    if _denied(order, config):
+        f = _reject(order.order_id, "TICKER_DENIED")
         f.trigger_fired = True
         return f
 

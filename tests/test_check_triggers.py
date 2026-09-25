@@ -1689,6 +1689,62 @@ class TestRefusedPushFallsBack:
         assert a.startswith(check_triggers.FALLBACK_BRANCH_PREFIX + "2026-05-17-local-")
 
 
+class TestALandedPushIsRecorded:
+    """J6 money review round 5, M-a: the watcher records the sha main took,
+    right after the push, so dispatch-session-integrity dispatches that and
+    never another writer's commit it rebased onto."""
+
+    def test_a_push_main_took_is_recorded_after_a_rebase(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        import subprocess as sp
+
+        from tests.test_watcher_ordering import _init_git_repo
+
+        from scripts import check_triggers as ct
+        from scripts.landed_on_main import LANDED_FILENAME
+
+        repo, bare = tmp_path / "repo", tmp_path / "bare.git"
+        _init_git_repo(repo, bare)
+        monkeypatch.setattr(ct, "_PROJECT_ROOT", repo)
+        monkeypatch.setattr(ct, "_fallback", None)
+        monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+        # Another writer lands first, so the first push is rejected and the
+        # rebase-and-retry is what lands this fire.
+        other = tmp_path / "other"
+        sp.run(["git", "clone", "-q", str(bare), str(other)], check=True)
+        sp.run(["git", "config", "user.email", "o@o"], cwd=other, check=True)
+        sp.run(["git", "config", "user.name", "o"], cwd=other, check=True)
+        sp.run(["git", "checkout", "-q", "-B", "main", "origin/main"], cwd=other, check=True)
+        (other / "other.txt").write_text("other\n")
+        sp.run(["git", "add", "other.txt"], cwd=other, check=True)
+        sp.run(["git", "commit", "-q", "-m", "other writer"], cwd=other, check=True)
+        sp.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=other, check=True)
+
+        (repo / "fill1.txt").write_text("fill 1\n")
+        assert (
+            ct._git_add_commit("ord_1", date(2026, 5, 17), [str(repo / "fill1.txt")])
+            == ct.COMMIT_OK
+        )
+        main = sp.run(
+            ["git", "rev-parse", "main"], cwd=bare, capture_output=True, text=True, check=True
+        ).stdout.strip()
+        assert (tmp_path / LANDED_FILENAME).read_text().strip() == main
+
+    def test_nothing_staged_records_nothing(self, tmp_path, monkeypatch) -> None:
+        from tests.test_watcher_ordering import _init_git_repo
+
+        from scripts import check_triggers as ct
+        from scripts.landed_on_main import LANDED_FILENAME
+
+        repo, bare = tmp_path / "repo", tmp_path / "bare.git"
+        _init_git_repo(repo, bare)
+        monkeypatch.setattr(ct, "_PROJECT_ROOT", repo)
+        monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+        assert ct._git_add_commit("ord_1", date(2026, 5, 17), [str(repo / "README.md")]) == ct.COMMIT_OK
+        assert not (tmp_path / LANDED_FILENAME).exists()
+
+
 class TestFallbackBranchAgainstRealGit:
     """The same fallback, driven through real git against a bare remote whose
     `pre-receive` hook refuses `refs/heads/main` — the GH006 shape exactly.
@@ -1768,6 +1824,25 @@ class TestFallbackBranchAgainstRealGit:
             text=True,
             check=True,
         ).stdout.strip()
+
+    def test_a_fire_main_refused_records_nothing_as_landed(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """J6 money review round 5, M-a: dispatch-session-integrity now
+        dispatches only what the run recorded as landed. A fire that went to
+        the branch landed nothing on main — auto-merge-session dispatches it
+        when it merges — so no record may exist."""
+        from scripts import check_triggers as ct
+        from scripts.landed_on_main import LANDED_FILENAME
+
+        repo, _bare = self._repos(tmp_path, monkeypatch)
+        monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+        (repo / "fill1.txt").write_text("fill 1\n")
+        assert (
+            ct._git_add_commit("ord_1", date(2026, 5, 17), [str(repo / "fill1.txt")])
+            == ct.PUSHED_FALLBACK
+        )
+        assert not (tmp_path / LANDED_FILENAME).exists()
 
     def test_two_fires_reach_the_branch_even_after_main_moves_underneath(
         self, tmp_path, monkeypatch
