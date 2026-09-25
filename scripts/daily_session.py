@@ -1610,7 +1610,9 @@ def concern_trailer(text: str) -> str | None:
     return f"Concerns: {flat}" if flat else None
 
 
-def step_commit_session(session_date: date, concerns: list[str] | None = None) -> None:
+def step_commit_session(
+    session_date: date, concerns: list[str] | str | None = None
+) -> None:
     """Step 10 — stage ``data/`` and make the session commit.
 
     The subject is fixed (``chore: weekday session <date>``) and each concern
@@ -1619,6 +1621,11 @@ def step_commit_session(session_date: date, concerns: list[str] | None = None) -
     plain strings and never types the commit command, so it cannot shape the
     message beyond them.
     """
+    # A bare string is ONE concern. Iterated as a list it becomes one trailer
+    # per character (money review round 3, M-B), and "pass your concern"
+    # with a single string is the natural slip.
+    if isinstance(concerns, str):
+        concerns = [concerns]
     subprocess.run(["git", "add", "data/"], cwd=_PROJECT_ROOT, check=True)
     args = ["git", "commit", "-m", f"chore: weekday session {session_date.isoformat()}"]
     for text in concerns or []:

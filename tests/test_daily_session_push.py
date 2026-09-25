@@ -234,3 +234,16 @@ class TestSessionCommitSanitisesConcerns:
         repo = self._repo(tmp_path, monkeypatch)
         daily_session.step_commit_session(date(2026, 9, 25))
         assert self._message(repo).strip() == "chore: weekday session 2026-09-25"
+
+    def test_a_bare_string_is_one_concern_not_one_per_letter(self, tmp_path, monkeypatch):
+        """Money review round 3, M-B: `concerns="one sentence"` iterated the
+        string and committed one `Concerns:` trailer per character."""
+        from datetime import date
+
+        repo = self._repo(tmp_path, monkeypatch)
+        daily_session.step_commit_session(date(2026, 9, 25), concerns="one sentence")
+        trailers = subprocess.run(
+            ["git", "log", "-1", "--format=%(trailers:key=Concerns,valueonly)"],
+            cwd=repo, capture_output=True, text=True, check=True,
+        ).stdout.split("\n")
+        assert [t for t in trailers if t] == ["one sentence"]
