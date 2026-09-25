@@ -79,8 +79,10 @@ def test_risk_budget_block_byte_identical():
 # --- Goldens: the EXACT pre-refactor output (module constants), captured
 # 2026-07-01 with the generator command in the module docstring.
 # One deliberate content change since, not a refactor: 2026-09-25 the PRIIPs
-# line blocks SH and PSQ and names the bearish-etfs-ucits substitutes
-# (METHODOLOGY #opus-alias-2026-09-23). The parity rule above still binds.
+# prose line also lists SH and PSQ among the funds it tells the Manager not to
+# buy, and names the bearish-etfs-ucits substitutes. Prompt text only — the
+# broker does not refuse these tickers (METHODOLOGY #opus-alias-2026-09-23).
+# The parity rule above still binds.
 EXPECTED_POLICY = """FEE AND TAX POLICY (French tax resident — these are GIVEN facts, not suggestions)
 
 TAX

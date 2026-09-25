@@ -482,6 +482,18 @@ disagrees with the bundle written minutes earlier.
 
 ## Phase 8 — Publish
 
+### Commit the session — `step_commit_session`
+
+**Reads:** the working tree and the driver's list of concerns. **Writes:** one
+commit. **On failure: fatal.**
+It stages the data tree and commits it under the fixed subject
+`chore: weekday session <date>`. Each concern the driver reports (a step that
+looked wrong, a helper that looked buggy) becomes one `Concerns:` trailer,
+flattened to a single line, so a model-driven session never types the commit
+command and cannot shape the message beyond its concerns. A downstream check can
+then read those trailers off the trunk.
+**Ordering:** after every artifact, immediately before the push.
+
 ### Commit and push — `step_git_commit_push`
 
 **Reads:** the working tree. **Writes:** a commit, and the remote.

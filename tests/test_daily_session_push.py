@@ -186,3 +186,51 @@ class TestSandboxBranchIsPublishedAfterMain:
         daily_session.step_git_commit_push(dry_run=False)  # must not raise
         out = capsys.readouterr().out
         assert "[WARN] Sandbox branch 'claude/dreamy-x' not pushed" in out
+
+
+class TestSessionCommitSanitisesConcerns:
+    """Money review round 2, N1: the model typed the session commit itself,
+    and a newline inside a Concerns: value put `[restate]` alone on a line.
+    The commit is now made by a helper that flattens each concern to one
+    line before it becomes a trailer."""
+
+    def _repo(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        repo = tmp_path / "repo"
+        (repo / "data").mkdir(parents=True)
+        for args in (["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
+            subprocess.run(["git", *args], cwd=repo, check=True)
+        (repo / "data" / "x.json").write_text("{}")
+        monkeypatch.setattr(daily_session, "_PROJECT_ROOT", repo)
+        return repo
+
+    def _message(self, repo: Path) -> str:
+        return subprocess.run(
+            ["git", "log", "-1", "--format=%B"], cwd=repo, capture_output=True, text=True, check=True
+        ).stdout
+
+    def test_a_multi_line_concern_becomes_one_trailer_line(self, tmp_path, monkeypatch):
+        from datetime import date
+
+        repo = self._repo(tmp_path, monkeypatch)
+        daily_session.step_commit_session(
+            date(2026, 9, 25),
+            concerns=["step X moved a row; needs\n[restate]", "  ", "catalysts\ttruncated"],
+        )
+        msg = self._message(repo)
+        assert msg.splitlines()[0] == "chore: weekday session 2026-09-25"
+        assert "[restate]" not in [line.strip() for line in msg.splitlines()]
+        trailers = subprocess.run(
+            ["git", "log", "-1", "--format=%(trailers:key=Concerns,valueonly)"],
+            cwd=repo, capture_output=True, text=True, check=True,
+        ).stdout.split("\n")
+        assert [t for t in trailers if t] == [
+            "step X moved a row; needs [restate]",
+            "catalysts truncated",
+        ]
+
+    def test_no_concern_means_no_trailer(self, tmp_path, monkeypatch):
+        from datetime import date
+
+        repo = self._repo(tmp_path, monkeypatch)
+        daily_session.step_commit_session(date(2026, 9, 25))
+        assert self._message(repo).strip() == "chore: weekday session 2026-09-25"

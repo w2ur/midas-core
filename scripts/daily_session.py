@@ -1597,6 +1597,37 @@ def step_build_tax_shadow() -> None:
     print(f"  Wrote {len(written)} tax shadow ledger(s).")
 
 
+def concern_trailer(text: str) -> str | None:
+    """One ``Concerns:`` trailer from model-written text, or None if empty.
+
+    Every run of whitespace, newlines included, becomes one space. A newline
+    inside a trailer value is how a session could place ``[restate]`` alone on
+    a line of its own commit (money review round 2, N1); flattened, the token
+    can only ever sit mid-line, which ``check_append_only`` never reads as a
+    declaration (and a session author cannot declare in any case).
+    """
+    flat = " ".join(text.split())
+    return f"Concerns: {flat}" if flat else None
+
+
+def step_commit_session(session_date: date, concerns: list[str] | None = None) -> None:
+    """Step 10 — stage ``data/`` and make the session commit.
+
+    The subject is fixed (``chore: weekday session <date>``) and each concern
+    the session reports becomes one ``Concerns:`` trailer, which
+    session-integrity files as an issue. The model passes its concerns as
+    plain strings and never types the commit command, so it cannot shape the
+    message beyond them.
+    """
+    subprocess.run(["git", "add", "data/"], cwd=_PROJECT_ROOT, check=True)
+    args = ["git", "commit", "-m", f"chore: weekday session {session_date.isoformat()}"]
+    for text in concerns or []:
+        trailer = concern_trailer(text)
+        if trailer is not None:
+            args += ["--trailer", trailer]
+    subprocess.run(args, cwd=_PROJECT_ROOT, check=True)
+
+
 SANDBOX_BRANCH_PREFIX = "claude/"
 
 
