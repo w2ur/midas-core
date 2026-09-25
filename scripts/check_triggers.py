@@ -462,6 +462,23 @@ def _push_to_fallback_branch(label: str) -> str:
     return PUSH_FAILED
 
 
+def _push_main() -> subprocess.CompletedProcess:
+    """`git push --porcelain origin HEAD:main`, stdout captured for
+    `record_landed_on_main` and echoed so the run log keeps it."""
+    result = subprocess.run(
+        ["git", "push", "--porcelain", "origin", "HEAD:main"],
+        cwd=_PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    # Echoed so the run log keeps what git said, as it did uncaptured.
+    if getattr(result, "stdout", None):
+        print(result.stdout, end="")
+    if getattr(result, "stderr", None):
+        print(result.stderr, end="", file=sys.stderr)
+    return result
+
+
 def _push_head(label: str) -> str:
     """Push HEAD to origin/main; on refusal, to the run's fallback branch.
 
@@ -514,15 +531,12 @@ def _push_head(label: str) -> str:
         )
         return _push_to_fallback_branch(label)
 
-    result = subprocess.run(
-        ["git", "push", "origin", "HEAD:main"],
-        cwd=_PROJECT_ROOT,
-    )
+    result = _push_main()
     if result.returncode == 0:
         logger.info("Committed + pushed %s.", label)
         # The sha dispatch-session-integrity checks — recorded only here, where
-        # main took it (money review round 5, M-a).
-        record_landed_on_main(_PROJECT_ROOT)
+        # main took it (money review round 5, M-a), and only if it moved.
+        record_landed_on_main(_PROJECT_ROOT, getattr(result, "stdout", None))
         return COMMIT_OK
 
     logger.warning("Push failed for %s; retrying after git pull --rebase.", label)
@@ -534,13 +548,13 @@ def _push_head(label: str) -> str:
         subprocess.run(["git", "rebase", "--abort"], cwd=_PROJECT_ROOT)
         logger.warning("Rebase failed for %s; aborted.", label)
     else:
-        retry = subprocess.run(
-            ["git", "push", "origin", "HEAD:main"],
-            cwd=_PROJECT_ROOT,
-        )
+        retry = _push_main()
         if retry.returncode == 0:
             logger.info("Committed + pushed %s after rebase.", label)
-            record_landed_on_main(_PROJECT_ROOT)
+            # A rebase that emptied this commit (the same change already
+            # upstream) pushes nothing and exits 0; the porcelain says so, and
+            # nothing is recorded (follow-up review r3, M2).
+            record_landed_on_main(_PROJECT_ROOT, getattr(retry, "stdout", None))
             return COMMIT_OK
         logger.warning("Retry push also failed for %s.", label)
 

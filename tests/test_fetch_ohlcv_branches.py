@@ -1385,19 +1385,20 @@ class TestExchangeWideHole:
         assert "exchange-wide hole" in err and ".PA" in err
         assert _fetch_end().isoformat() in err
 
-    def test_an_exchange_below_the_floor_needs_every_name_missing(
+    def test_an_exchange_below_the_floor_fires_on_a_majority(
         self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Below MIN_HOLE_POPULATION the rate is not taken; all but one of 19
-        # names late (95%) is still not a hole there — every one of them is.
+        # Below MIN_HOLE_POPULATION the 10% rate is not taken. All but one of
+        # 19 names late is a hole (it pinned the opposite until follow-up
+        # review r2, N1); fewer than half is not.
         n = fo.MIN_HOLE_POPULATION - 1
-        assert self._run(monkeypatch, us=200, exchange=".VI", listed=n, holed=n - 1) == 0
-        assert self._run(monkeypatch, us=200, exchange=".VI", listed=n, holed=n) == fo.EXIT_VENDOR_OUTAGE
+        assert self._run(monkeypatch, us=200, exchange=".VI", listed=n, holed=n - 1) == fo.EXIT_VENDOR_OUTAGE
+        assert self._run(monkeypatch, us=200, exchange=".IR", listed=n, holed=n // 2) == 0
 
     def test_a_bucket_of_a_few_names_is_never_measured(
         self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        n = fo.MIN_UNANIMOUS_POPULATION - 1
+        n = fo.MIN_SMALL_BUCKET_POPULATION - 1
         assert self._run(monkeypatch, us=200, exchange=".LS", listed=n, holed=n) == 0
 
     def _run_symbols(self, monkeypatch, covered: list[str], holed: set[str]) -> int:
@@ -1433,8 +1434,8 @@ class TestExchangeWideHole:
     def test_an_fx_hole_fails_although_fx_is_under_the_floor(
         self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
     ) -> None:
-        # Ten pairs is below MIN_HOLE_POPULATION: measured by the unanimity
-        # rule instead — every covered pair missing the same past date.
+        # Ten pairs is below MIN_HOLE_POPULATION: measured by the small-bucket
+        # rule instead — most covered pairs missing the same past date.
         us = [f"US{i}" for i in range(600)]
         rc = self._run_symbols(monkeypatch, us + self.FX, set(self.FX))
         assert rc == fo.EXIT_VENDOR_OUTAGE
@@ -1443,9 +1444,83 @@ class TestExchangeWideHole:
     def test_a_few_fx_pairs_late_do_not_fire(
         self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Control: under the floor, anything short of every pair is not a hole.
+        # Control, the observed Saturday shape (2026-08-15 run): 3 of 10 pairs
+        # without a close is not an FX hole.
         us = [f"US{i}" for i in range(600)]
-        assert self._run_symbols(monkeypatch, us + self.FX, set(self.FX[:9])) == 0
+        assert self._run_symbols(monkeypatch, us + self.FX, set(self.FX[:3])) == 0
+
+    # --- follow-up review r3, M5: an exchange that serves NOTHING ---------
+
+    def _run_empty(self, monkeypatch, us: int, exchange: str, listed: int, dark: int) -> int:
+        covered = [f"US{i}" for i in range(us)] + [f"EU{i}{exchange}" for i in range(listed)]
+        _cover(covered)
+        d = _fetch_end().isoformat()
+        dark_set = {f"EU{i}{exchange}" for i in range(dark)}
+        frames = {s: {d: [1, 2, 0.5, 1.5, 1.5, 100]} for s in covered if s not in dark_set}
+        monkeypatch.setattr(fo, "_fetch_symbol", _make_fake_fetch_symbol(frames))
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+        return _run_main(monkeypatch, ["--symbols", ",".join(covered)])
+
+    def test_an_exchange_that_serves_nothing_fails_the_run(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        """Regression: 3dc232816 — follow-up money review r3, M5. The per-exchange rule
+        counted only dates served with a NaN close. A vendor serving EMPTY
+        frames for every `.PA` name was only `covered_failures`, rated over
+        the whole universe (20 of 220 = 9.1% here, 74 of ~1,300 live), and the
+        run exited 0 while those books priced a day stale. A covered symbol
+        that served nothing lacks `end` just the same, so it counts there."""
+        rc = self._run_empty(monkeypatch, us=200, exchange=".PA", listed=20, dark=20)
+        assert rc == fo.EXIT_VENDOR_OUTAGE
+        assert ".PA" in capsys.readouterr().err
+
+    def test_one_dark_name_on_an_exchange_does_not_fire(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Control: a single delisted-looking name is routine.
+        assert self._run_empty(monkeypatch, us=200, exchange=".PA", listed=20, dark=1) == 0
+
+    def test_a_bank_holiday_on_one_exchange_stays_green(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """2026-08-31, UK Summer bank holiday: London was shut, Yahoo served no
+        row for it, and every `.L` frame carried only the day before (the
+        one-day revision window). A closed exchange is not a hole and not an
+        empty frame; this must stay green whatever the rule counts."""
+        end = _fetch_end()
+        before = (end - timedelta(days=1)).isoformat()
+        us = [f"US{i}" for i in range(200)]
+        ldn = [f"LN{i}.L" for i in range(40)]
+        for sym in ldn:
+            _write_raw(get_config().ohlcv_dir / f"{sym}.jsonl", [_tight_line(before, 1.5)])
+        _cover(us)
+        frames = {s: {end.isoformat(): [1, 2, 0.5, 1.5, 1.5, 100]} for s in us}
+        frames.update({s: {before: [1, 2, 0.5, 1.5, 1.5, 100]} for s in ldn})
+        monkeypatch.setattr(fo, "_fetch_symbol", _make_fake_fetch_symbol(frames))
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+        assert _run_main(monkeypatch, ["--symbols", ",".join(us + ldn)]) == 0
+
+    # --- follow-up review r2, N1: a near-total hole on a small exchange ---
+
+    def test_a_near_total_hole_on_a_small_exchange_fires(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Regression: cfafb84f1 — follow-up money review r2, N1. Below the 20-symbol
+        floor the rule needed EVERY covered name holed, and the real holes in
+        the logs were near-total, not total: `.WA` 17 of 18 on 2026-09-17 and
+        `.HE` 16 of 17 on 2026-09-22. One straggler hid the whole exchange."""
+        assert self._run(monkeypatch, us=200, exchange=".HE", listed=17, holed=16) == fo.EXIT_VENDOR_OUTAGE
+
+    def test_the_warsaw_shape_fires_too(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        assert self._run(monkeypatch, us=200, exchange=".WA", listed=18, holed=17) == fo.EXIT_VENDOR_OUTAGE
+
+    def test_the_worst_healthy_small_exchange_night_stays_green(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Control, the replay's worst healthy small-bucket night: `.WA` 2 of 18.
+        assert self._run(monkeypatch, us=200, exchange=".WA", listed=18, holed=2) == 0
 
     def test_a_few_chronic_names_on_one_exchange_do_not_fire(
         self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
@@ -1472,7 +1547,9 @@ def test_exchange_wide_holes_applies_the_rate_and_floor_per_exchange() -> None:
     holes = {".PA": {"2026-09-22": 20}, ".VI": {"2026-09-22": 9}, "": {"2026-09-22": 3},
              ".F": {"2026-09-22": 1}, "fx": {"2026-09-22": 10}}
     covered = {".PA": 82, ".VI": 10, "": 600, ".F": 1, "fx": 10}
-    # .VI: 9 of 10 is not all of them; .F: one name is below the unanimity floor.
+    # .VI: 9 of 10 is a majority; .F: one name is below the small-bucket floor.
     assert fo.exchange_wide_holes(holes, covered) == {
-        ".PA": {"2026-09-22": 20}, "fx": {"2026-09-22": 10},
+        ".PA": {"2026-09-22": 20}, ".VI": {"2026-09-22": 9}, "fx": {"2026-09-22": 10},
     }
+    # Exactly half is not over the share.
+    assert fo.exchange_wide_holes({".VI": {"2026-09-22": 5}}, {".VI": 10}) == {}

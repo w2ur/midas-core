@@ -18,6 +18,13 @@ succeeds, and the action dispatches that sha or nothing. The shell twin of
 push paths (`scripts/check_triggers._push_head`,
 `scripts/refresh_leaderboard._push_with_rebase_retry`) call this one.
 
+"Pushed" is read from git, not from the exit code (follow-up money review
+r3, M2): when another writer landed the very change this run committed, the
+rebase drops the now-empty commit and the retry push exits 0 with
+"Everything up-to-date" — HEAD is then the OTHER writer's commit. Every push
+path therefore runs `git push --porcelain` and records only when git reports
+main's ref moved (`landed_by_push`).
+
 The file is overwritten, not appended: a run that landed several commits
 (a watcher with several fires) dispatches its last one, which is the contract
 the action documents. `$RUNNER_TEMP` is per job and absent outside Actions; with
@@ -53,15 +60,30 @@ def landed_record_path() -> Path | None:
     return Path(runner_temp) / LANDED_FILENAME
 
 
-def record_landed_on_main(cwd: Path) -> str | None:
+#: `git push --porcelain` flags that mean the ref was written: a fast-forward,
+#: a new ref, a forced update. "=" is up to date, "!" rejected.
+_MOVED_FLAGS = (" ", "*", "+")
+
+
+def landed_by_push(porcelain: str | None) -> bool:
+    """True when `git push --porcelain … HEAD:main` output shows main moved."""
+    for line in (porcelain or "").splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 2 and parts[0] in _MOVED_FLAGS and parts[1].endswith(":refs/heads/main"):
+            return True
+    return False
+
+
+def record_landed_on_main(cwd: Path, porcelain: str | None) -> str | None:
     """Record HEAD of the repository at ``cwd`` as the commit this run landed.
 
-    Call it only right after `git push origin HEAD:main` succeeded — HEAD is
-    then exactly the commit main holds. Returns the sha recorded, or None when
-    nothing was written.
+    Call it right after `git push --porcelain origin HEAD:main` exited 0,
+    passing that push's stdout: HEAD is recorded only when the push moved
+    main, since only then is HEAD a commit this run put there. Returns the sha
+    recorded, or None when nothing was written.
     """
     path = landed_record_path()
-    if path is None:
+    if path is None or not landed_by_push(porcelain):
         return None
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=cwd, capture_output=True, text=True

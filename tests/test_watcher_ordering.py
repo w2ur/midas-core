@@ -642,7 +642,7 @@ class TestGitAddCommitIntegration:
         original_run2 = _real_subprocess.run
 
         def patched_run2(cmd, *args, **kwargs):
-            if cmd == ["git", "push", "origin", "HEAD:main"] and push_attempt[0] == 0:
+            if cmd[:2] == ["git", "push"] and cmd[-1] == "HEAD:main" and push_attempt[0] == 0:
                 push_attempt[0] += 1
 
                 class _FakeResult:

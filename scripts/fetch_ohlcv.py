@@ -257,14 +257,23 @@ def vendor_wide_holes(
     }
 
 
-#: Fewest covered symbols a bucket needs for the unanimity rule, used below
-#: MIN_HOLE_POPULATION: such a bucket is a hole only when EVERY covered member
-#: lacks the same date. Ten FX pairs and the small exchanges (`.VI` 10, `.IR`
-#: 6, `.LS` 5) sit under the rate's floor and were never measured; one or two
-#: late names in them is routine, all of them at once is not. Below 5 a whole
-#: bucket is a couple of names (`.F`, `.NYB`: 1 each), which says nothing
-#: about a vendor.
-MIN_UNANIMOUS_POPULATION = 5
+#: Fewest covered symbols a bucket needs for the small-bucket rule, used below
+#: MIN_HOLE_POPULATION: such a bucket is a hole when MORE THAN HALF of its
+#: covered members lack the same date (SMALL_BUCKET_HOLE_SHARE). Ten FX pairs
+#: and the small exchanges (`.VI`, `.IR`, `.LS`, `.WA`, `.HE`, `.BR` as
+#: fetched) sit under the rate's floor; there 10% is one or two names, which
+#: is routine. Below 5 a whole bucket is a couple of names (`.F`, `.NYB`: 1
+#: each), which says nothing about a vendor.
+MIN_SMALL_BUCKET_POPULATION = 5
+
+#: The share of a small bucket that must lack a date for it to be a hole.
+#: It was "every member" until follow-up money review r2, N1: the real holes
+#: in the logs were near-total, not total — `.WA` 17 of 18 on 2026-09-17 and
+#: `.HE` 16 of 17 on 2026-09-22 — so one straggler hid the whole exchange. A
+#: majority fires on both, and the worst healthy night in the 09-18..09-25
+#: replay was `.WA` 2 of 18 (11%); August's all-late small exchanges read as
+#: holes too, which they were (a day stale at session time).
+SMALL_BUCKET_HOLE_SHARE = 0.5
 
 
 def hole_bucket(symbol: str, crypto: frozenset[str] = frozenset()) -> str:
@@ -295,8 +304,12 @@ def exchange_wide_holes(
 ) -> dict[str, dict[str, int]]:
     """``vendor_wide_holes`` taken per `hole_bucket`: the same rate, the same
     population floor, over each bucket's own covered symbols — and, for a
-    bucket between MIN_UNANIMOUS_POPULATION and that floor, a hole only when
-    every covered member lacks the date.
+    bucket between MIN_SMALL_BUCKET_POPULATION and that floor, a hole when
+    more than SMALL_BUCKET_HOLE_SHARE of its covered members lack the date.
+
+    A covered symbol whose download came back EMPTY counts as lacking `end`
+    (the caller records it so): it did not advance either (follow-up review
+    r3, M5).
 
     J6 money review round 2, N4: over the whole universe (~1,320 covered
     symbols) a hole across every `.PA` (82) or `.DE` (83) name reads ~6%,
@@ -307,8 +320,12 @@ def exchange_wide_holes(
     wide: dict[str, dict[str, int]] = {}
     for exchange, holes in sorted(holes_by_exchange.items()):
         covered = covered_by_exchange.get(exchange, 0)
-        if MIN_UNANIMOUS_POPULATION <= covered < MIN_HOLE_POPULATION:
-            found = {d: n for d, n in sorted(holes.items()) if n >= covered}
+        if MIN_SMALL_BUCKET_POPULATION <= covered < MIN_HOLE_POPULATION:
+            found = {
+                d: n
+                for d, n in sorted(holes.items())
+                if n / covered > SMALL_BUCKET_HOLE_SHARE
+            }
         else:
             found = vendor_wide_holes(holes, covered)
         if found:
@@ -974,6 +991,17 @@ def main() -> int:
             if df is None:
                 if covered:
                     covered_failures += 1
+                    # A covered symbol that served NOTHING did not advance to
+                    # `end` either. The aggregate rates it as a failure, over
+                    # the whole universe; per bucket it is a hole on `end`,
+                    # or an exchange that went dark reads ~6% and passes
+                    # (follow-up money review r3, M5). A closed exchange is
+                    # not this: the one-day revision window re-requests the
+                    # last stored day, so a holiday still serves a frame.
+                    by_date = holes_by_exchange.setdefault(
+                        hole_bucket(symbol, crypto_bucket), {}
+                    )
+                    by_date[end.isoformat()] = by_date.get(end.isoformat(), 0) + 1
                 else:
                     unresolved.append(symbol)
             else:
@@ -1213,8 +1241,9 @@ def main() -> int:
             )
             print(
                 f"\nFAILED: exchange-wide hole — {listed} came back with no "
-                f"close (limit {MAX_HOLE_RATE:.0%} of an exchange's or asset "
-                "class's covered symbols, or all of a small one). The store "
+                f"close or served nothing (limit {MAX_HOLE_RATE:.0%} of an "
+                "exchange's or asset class's covered symbols, or more than "
+                f"{SMALL_BUCKET_HOLE_SHARE:.0%} of a small one). The store "
                 "did not advance for that date there; a session tonight "
                 "prices those books a day stale. "
                 "Retry with `--resweep` over a longer window before the "

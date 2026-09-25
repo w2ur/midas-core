@@ -1731,6 +1731,39 @@ class TestALandedPushIsRecorded:
         ).stdout.strip()
         assert (tmp_path / LANDED_FILENAME).read_text().strip() == main
 
+    def test_a_fire_the_rebase_empties_records_nothing(self, tmp_path, monkeypatch) -> None:
+        """Regression: 628cd9530 — follow-up money review r3, M2 — another writer landed
+        the same change, the rebase dropped this fire's commit, and the retry
+        push was an up-to-date no-op: nothing of this run reached main."""
+        import subprocess as sp
+
+        from tests.test_watcher_ordering import _init_git_repo
+
+        from scripts import check_triggers as ct
+        from scripts.landed_on_main import LANDED_FILENAME
+
+        repo, bare = tmp_path / "repo", tmp_path / "bare.git"
+        _init_git_repo(repo, bare)
+        monkeypatch.setattr(ct, "_PROJECT_ROOT", repo)
+        monkeypatch.setattr(ct, "_fallback", None)
+        monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+        other = tmp_path / "other"
+        sp.run(["git", "clone", "-q", str(bare), str(other)], check=True)
+        sp.run(["git", "config", "user.email", "o@o"], cwd=other, check=True)
+        sp.run(["git", "config", "user.name", "o"], cwd=other, check=True)
+        sp.run(["git", "checkout", "-q", "-B", "main", "origin/main"], cwd=other, check=True)
+        (other / "fill1.txt").write_text("fill 1\n")
+        sp.run(["git", "add", "fill1.txt"], cwd=other, check=True)
+        sp.run(["git", "commit", "-q", "-m", "same fill, other writer"], cwd=other, check=True)
+        sp.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=other, check=True)
+
+        (repo / "fill1.txt").write_text("fill 1\n")
+        assert (
+            ct._git_add_commit("ord_1", date(2026, 5, 17), [str(repo / "fill1.txt")])
+            == ct.COMMIT_OK
+        )
+        assert not (tmp_path / LANDED_FILENAME).exists()
+
     def test_nothing_staged_records_nothing(self, tmp_path, monkeypatch) -> None:
         from tests.test_watcher_ordering import _init_git_repo
 
