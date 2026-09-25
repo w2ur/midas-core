@@ -127,3 +127,62 @@ class TestStepGitCommitPushTargetsMain:
             "current sandbox branch so auto-merge-session.yml can take it "
             "the rest of the way to main."
         )
+
+
+def _sandbox_fake(calls: list[list[str]], branch: str, branch_push_rc: int = 0):
+    def fake_run(args, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append(list(args))
+        if args[:3] == ["git", "diff", "--cached"]:
+            return subprocess.CompletedProcess(args, returncode=0)
+        if args[:3] == ["git", "rev-list", "--count"]:
+            return subprocess.CompletedProcess(args, returncode=0, stdout="1\n")
+        if args[:2] == ["git", "rev-parse"] and "--abbrev-ref" in args:
+            return subprocess.CompletedProcess(args, returncode=0, stdout=f"{branch}\n")
+        if args[:4] == ["git", "push", "-u", "origin"]:
+            return subprocess.CompletedProcess(
+                args, returncode=branch_push_rc, stdout="", stderr="rejected\n"
+            )
+        return subprocess.CompletedProcess(args, returncode=0)
+
+    return fake_run
+
+
+class TestSandboxBranchIsPublishedAfterMain:
+    """Regression: on 2026-09-23 the cloud stop hook reported the sandbox
+    branch as unpushed after the session had landed on main, and the
+    orchestrator spent a turn pushing it by hand."""
+
+    def test_claude_branch_is_pushed_after_main(self, monkeypatch, capsys) -> None:
+        calls: list[list[str]] = []
+        monkeypatch.setattr(
+            daily_session.subprocess, "run", _sandbox_fake(calls, "claude/dreamy-x")
+        )
+        daily_session.step_git_commit_push(dry_run=False)
+        push_calls = [c for c in calls if c[:2] == ["git", "push"]]
+        # Main first, always: the sandbox branch is published only after it.
+        assert push_calls == [
+            ["git", "push", "origin", "HEAD:main"],
+            ["git", "push", "-u", "origin", "HEAD"],
+        ]
+        assert "Also pushed sandbox branch 'claude/dreamy-x'" in capsys.readouterr().out
+
+    def test_other_branch_is_left_alone(self, monkeypatch) -> None:
+        # Control: a local run on a feature branch pushes main and nothing else.
+        calls: list[list[str]] = []
+        monkeypatch.setattr(
+            daily_session.subprocess, "run", _sandbox_fake(calls, "feature/x")
+        )
+        daily_session.step_git_commit_push(dry_run=False)
+        push_calls = [c for c in calls if c[:2] == ["git", "push"]]
+        assert push_calls == [["git", "push", "origin", "HEAD:main"]]
+
+    def test_failed_branch_push_is_a_warning(self, monkeypatch, capsys) -> None:
+        calls: list[list[str]] = []
+        monkeypatch.setattr(
+            daily_session.subprocess,
+            "run",
+            _sandbox_fake(calls, "claude/dreamy-x", branch_push_rc=1),
+        )
+        daily_session.step_git_commit_push(dry_run=False)  # must not raise
+        out = capsys.readouterr().out
+        assert "[WARN] Sandbox branch 'claude/dreamy-x' not pushed" in out

@@ -223,6 +223,28 @@ def _crypto_symbols() -> list[str]:
 #: whole symbol list.
 MAX_FAILURE_RATE = 0.10
 
+#: Fraction of *already-covered* symbols that may lack the same date (served
+#: with no close) before that date is a vendor-wide hole rather than a few thin
+#: names. 2026-09-22: the vendor served SPY and most of the US universe with no
+#: close; the run wrote 84 new rows across 1,247 symbols, exited 0, and every
+#: equity book priced a day stale that evening. A holiday is not a hole: the
+#: vendor serves no row at all for a closed market, so it never lands here.
+MAX_HOLE_RATE = 0.10
+
+
+def vendor_wide_holes(
+    holes_by_date: dict[str, int], considered_covered: int
+) -> dict[str, int]:
+    """The dates missing from more than ``MAX_HOLE_RATE`` of covered symbols."""
+    if considered_covered <= 0:
+        return {}
+    return {
+        d: n
+        for d, n in sorted(holes_by_date.items())
+        if n / considered_covered > MAX_HOLE_RATE
+    }
+
+
 #: Deliberate non-zero exits. Distinct from 1 on purpose: 1 is what an
 #: unhandled traceback exits with, and the workflow must be able to tell "I
 #: refused this data, commit the rest and go red" from "I crashed at symbol 500
@@ -798,6 +820,7 @@ def main() -> int:
     # including those skipped as already-current: they are evidence the store is
     # healthy, and dropping them collapses the denominator.
     considered_covered = 0
+    holes_by_date: dict[str, int] = {}
     covered_failures = 0
     unresolved: list[str] = []
     served = 0
@@ -950,6 +973,8 @@ def main() -> int:
                     # Kept for the adjudication pass below, which needs the
                     # dates and ratios rather than the count.
                     refused_rows[symbol] = merged.refused
+                for hole in merged.holes:
+                    holes_by_date[hole] = holes_by_date.get(hole, 0) + 1
                 if i % 25 == 0 or n > 0 or r > 0 or q > 0:
                     suffix = f", !{q} quarantined" if q else ""
                     print(
@@ -1060,6 +1085,27 @@ def main() -> int:
                 "arrive is still committed, but the store is incomplete; a "
                 "session running against it tonight would price some books at "
                 "stale closes.",
+                file=sys.stderr,
+            )
+            return EXIT_VENDOR_OUTAGE
+
+    # A vendor-wide hole: symbols that DID answer, for a date they served with
+    # no close. The failure rate above cannot see it — every symbol "served" —
+    # and neither can the session's staleness guard, whose bound is four
+    # calendar days. Committable and red, like an outage: whatever arrived is
+    # kept, the failure issue is filed, and the retry is a human's
+    # `--resweep` (a short-window miss is a request-shape failure, not proof
+    # the day is lost — see the midas-market-data skill).
+    if not args.names_only:
+        wide = vendor_wide_holes(holes_by_date, considered_covered)
+        if wide:
+            listed = ", ".join(f"{d} ({n} symbols)" for d, n in wide.items())
+            print(
+                f"\nFAILED: vendor-wide hole — {listed} of {considered_covered} "
+                "covered symbols came back with no close (limit "
+                f"{MAX_HOLE_RATE:.0%}). The store did not advance for that date; "
+                "a session tonight prices those books a day stale. Retry with "
+                "`--resweep` over a longer window before the session.",
                 file=sys.stderr,
             )
             return EXIT_VENDOR_OUTAGE

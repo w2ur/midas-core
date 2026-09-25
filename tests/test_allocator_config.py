@@ -55,7 +55,9 @@ class TestAllocatorRoster:
 
     def test_allocator_blocklist(self):
         alloc = get_config().allocator_spec("the-manager")
-        assert set(alloc.blocklist) == {"SQQQ", "SPXS", "SPXU", "TQQQ", "UPRO", "SOXL"}
+        assert set(alloc.blocklist) == {
+            "SQQQ", "SPXS", "SPXU", "TQQQ", "UPRO", "SOXL", "SH", "PSQ"
+        }
 
     def test_allocator_channels_and_memory(self):
         alloc = get_config().allocator_spec("the-manager")

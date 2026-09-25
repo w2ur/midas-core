@@ -1031,3 +1031,33 @@ class TestUnparseableLineDegradation:
 
         assert result.revised == 1
         assert "revision is DISABLED" not in caplog.text
+
+
+def test_merge_rows_reports_holes_it_did_not_fill(tmp_path) -> None:
+    """A null close for a date the store lacks is a hole the caller aggregates
+    across symbols (fetch_ohlcv's vendor-wide hole check, 2026-09-22). A null
+    close over a date already stored is not a hole: the store holds the day."""
+    import pandas as pd
+
+    from engine.ohlcv_ingest import merge_rows
+
+    path = tmp_path / "SPY.jsonl"
+    path.write_text(
+        '{"date": "2026-09-18", "open": 1.0, "high": 1.0, "low": 1.0, '
+        '"close": 1.0, "adj_close": 1.0, "volume": 1}\n',
+        encoding="utf-8",
+    )
+    df = pd.DataFrame(
+        {
+            "Open": [1.0, 2.0, 2.0],
+            "High": [1.0, 2.0, 2.0],
+            "Low": [1.0, 2.0, 2.0],
+            "Close": [None, None, 2.0],
+            "Adj Close": [None, None, 2.0],
+            "Volume": [10, 20, 30],
+        },
+        index=pd.to_datetime(["2026-09-18", "2026-09-22", "2026-09-23"]),
+    )
+    result = merge_rows(path, df, revise_from="2026-09-18")
+    assert result.holes == ("2026-09-22",)
+    assert result.appended == 1

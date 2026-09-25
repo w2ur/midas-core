@@ -47,6 +47,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+from engine.token_cost import reset_session_costs
+
 # Typical weekday session runs 30-45 minutes. Three hours is generous headroom
 # for a slow agent round while still catching a suspend/resume (the 2026-07-31
 # stall was 63 hours).
@@ -128,6 +130,10 @@ def anchor_session(session_date: date) -> SessionAnchor:
     Call once, immediately after the Step 0 realignment to origin/main and
     before any agent is dispatched. Overwrites any previous anchor, so a
     re-run from the top re-anchors cleanly.
+
+    Also resets the persisted dispatch ledger (``engine.token_cost``), so the
+    bundle's ``session_costs`` counts this session's dispatches and no earlier
+    run's.
     """
     a = SessionAnchor(
         session_date=session_date,
@@ -137,6 +143,7 @@ def anchor_session(session_date: date) -> SessionAnchor:
     path = _anchor_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(a.to_dict(), indent=1), encoding="utf-8")
+    reset_session_costs()
     print(
         f"  [anchor] session={a.session_date} base={a.base_sha[:8]} "
         f"started={a.started_at.isoformat()}"

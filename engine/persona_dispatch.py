@@ -98,8 +98,9 @@ def wrap_persona_prompt(
     )
     # Token/cost visibility: record the character-count proxy (len/4) for this
     # dispatch into the session ledger, and log it. Proxy only — we have no real
-    # token accounting from the orchestrator's untracked dispatch.
-    est = record_dispatch(agent_id, wrapped)
+    # token accounting from the orchestrator's untracked dispatch. The model the
+    # dispatch is made with, and the release it resolves to, are recorded with it.
+    est = record_dispatch(agent_id, wrapped, model=model)
     print(
         f"[dispatch] {agent_id}: ~{est} tokens (len/4 proxy, {len(wrapped)} chars)",
         file=sys.stderr,

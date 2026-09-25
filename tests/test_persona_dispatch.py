@@ -87,3 +87,20 @@ def test_wrap_persona_prompt_persona_precedes_task():
     wrapped, _ = wrap_persona_prompt("the-oracle", "TASK_SENTINEL")
     assert wrapped.index("--- PERSONA") < wrapped.index("--- TASK ---")
     assert wrapped.index("--- END PERSONA") < wrapped.index("TASK_SENTINEL")
+
+
+def test_wrap_persona_prompt_records_the_dispatch_model(monkeypatch):
+    # Regression: session_costs recorded 0 dispatches and no model on
+    # 2026-09-23. Each wrapped prompt is one ledger row carrying the model it is
+    # dispatched with.
+    from engine.token_cost import reset_session_costs, session_cost_totals
+
+    monkeypatch.setenv("ANTHROPIC_DEFAULT_OPUS_MODEL", "claude-opus-test-id")
+    monkeypatch.delenv("ANTHROPIC_DEFAULT_SONNET_MODEL", raising=False)
+    reset_session_costs()
+    wrap_persona_prompt("satoshi", "TASK")
+    wrap_persona_prompt("the-oracle", "TASK")
+    assert session_cost_totals()["dispatches"] == [
+        {"agent_id": "satoshi", "model": "opus", "model_id": "claude-opus-test-id"},
+        {"agent_id": "the-oracle", "model": "sonnet", "model_id": None},
+    ]

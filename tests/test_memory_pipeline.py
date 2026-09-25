@@ -203,3 +203,68 @@ class TestNarratorPrompt:
         oracle = self._prompts(oracle_posts=[payload])[narrator_id()]
 
         assert "the twins are 15 points apart" in oracle
+
+
+class TestStepSaveMemoriesRefreshesSessionCosts:
+    """The journal round is the last dispatch; the bundle was saved before it."""
+
+    def _anchor(self, day) -> None:
+        import json
+        from datetime import datetime, timezone
+
+        import scripts.session_state as ss
+
+        state_dir = Path(ss._STATE_DIR)
+        state_dir.mkdir(parents=True, exist_ok=True)
+        (state_dir / "anchor.json").write_text(
+            json.dumps(
+                {
+                    "session_date": day.isoformat(),
+                    "base_sha": "base000",
+                    "started_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+        )
+
+    def _bundle_path(self, day):
+        from engine.config import get_config
+
+        path = get_config().output_dir / f"{day.isoformat()}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def test_anchored_session_bundle_counts_the_journal_round(
+        self, tmp_journals: Path
+    ) -> None:
+        import json
+        from datetime import date
+
+        from engine.token_cost import record_dispatch, reset_session_costs
+
+        day = date(2026, 9, 23)
+        self._anchor(day)
+        reset_session_costs()
+        path = self._bundle_path(day)
+        path.write_text(json.dumps({"date": day.isoformat(), "session_costs": {}}))
+        for aid in ("satoshi", "the-oracle"):
+            record_dispatch(aid, "x" * 40, model="opus")
+
+        step_save_memories({"satoshi": "Day 1."})
+
+        costs = json.loads(path.read_text())["session_costs"]
+        assert costs["total_dispatches"] == 2
+
+    def test_unanchored_run_leaves_the_bundle_alone(self, tmp_journals: Path) -> None:
+        import json
+        from datetime import date
+
+        from engine.token_cost import record_dispatch
+
+        day = date(2026, 9, 23)
+        path = self._bundle_path(day)
+        path.write_text(json.dumps({"date": day.isoformat(), "session_costs": {}}))
+        record_dispatch("satoshi", "x" * 40, model="opus")
+
+        step_save_memories({"satoshi": "Day 1."})
+
+        assert json.loads(path.read_text())["session_costs"] == {}

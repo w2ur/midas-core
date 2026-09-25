@@ -74,9 +74,16 @@ def _isolated_session_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     leaking between tests and eliminates side-effects from the real
     ``data/session_state/`` directory.
     """
+    import engine.token_cost as tc
     import scripts.session_state as ss
 
     monkeypatch.setattr(ss, "_STATE_DIR", tmp_path / "session_state")
+    # The dispatch ledger is persisted too (engine.token_cost); every
+    # wrap_persona_prompt call in the suite would otherwise append to the real
+    # data/session_state/dispatch_ledger.jsonl.
+    monkeypatch.setattr(
+        tc, "_LEDGER_PATH", tmp_path / "session_state" / tc.LEDGER_FILENAME
+    )
 
 
 def _running_live_cast() -> bool:

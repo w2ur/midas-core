@@ -148,3 +148,14 @@ def test_harmless_main_movement_is_allowed(anchored):
     state["subjects"] = ["[data] 2026-07-31 sentiment digests"]
     state["changed"] = ["data/sentiment/x.json", "site/src/pages/index.astro"]
     assert_session_fresh("author")  # no raise
+
+
+def test_anchoring_resets_the_dispatch_ledger(anchored):
+    # A session counts its own dispatches only: Step 0c clears whatever an
+    # earlier run or a hand invocation left in the persisted ledger.
+    from engine.token_cost import record_dispatch, session_cost_totals
+
+    record_dispatch("satoshi", "x" * 40, model="opus")
+    assert session_cost_totals()["total_dispatches"] == 1
+    anchor_session(date(2026, 9, 23))
+    assert session_cost_totals()["total_dispatches"] == 0

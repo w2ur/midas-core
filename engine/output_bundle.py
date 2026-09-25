@@ -114,6 +114,26 @@ def save_output_bundle(bundle_date: date, bundle: dict) -> Path:
     return path
 
 
+def refresh_session_costs(bundle_date: date) -> bool:
+    """Re-read the dispatch ledger into an already-saved bundle's ``session_costs``.
+
+    The bundle is assembled at Step 7, before the Step 8 journal round, so the
+    block it was written with misses the last eleven dispatches of every
+    session. ``scripts.daily_session.step_save_memories`` calls this once the
+    journals are in, which is the last dispatch a session makes. Only the
+    ``session_costs`` key is rewritten.
+
+    Returns False, writing nothing, when no bundle exists for ``bundle_date``.
+    """
+    path = get_config().output_dir / f"{bundle_date.isoformat()}.json"
+    if not path.exists():
+        return False
+    bundle = json.loads(path.read_text(encoding="utf-8"))
+    bundle["session_costs"] = session_cost_totals()
+    save_output_bundle(bundle_date, bundle)
+    return True
+
+
 if __name__ == "__main__":
     import sys
 

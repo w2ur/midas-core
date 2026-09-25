@@ -78,6 +78,9 @@ def test_risk_budget_block_byte_identical():
 
 # --- Goldens: the EXACT pre-refactor output (module constants), captured
 # 2026-07-01 with the generator command in the module docstring.
+# One deliberate content change since, not a refactor: 2026-09-25 the PRIIPs
+# line blocks SH and PSQ and names the bearish-etfs-ucits substitutes
+# (METHODOLOGY #opus-alias-2026-09-23). The parity rule above still binds.
 EXPECTED_POLICY = """FEE AND TAX POLICY (French tax resident — these are GIVEN facts, not suggestions)
 
 TAX
@@ -99,7 +102,7 @@ FEES (round-trip cost the trade must exceed by ~2x to be worth doing)
 - FX (OANDA Europe): ~0.002%.
 
 PRIIPS BLOCKLIST — NOT buyable by EU retail via IBKR
-These US-domiciled leveraged/inverse ETFs are blocked: SOXL, SPXS, SPXU, SQQQ, TQQQ, UPRO. Use UCITS substitutes (3USS.L, QQQS.L) or 1x inverse (SH, PSQ) only."""
+These US-domiciled leveraged/inverse ETFs are blocked: PSQ, SH, SOXL, SPXS, SPXU, SQQQ, TQQQ, UPRO. Use UCITS substitutes (3USS.L, QQQS.L) or the bearish-etfs-ucits inverse ETFs (DSP5.PA, BX4.PA, XDEB.DE, DXSN.DE) only."""
 
 EXPECTED_RISK_BUDGET = """RISK BUDGET (hard constraints — DEFAULT ACTION IS HOLD)
 

@@ -49,7 +49,7 @@ _F = TypeVar("_F", bound=Callable[..., Any])
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_PROJECT_ROOT))
 
-from scripts.session_guard import assert_session_fresh, clear_anchor
+from scripts.session_guard import assert_session_fresh, clear_anchor, load_anchor
 from scripts.session_state import clear as _clear_state
 from scripts.session_state import is_done as _is_done
 from scripts.session_state import mark_done as _mark_done
@@ -89,6 +89,7 @@ from engine.types import Portfolio
 from engine.output_bundle import (
     assemble_output_bundle,
     get_day_number,
+    refresh_session_costs,
     save_output_bundle,
 )
 from engine.paper_broker import fill_day
@@ -1300,6 +1301,11 @@ def step_save_memories(new_journals: dict[str, str]) -> int:
         Empty/blank values are skipped so a partial round doesn't wipe a journal.
 
     Returns the number of journals actually written.
+
+    The journal round is the session's last dispatch, and it runs after the
+    bundle was saved, so this step also re-reads the dispatch ledger into the
+    anchored session's bundle (``refresh_session_costs``). Unanchored — a hand
+    run — there is no session bundle to correct and nothing is rewritten.
     """
     print("\n=== Step 7b: Save updated memories ===")
     written = 0
@@ -1310,6 +1316,14 @@ def step_save_memories(new_journals: dict[str, str]) -> int:
         save_journal(agent_id, content)
         written += 1
     print(f"  Saved {written}/{len(new_journals)} journals")
+    # A visibility counter must never cost the journals: any failure here is
+    # a warning, and the step still completes.
+    try:
+        anchor = load_anchor()
+        if anchor is not None and refresh_session_costs(anchor.session_date):
+            print(f"  Refreshed session_costs in the {anchor.session_date} bundle")
+    except (OSError, ValueError, KeyError) as exc:
+        print(f"  [WARN] session_costs not refreshed: {exc}")
     return written
 
 
@@ -1583,6 +1597,42 @@ def step_build_tax_shadow() -> None:
     print(f"  Wrote {len(written)} tax shadow ledger(s).")
 
 
+SANDBOX_BRANCH_PREFIX = "claude/"
+
+
+def _publish_sandbox_branch() -> None:
+    """Once HEAD is on main, publish the same commit on the sandbox branch.
+
+    The cloud sandbox's stop hook reports any commit its ``claude/<slug>``
+    branch has not pushed, and the orchestrator then spent a model turn (about
+    two minutes on 2026-09-23) pushing a branch identical to main. Pushing it
+    here settles the hook without a turn; the ``auto-merge-session`` run that
+    push triggers takes its ``already_merged`` path, as it did when the model
+    pushed. Only a ``claude/`` branch is pushed, so a local run on any other
+    branch is left alone, and a failure is a warning: the session is already
+    on main.
+    """
+    branch = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=_PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    name = (branch.stdout or "").strip()
+    if branch.returncode != 0 or not name.startswith(SANDBOX_BRANCH_PREFIX):
+        return
+    push = subprocess.run(
+        ["git", "push", "-u", "origin", "HEAD"],
+        cwd=_PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if push.returncode == 0:
+        print(f"  Also pushed sandbox branch '{name}' (same commit as main).")
+    else:
+        detail = (push.stderr or push.stdout or "").strip()
+        print(f"  [WARN] Sandbox branch '{name}' not pushed: {detail}")
+
 def step_git_commit_push(dry_run: bool = False) -> None:
     """Step 5 — Git commit and push data changes.
 
@@ -1667,6 +1717,7 @@ def step_git_commit_push(dry_run: bool = False) -> None:
             )
             if push_main.returncode == 0:
                 print("  Pushed to origin/main.")
+                _publish_sandbox_branch()
             else:
                 stderr = (push_main.stderr or "").strip()
                 stdout = (push_main.stdout or "").strip()

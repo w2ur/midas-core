@@ -951,6 +951,11 @@
     "type": "equity",
     "currency": "USD"
   },
+  "BE": {
+    "name": "Bloom Energy Corporation",
+    "type": "equity",
+    "currency": "USD"
+  },
   "BEAN.SW": {
     "name": "BELIMO Holding AG",
     "type": "equity",
@@ -1479,7 +1484,7 @@
     "currency": "EUR"
   },
   "CL=F": {
-    "name": "Crude Oil Oct 26",
+    "name": "Crude Oil Nov 26",
     "type": "unknown",
     "currency": "USD"
   },
@@ -3359,6 +3364,11 @@
     "type": "equity",
     "currency": "GBp"
   },
+  "ILMN": {
+    "name": "Illumina, Inc.",
+    "type": "equity",
+    "currency": "USD"
+  },
   "IMB.L": {
     "name": "Imperial Brands PLC",
     "type": "equity",
@@ -3512,6 +3522,11 @@
     "name": "Gartner, Inc.",
     "type": "equity",
     "currency": "USD"
+  },
+  "ITH.L": {
+    "name": "Ithaca Energy plc",
+    "type": "equity",
+    "currency": "GBp"
   },
   "ITRK.L": {
     "name": "Intertek Group plc",
@@ -4079,7 +4094,7 @@
     "currency": "USD"
   },
   "MATIC-USD": {
-    "name": "Polygon USD",
+    "name": "Polygon",
     "type": "crypto",
     "currency": "USD"
   },
@@ -4756,6 +4771,11 @@
   },
   "OXY": {
     "name": "Occidental Petroleum Corporation",
+    "type": "equity",
+    "currency": "USD"
+  },
+  "P": {
+    "name": "Everpure, Inc.",
     "type": "equity",
     "currency": "USD"
   },
@@ -5879,12 +5899,12 @@
     "currency": "EUR"
   },
   "SOL-EUR": {
-    "name": "Solana",
+    "name": "Solana EUR",
     "type": "crypto",
     "currency": "EUR"
   },
   "SOL-USD": {
-    "name": "Solana",
+    "name": "Solana USD",
     "type": "crypto",
     "currency": "USD"
   },
@@ -7145,12 +7165,12 @@
     "currency": "USD"
   },
   "XLM-EUR": {
-    "name": "Stellar",
+    "name": "Stellar EUR",
     "type": "crypto",
     "currency": "EUR"
   },
   "XLM-USD": {
-    "name": "Stellar",
+    "name": "Stellar USD",
     "type": "crypto",
     "currency": "USD"
   },
@@ -7185,12 +7205,12 @@
     "currency": "USD"
   },
   "XRP-EUR": {
-    "name": "XRP",
+    "name": "XRP EUR",
     "type": "crypto",
     "currency": "EUR"
   },
   "XRP-USD": {
-    "name": "XRP",
+    "name": "XRP USD",
     "type": "crypto",
     "currency": "USD"
   },

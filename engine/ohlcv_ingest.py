@@ -285,6 +285,11 @@ class MergeResult(NamedTuple):
     #: calendar (engine.corporate_actions.explain_quarantine); a bare count
     #: can only ever say "a human should look at this".
     refused: tuple["QuarantinedRow", ...] = ()
+    #: Dates the vendor served with no close and the store does not hold, so
+    #: the store did not advance for them. One symbol's hole is routine; the
+    #: same date missing across most of the universe is a vendor-wide hole
+    #: (2026-09-22), which the caller can see only by aggregating these.
+    holes: tuple[str, ...] = ()
 
 
 def _close_of(line: str) -> float | None:
@@ -506,4 +511,5 @@ def merge_rows(
         write_quarantine(quarantine, refused)
         for row in refused:
             print(f"  [QUARANTINED] {row.describe()}", file=sys.stderr)
-    return MergeResult(appended, revised, len(refused), tuple(refused))
+    holes = tuple(sorted(d for d in set(dropped_no_close) if d not in stored))
+    return MergeResult(appended, revised, len(refused), tuple(refused), holes)

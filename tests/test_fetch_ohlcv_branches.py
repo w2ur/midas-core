@@ -1270,3 +1270,46 @@ class TestBothSplitPathsShareOneLedger:
         applied: list[float] = []
         self._run_resweep(monkeypatch, applied)
         assert applied == []
+
+
+class TestVendorWideHole:
+    """2026-09-22: the vendor served SPY and most of the US universe with no
+    close. The run wrote 84 new rows across 1,247 symbols, exited 0 — every
+    symbol had "served" — and every equity book priced a day stale that
+    evening. A date missing across most of the covered universe is now an
+    outage exit (committable, red, issue filed)."""
+
+    def _run(self, monkeypatch, covered: list[str], holed: int, capsys=None) -> int:
+        _cover(covered)
+        d = _fetch_end().isoformat()
+        nan = float("nan")
+        frames = {
+            s: {d: [1, 2, 0.5, nan, nan, 100] if i < holed else [1, 2, 0.5, 1.5, 1.5, 100]}
+            for i, s in enumerate(covered)
+        }
+        monkeypatch.setattr(fo, "_fetch_symbol", _make_fake_fetch_symbol(frames))
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+        return _run_main(monkeypatch, ["--symbols", ",".join(covered)])
+
+    def test_the_same_date_missing_across_the_universe_fails_the_run(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        covered = [f"COV{i}" for i in range(20)]
+        rc = self._run(monkeypatch, covered, holed=15)
+        assert rc == fo.EXIT_VENDOR_OUTAGE
+        assert rc in fo.COMMITTABLE_EXITS  # what did arrive is still committed
+        err = capsys.readouterr().err
+        assert "vendor-wide hole" in err and _fetch_end().isoformat() in err
+
+    def test_a_few_thin_names_missing_a_close_do_not(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Control: one routine per-symbol hole in 20 (5%) stays green.
+        covered = [f"COV{i}" for i in range(20)]
+        assert self._run(monkeypatch, covered, holed=1) == 0
+
+
+def test_vendor_wide_holes_threshold_is_strictly_over_the_rate() -> None:
+    assert fo.vendor_wide_holes({"2026-09-22": 2}, 20) == {}  # exactly 10%
+    assert fo.vendor_wide_holes({"2026-09-22": 3}, 20) == {"2026-09-22": 3}
+    assert fo.vendor_wide_holes({"2026-09-22": 3}, 0) == {}  # cannot measure
