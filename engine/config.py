@@ -103,6 +103,8 @@ class AllocatorSpec:
     outcome_memory_other_max: int = 3
     baseline: BaselineSpec = field(default_factory=BaselineSpec)
     risk_budget: RiskBudget = field(default_factory=RiskBudget)
+    # Prompt-only: rendered by manager_context.render_policy_prose when there is
+    # no prose_override. The broker does not enforce it (see roster.yaml).
     blocklist: tuple[str, ...] = ()
     policy_prose_override: str | None = None
 

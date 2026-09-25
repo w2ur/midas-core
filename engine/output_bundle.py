@@ -67,8 +67,12 @@ def assemble_output_bundle(
     so the site can always render every dossier.
 
     `session_costs` is the session-level prompt-size totals block (the len/4 token
-    proxy accumulated by the persona dispatch path). When None, the process-level
-    ledger totals are read via `engine.token_cost.session_cost_totals`.
+    proxy accumulated by the persona dispatch path). When None, the persisted
+    ledger totals are read via `engine.token_cost.session_cost_totals`. Its
+    `total_dispatches` counts prompt wraps (`wrap_persona_prompt` calls), not API
+    dispatches, and each row's `model_id` is what the environment pins the alias
+    to (null when unpinned), not the release that answered — see
+    `engine.token_cost`.
     """
     agents = {}
     for aid in get_config().trading_roster:

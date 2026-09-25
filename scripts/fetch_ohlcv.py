@@ -231,12 +231,23 @@ MAX_FAILURE_RATE = 0.10
 #: vendor serves no row at all for a closed market, so it never lands here.
 MAX_HOLE_RATE = 0.10
 
+#: Fewest covered symbols the hole rate is taken over. A rate over a handful of
+#: symbols describes those symbols, not the vendor: `--symbols EURUSD=X` read
+#: 1/1 = 100% (money review round 1, M2). 20 keeps the crypto-only run (~35
+#: symbols) measured — crypto trades every day, so a shared hole there is real —
+#: while a targeted local or `--resweep --symbols` run of a few names never
+#: reads as an outage. At 20, one symbol is 5% and a firing needs at least 3.
+MIN_HOLE_POPULATION = 20
+
 
 def vendor_wide_holes(
     holes_by_date: dict[str, int], considered_covered: int
 ) -> dict[str, int]:
-    """The dates missing from more than ``MAX_HOLE_RATE`` of covered symbols."""
-    if considered_covered <= 0:
+    """The dates missing from more than ``MAX_HOLE_RATE`` of covered symbols.
+
+    Nothing is measured below ``MIN_HOLE_POPULATION`` covered symbols.
+    """
+    if considered_covered < MIN_HOLE_POPULATION:
         return {}
     return {
         d: n
@@ -974,7 +985,11 @@ def main() -> int:
                     # dates and ratios rather than the count.
                     refused_rows[symbol] = merged.refused
                 for hole in merged.holes:
-                    holes_by_date[hole] = holes_by_date.get(hole, 0) + 1
+                    # Past `end` is today's still-forming bar, which the vendor
+                    # serves with no close on every run (ten FX pairs, nightly).
+                    # This script never stores it, so it is never a hole.
+                    if hole <= end.isoformat():
+                        holes_by_date[hole] = holes_by_date.get(hole, 0) + 1
                 if i % 25 == 0 or n > 0 or r > 0 or q > 0:
                     suffix = f", !{q} quarantined" if q else ""
                     print(

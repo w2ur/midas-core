@@ -1313,3 +1313,41 @@ def test_vendor_wide_holes_threshold_is_strictly_over_the_rate() -> None:
     assert fo.vendor_wide_holes({"2026-09-22": 2}, 20) == {}  # exactly 10%
     assert fo.vendor_wide_holes({"2026-09-22": 3}, 20) == {"2026-09-22": 3}
     assert fo.vendor_wide_holes({"2026-09-22": 3}, 0) == {}  # cannot measure
+
+
+class TestVendorWideHoleNeedsAPopulation:
+    """Money review round 1, M2: `--symbols EURUSD=X` read 1/1 = 100% and
+    exited as a vendor outage. Ten FX pairs are served a no-close row for
+    TODAY on every run; today is not a hole (the script's `end` is
+    yesterday), and one symbol is not a vendor."""
+
+    def test_a_narrow_run_cannot_read_as_vendor_wide(self) -> None:
+        assert fo.vendor_wide_holes({"2026-09-22": 1}, 1) == {}
+        assert fo.vendor_wide_holes({"2026-09-22": 5}, fo.MIN_HOLE_POPULATION - 1) == {}
+
+    def test_at_the_floor_it_measures(self) -> None:
+        # Control: the floor admits the population it names.
+        n = fo.MIN_HOLE_POPULATION
+        assert fo.vendor_wide_holes({"2026-09-22": n}, n) == {"2026-09-22": n}
+
+    def test_todays_partial_row_is_not_a_hole(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        covered = [f"FX{i}=X" for i in range(20)]
+        _cover(covered)
+        end = _fetch_end()
+        today = (end + timedelta(days=1)).isoformat()
+        nan = float("nan")
+        frames = {
+            s: {end.isoformat(): [1, 2, 0.5, 1.5, 1.5, 100], today: [1, 2, 0.5, nan, nan, 0]}
+            for s in covered
+        }
+
+        def fake(symbol, start, end_, *, vendor_unit=None):
+            # The vendor serves today's partial bar past the requested end.
+            series = frames.get(symbol)
+            return _yf_frame(series) if series else None
+
+        monkeypatch.setattr(fo, "_fetch_symbol", fake)
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+        assert _run_main(monkeypatch, ["--symbols", ",".join(covered)]) == 0
