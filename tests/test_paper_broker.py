@@ -1469,6 +1469,33 @@ class TestDeniedTickers:
         assert fills[0].reason == "TICKER_DENIED"
         assert pm.load("agent1").positions == []
 
+    @pytest.mark.parametrize("variant", ["sh", "Sh", " SH ", "sH\n"])
+    def test_a_case_or_whitespace_variant_of_a_denied_ticker_is_refused(
+        self, broker_env, variant
+    ):
+        """Regression: 2de6c7039 — follow-up money review r1, M3. The rail compared the
+        raw ticker string, so a lower-case `sh` passed it; on a
+        case-insensitive filesystem (a Mac, the demo desk's entry point) the
+        store read `SH.jsonl` for it and the BUY filled. Refused regardless
+        of the filesystem — no price is needed to refuse it."""
+        from engine.paper_broker import fill_day
+
+        _write_config(broker_env["config_dir"], "agent1", denied_tickers=["SH"])
+        pm = _init_portfolio(broker_env["pm_base"], "agent1", cash=10_000.0)
+        append_order(TRADE_DATE, _make_order("ord_v", "agent1", "BUY", variant, 5))
+
+        fills = fill_day(TRADE_DATE, pm)
+        assert (fills[0].status, fills[0].reason) == ("rejected", "TICKER_DENIED")
+
+    def test_a_lower_case_deny_list_entry_still_denies(self, broker_env):
+        from engine.paper_broker import fill_day
+
+        _write_config(broker_env["config_dir"], "agent1", denied_tickers=["psq"])
+        pm = _init_portfolio(broker_env["pm_base"], "agent1", cash=10_000.0)
+        append_order(TRADE_DATE, _make_order("ord_p", "agent1", "BUY", "PSQ", 5))
+
+        assert fill_day(TRADE_DATE, pm)[0].reason == "TICKER_DENIED"
+
     def test_an_agent_without_a_deny_list_still_buys_it(self, broker_env):
         # Control: the same order fills when nothing denies it, so the refusal
         # above is the rail and not the fixture.

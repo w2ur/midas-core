@@ -142,7 +142,7 @@ class AgentConfig:
             max_orders_per_day=s.max_orders_per_day,
             daily_drawdown_halt_pct=s.daily_drawdown_halt_pct,
             allowed_universe=list(s.allowed_universe),
-            denied_tickers=frozenset(s.denied_tickers),
+            denied_tickers=frozenset(_ticker_key(t) for t in s.denied_tickers),
             dry_run=s.dry_run,
         )
 
@@ -344,6 +344,19 @@ def _reject(order_id: str, reason: str) -> Fill:
     )
 
 
+def _ticker_key(ticker: str) -> str:
+    """A ticker as the deny-list compares it: stripped and upper-cased.
+
+    The store is upper-case by convention (`engine.fees.classify_ticker`
+    upper-cases the same way), but it is read through the filesystem, and on a
+    case-insensitive one `sh` opens `SH.jsonl`. So an exact string match let a
+    lower-case BUY of a denied fund past the rail and fill it (follow-up money
+    review r1, M3). The allow-list keeps its exact match on purpose: there a
+    variant fails closed (TICKER_NOT_IN_UNIVERSE), here it failed open.
+    """
+    return ticker.strip().upper()
+
+
 def _denied(order: Order, config: AgentConfig) -> bool:
     """True when ``order`` would OPEN or ADD TO a position in a denied ticker.
 
@@ -352,7 +365,7 @@ def _denied(order: Order, config: AgentConfig) -> bool:
     already held is an exit, and a rail that refused it would trap the
     position it exists to keep out of the book.
     """
-    return order.action == "BUY" and order.ticker in config.denied_tickers
+    return order.action == "BUY" and _ticker_key(order.ticker) in config.denied_tickers
 
 
 def _resolve_allowed_tickers(allowed_universe: list[str], agent_id: str) -> set[str]:

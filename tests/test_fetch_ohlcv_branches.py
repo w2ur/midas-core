@@ -1385,12 +1385,67 @@ class TestExchangeWideHole:
         assert "exchange-wide hole" in err and ".PA" in err
         assert _fetch_end().isoformat() in err
 
-    def test_an_exchange_below_the_floor_is_not_measured(
+    def test_an_exchange_below_the_floor_needs_every_name_missing(
         self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Control: 19 names is below MIN_HOLE_POPULATION, as for the aggregate.
+        # Below MIN_HOLE_POPULATION the rate is not taken; all but one of 19
+        # names late (95%) is still not a hole there — every one of them is.
         n = fo.MIN_HOLE_POPULATION - 1
-        assert self._run(monkeypatch, us=200, exchange=".VI", listed=n, holed=n) == 0
+        assert self._run(monkeypatch, us=200, exchange=".VI", listed=n, holed=n - 1) == 0
+        assert self._run(monkeypatch, us=200, exchange=".VI", listed=n, holed=n) == fo.EXIT_VENDOR_OUTAGE
+
+    def test_a_bucket_of_a_few_names_is_never_measured(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        n = fo.MIN_UNANIMOUS_POPULATION - 1
+        assert self._run(monkeypatch, us=200, exchange=".LS", listed=n, holed=n) == 0
+
+    def _run_symbols(self, monkeypatch, covered: list[str], holed: set[str]) -> int:
+        _cover(covered)
+        d = _fetch_end().isoformat()
+        nan = float("nan")
+        frames = {
+            s: {d: [1, 2, 0.5, nan, nan, 100] if s in holed else [1, 2, 0.5, 1.5, 1.5, 100]}
+            for s in covered
+        }
+        monkeypatch.setattr(fo, "_fetch_symbol", _make_fake_fetch_symbol(frames))
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+        return _run_main(monkeypatch, ["--symbols", ",".join(covered)])
+
+    CRYPTO = [f"{b}-{q}" for b in ("BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "DOT", "LINK",
+                                    "LTC", "BCH", "AVAX", "ATOM", "XLM", "FIL", "MATIC", "UNI")
+              for q in ("EUR", "USD")] + ["BTC-GBP", "ETH-GBP"]
+    FX = ["EURUSD=X", "USDJPY=X", "GBPUSD=X", "USDCHF=X", "EURGBP=X",
+          "EURJPY=X", "EURCHF=X", "AUDUSD=X", "USDCAD=X", "NZDUSD=X"]
+
+    def test_a_crypto_hole_on_a_full_run_fails(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        """Regression: b3aaa4fb1 — follow-up money review r1, M1. Crypto shared the
+        no-suffix bucket with ~590 US names: all 34 pairs holed read 34/640 =
+        5.3% and a weekday full run exited 0 while every crypto book priced a
+        day stale."""
+        us = [f"US{i}" for i in range(600)]
+        rc = self._run_symbols(monkeypatch, us + self.CRYPTO, set(self.CRYPTO))
+        assert rc == fo.EXIT_VENDOR_OUTAGE
+        assert "crypto:" in capsys.readouterr().err
+
+    def test_an_fx_hole_fails_although_fx_is_under_the_floor(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        # Ten pairs is below MIN_HOLE_POPULATION: measured by the unanimity
+        # rule instead — every covered pair missing the same past date.
+        us = [f"US{i}" for i in range(600)]
+        rc = self._run_symbols(monkeypatch, us + self.FX, set(self.FX))
+        assert rc == fo.EXIT_VENDOR_OUTAGE
+        assert "fx:" in capsys.readouterr().err
+
+    def test_a_few_fx_pairs_late_do_not_fire(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Control: under the floor, anything short of every pair is not a hole.
+        us = [f"US{i}" for i in range(600)]
+        assert self._run_symbols(monkeypatch, us + self.FX, set(self.FX[:9])) == 0
 
     def test_a_few_chronic_names_on_one_exchange_do_not_fire(
         self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
@@ -1400,16 +1455,24 @@ class TestExchangeWideHole:
         assert self._run(monkeypatch, us=200, exchange=".PA", listed=20, holed=2) == 0
 
 
-def test_exchange_of_reads_the_yahoo_suffix() -> None:
-    assert fo.exchange_of("AIR.PA") == ".PA"
-    assert fo.exchange_of("BT.A.L") == ".L"  # the last dot is the exchange
-    # No suffix: US listings, crypto pairs and FX share one bucket.
-    assert fo.exchange_of("AAPL") == ""
-    assert fo.exchange_of("BTC-EUR") == ""
-    assert fo.exchange_of("EURUSD=X") == ""
+def test_hole_bucket_reads_the_suffix_then_the_instrument_class() -> None:
+    assert fo.hole_bucket("AIR.PA") == ".PA"
+    assert fo.hole_bucket("BT.A.L") == ".L"  # the last dot is the exchange
+    # No suffix: crypto and FX by the repo's own classifier, the rest US.
+    assert fo.hole_bucket("BTC-EUR") == "crypto"
+    assert fo.hole_bucket("EURUSD=X") == "fx"
+    assert fo.hole_bucket("AAPL") == ""
+    assert fo.hole_bucket("BRK-B") == ""  # a share class, not a crypto pair
+    # A pair the fetch's crypto set carries but the fee allowlist does not.
+    assert fo.hole_bucket("HBAR-USD") == ""
+    assert fo.hole_bucket("HBAR-USD", crypto=frozenset({"HBAR-USD"})) == "crypto"
 
 
 def test_exchange_wide_holes_applies_the_rate_and_floor_per_exchange() -> None:
-    holes = {".PA": {"2026-09-22": 20}, ".VI": {"2026-09-22": 10}, "": {"2026-09-22": 3}}
-    covered = {".PA": 82, ".VI": 10, "": 600}
-    assert fo.exchange_wide_holes(holes, covered) == {".PA": {"2026-09-22": 20}}
+    holes = {".PA": {"2026-09-22": 20}, ".VI": {"2026-09-22": 9}, "": {"2026-09-22": 3},
+             ".F": {"2026-09-22": 1}, "fx": {"2026-09-22": 10}}
+    covered = {".PA": 82, ".VI": 10, "": 600, ".F": 1, "fx": 10}
+    # .VI: 9 of 10 is not all of them; .F: one name is below the unanimity floor.
+    assert fo.exchange_wide_holes(holes, covered) == {
+        ".PA": {"2026-09-22": 20}, "fx": {"2026-09-22": 10},
+    }

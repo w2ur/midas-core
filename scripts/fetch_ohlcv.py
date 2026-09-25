@@ -35,6 +35,7 @@ from engine.corporate_actions import (
     explain_quarantine,
     ratios_agree,
 )
+from engine.fees import classify_ticker
 from engine.quotes import vendor_unit_scale
 from engine.ohlcv_ingest import (
     MergeResult,
@@ -256,23 +257,46 @@ def vendor_wide_holes(
     }
 
 
-def exchange_of(symbol: str) -> str:
-    """The Yahoo exchange suffix of ``symbol`` (``".PA"``), or ``""`` for none.
+#: Fewest covered symbols a bucket needs for the unanimity rule, used below
+#: MIN_HOLE_POPULATION: such a bucket is a hole only when EVERY covered member
+#: lacks the same date. Ten FX pairs and the small exchanges (`.VI` 10, `.IR`
+#: 6, `.LS` 5) sit under the rate's floor and were never measured; one or two
+#: late names in them is routine, all of them at once is not. Below 5 a whole
+#: bucket is a couple of names (`.F`, `.NYB`: 1 each), which says nothing
+#: about a vendor.
+MIN_UNANIMOUS_POPULATION = 5
 
-    The suffix is what follows the LAST dot (``BT.A.L`` lists on ``.L``). US
-    listings, crypto pairs (``BTC-EUR``) and FX (``EURUSD=X``) carry no
-    exchange suffix and share the ``""`` bucket.
+
+def hole_bucket(symbol: str, crypto: frozenset[str] = frozenset()) -> str:
+    """The population ``symbol``'s missing closes are rated within.
+
+    A Yahoo exchange suffix (``".PA"``: what follows the LAST dot, so
+    ``BT.A.L`` is ``.L``) when there is one. Otherwise the instrument class, by
+    the repo's own classifier (`engine.fees.classify_ticker`): ``"crypto"``,
+    also for any pair in ``crypto`` (the set this script fetches in its
+    crypto-only mode, which carries pairs such as HBAR-USD that the fee
+    allowlist does not), ``"fx"``, and ``""`` for the rest — US listings and
+    the handful of `=F` futures. Money review r1 (J6 follow-ups), M1: crypto
+    and FX folded into the US bucket, where a hole across all 34 crypto pairs
+    read 5.3% and passed.
     """
     head, dot, tail = symbol.rpartition(".")
-    return f".{tail}" if dot and head and tail else ""
+    if dot and head and tail:
+        return f".{tail}"
+    if symbol in crypto:
+        return "crypto"
+    asset_class = classify_ticker(symbol)
+    return "" if asset_class == "equity" else asset_class
 
 
 def exchange_wide_holes(
     holes_by_exchange: dict[str, dict[str, int]],
     covered_by_exchange: dict[str, int],
 ) -> dict[str, dict[str, int]]:
-    """``vendor_wide_holes`` taken per exchange suffix: the same rate, the same
-    population floor, over each exchange's own covered symbols.
+    """``vendor_wide_holes`` taken per `hole_bucket`: the same rate, the same
+    population floor, over each bucket's own covered symbols — and, for a
+    bucket between MIN_UNANIMOUS_POPULATION and that floor, a hole only when
+    every covered member lacks the date.
 
     J6 money review round 2, N4: over the whole universe (~1,320 covered
     symbols) a hole across every `.PA` (82) or `.DE` (83) name reads ~6%,
@@ -282,7 +306,11 @@ def exchange_wide_holes(
     """
     wide: dict[str, dict[str, int]] = {}
     for exchange, holes in sorted(holes_by_exchange.items()):
-        found = vendor_wide_holes(holes, covered_by_exchange.get(exchange, 0))
+        covered = covered_by_exchange.get(exchange, 0)
+        if MIN_UNANIMOUS_POPULATION <= covered < MIN_HOLE_POPULATION:
+            found = {d: n for d, n in sorted(holes.items()) if n >= covered}
+        else:
+            found = vendor_wide_holes(holes, covered)
         if found:
             wide[exchange] = found
     return wide
@@ -867,6 +895,10 @@ def main() -> int:
     # The same two counts per exchange suffix, for `exchange_wide_holes`.
     covered_by_exchange: dict[str, int] = {}
     holes_by_exchange: dict[str, dict[str, int]] = {}
+    # The crypto-only mode's own set, so a pair the fee allowlist does not
+    # carry (HBAR-USD) still rates as crypto. Read from committed universe
+    # files; no network.
+    crypto_bucket = frozenset() if args.names_only else frozenset(_crypto_symbols())
     covered_failures = 0
     unresolved: list[str] = []
     served = 0
@@ -911,7 +943,7 @@ def main() -> int:
                     # also Saturday, asks for them.
                     if path.exists():
                         considered_covered += 1
-                        ex = exchange_of(symbol)
+                        ex = hole_bucket(symbol, crypto_bucket)
                         covered_by_exchange[ex] = covered_by_exchange.get(ex, 0) + 1
                     continue  # OHLCV already up to date; still refresh name
                 start = window_start
@@ -924,7 +956,7 @@ def main() -> int:
             covered = path.exists()
             if covered:
                 considered_covered += 1
-                ex = exchange_of(symbol)
+                ex = hole_bucket(symbol, crypto_bucket)
                 covered_by_exchange[ex] = covered_by_exchange.get(ex, 0) + 1
 
             # A FIRST ingest is scaled by whatever the vendor says the symbol
@@ -1029,7 +1061,7 @@ def main() -> int:
                     # This script never stores it, so it is never a hole.
                     if hole <= end.isoformat():
                         holes_by_date[hole] = holes_by_date.get(hole, 0) + 1
-                        by_date = holes_by_exchange.setdefault(exchange_of(symbol), {})
+                        by_date = holes_by_exchange.setdefault(hole_bucket(symbol, crypto_bucket), {})
                         by_date[hole] = by_date.get(hole, 0) + 1
                 if i % 25 == 0 or n > 0 or r > 0 or q > 0:
                     suffix = f", !{q} quarantined" if q else ""
@@ -1172,7 +1204,7 @@ def main() -> int:
         by_exchange = exchange_wide_holes(holes_by_exchange, covered_by_exchange)
         if by_exchange:
             listed = "; ".join(
-                f"{ex or '(no suffix)'}: "
+                f"{ex or 'US (no suffix)'}: "
                 + ", ".join(
                     f"{d} ({n} of {covered_by_exchange[ex]} symbols)"
                     for d, n in holes.items()
@@ -1181,9 +1213,10 @@ def main() -> int:
             )
             print(
                 f"\nFAILED: exchange-wide hole — {listed} came back with no "
-                f"close (limit {MAX_HOLE_RATE:.0%} of an exchange's covered "
-                "symbols). The store did not advance for that date on that "
-                "exchange; a session tonight prices its books a day stale. "
+                f"close (limit {MAX_HOLE_RATE:.0%} of an exchange's or asset "
+                "class's covered symbols, or all of a small one). The store "
+                "did not advance for that date there; a session tonight "
+                "prices those books a day stale. "
                 "Retry with `--resweep` over a longer window before the "
                 "session.",
                 file=sys.stderr,
