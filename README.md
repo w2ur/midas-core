@@ -31,10 +31,11 @@ Reproduce it with the [quickstart](#quickstart--reach-a-real-fill) below — not
 ## Why this exists
 
 - **Safety lives in the broker, not the prompt.** The persona is aspirational; the broker is
-  enforcing. Every order is checked at fill time against a fixed set of 15 rejection/cancel
-  reason codes — `MAX_ORDER_NOTIONAL`, `MAX_ORDERS_PER_DAY`, `TICKER_NOT_IN_UNIVERSE`,
-  `INSUFFICIENT_CASH`, `DAILY_DRAWDOWN_HALT`, … — so a coaxed or confused agent still can't
-  slip an oversized or out-of-universe trade through.
+  enforcing. Every order is checked at fill time against the fixed set of rejection/cancel
+  reason codes in [`REJECTION_REASON_CODES`](engine/paper_broker.py) — `MAX_ORDER_NOTIONAL`,
+  `MAX_ORDERS_PER_DAY`, `TICKER_NOT_IN_UNIVERSE`, `INSUFFICIENT_CASH`, `DAILY_DRAWDOWN_HALT`,
+  … — so a coaxed or confused agent still can't slip an oversized or out-of-universe trade
+  through.
 - **Reproducible by construction.** Dependencies are a fully-pinned lockfile; prices and index
   universes are committed to git; a trading session makes no outbound HTTP calls. Every fill is
   stamped with `executed_sha`, the git HEAD it executed against — `git checkout <sha>` re-derives
