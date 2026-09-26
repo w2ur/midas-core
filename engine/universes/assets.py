@@ -154,9 +154,11 @@ def get_commodities_eur_tickers() -> list[str]:
         "PHAU.L",  # WisdomTree Physical Gold (USD, LSE) — widely traded
         "PHAG.L",  # WisdomTree Physical Silver (USD, LSE)
         "SGLN.L",  # iShares Physical Gold ETC (USD, LSE)
-        "SGLN.MI",  # iShares Physical Gold ETC (EUR, Milan listing)
         "4GLD.DE",  # Xetra-Gold (EUR, Xetra)
-        "PPFB.DE",  # WisdomTree Physical Gold EUR (Xetra)
+        # iShares Physical Gold ETC, the SGLN.L product, EUR on Xetra. It is
+        # also the EUR listing of it now: SGLN.MI (Milan) was dropped on
+        # 2026-09-26 because the vendor serves it only its latest quote.
+        "PPFB.DE",
         "CRUD.L",  # WisdomTree Brent Crude Oil ETC (USD, LSE)
     ]
 
@@ -182,7 +184,10 @@ def get_bearish_etf_ucits_tickers() -> list[str]:
         "DSP5.PA",  # Amundi S&P 500 Daily (-1x) Inverse (Euronext, EUR) — replaces SH
         # --- European-index exposure ---
         "3UKS.L",  # WisdomTree FTSE 100 3x Daily Short (LSE)
-        "3EUS.L",  # WisdomTree Euro Stoxx 50 3x Daily Short (LSE)
+        # WisdomTree Euro Stoxx 50 3x Daily Short, EUR on Milan. Replaced the
+        # LSE line 3EUS.L on 2026-09-26: the vendor serves that one only its
+        # latest quote, so its store collected one row a week.
+        "3EUS.MI",
         "BX4.PA",  # Amundi CAC 40 Daily (-2x) Inverse (Euronext Paris)
         "CL2.PA",  # Amundi CAC 40 Daily 2x Leveraged (Euronext Paris)
         "XDEB.DE",  # Xtrackers ShortDAX Daily x1 Swap (Xetra)

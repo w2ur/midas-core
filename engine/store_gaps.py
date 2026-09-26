@@ -241,11 +241,48 @@ def bucket_traded(probes: Iterable[Verdict]) -> bool | None:
 _ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _LEDGER_REASONS = frozenset(v.value for v in OPEN_VERDICTS) | {"quarantined"}
 
+#: The status of a gap a human has accepted as unfillable. Such an entry is an
+#: object, ``{"status": "accepted", "reason": ..., "accepted_on": ...}``, not
+#: an open reason string. It is green, and the scan never re-opens its date.
+#: The reason is required: an acceptance nobody can explain is not a decision,
+#: and a ledger carrying one is unreadable, which is never green. BYND
+#: 2026-08-13 was the first: the vendor serves it on the post-split basis
+#: against a pre-split 08-12, so filling it needs a basis rebase of the
+#: history, and that is not insert-only.
+ACCEPTED = "accepted"
 
-def parse_ledger(text: str) -> dict[str, dict[str, str]]:
-    """Read ``data/market/store_gaps.json``: symbol -> {date: reason}.
 
-    Raises ``ValueError`` on anything else. The caller must not treat an
+def is_accepted(entry: object) -> bool:
+    """Whether a parsed ledger entry is an accepted gap rather than an open one."""
+    return isinstance(entry, dict) and entry.get("status") == ACCEPTED
+
+
+def accepted_entry(reason: str, accepted_on: date) -> dict[str, str]:
+    """The ledger entry that accepts a gap. Refuses an empty reason."""
+    if not reason.strip():
+        raise ValueError("an accepted gap needs a non-empty reason")
+    return {"status": ACCEPTED, "reason": reason.strip(), "accepted_on": accepted_on.isoformat()}
+
+
+def _check_accepted(symbol: str, d: str, entry: dict) -> None:
+    if entry.get("status") != ACCEPTED:
+        raise ValueError(f"{symbol} {d}: unknown status {entry.get('status')!r}")
+    reason = entry.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError(f"{symbol} {d}: an accepted gap needs a non-empty reason")
+    if not _ISO_DATE.fullmatch(str(entry.get("accepted_on", ""))):
+        raise ValueError(f"{symbol} {d}: an accepted gap needs an ISO accepted_on date")
+    extra = set(entry) - {"status", "reason", "accepted_on"}
+    if extra:
+        raise ValueError(f"{symbol} {d}: unexpected keys {sorted(extra)}")
+
+
+def parse_ledger(text: str) -> dict[str, dict[str, str | dict[str, str]]]:
+    """Read ``data/market/store_gaps.json``: symbol -> {date: entry}.
+
+    An entry is an open reason (``no-close``, ``unfetched``, ``quarantined``)
+    or an accepted gap (`ACCEPTED`). Raises ``ValueError`` on anything else,
+    including an acceptance without a reason. The caller must not treat an
     unreadable ledger as an empty one: that would forget every held gap and
     report the store healthy.
     """
@@ -255,19 +292,21 @@ def parse_ledger(text: str) -> dict[str, dict[str, str]]:
         raise ValueError(f"not JSON: {exc}") from exc
     if not isinstance(raw, dict):
         raise ValueError("the ledger must be an object keyed by symbol")
-    entries: dict[str, dict[str, str]] = {}
+    entries: dict[str, dict[str, str | dict[str, str]]] = {}
     for symbol, gaps in raw.items():
         if not isinstance(gaps, dict):
-            raise ValueError(f"{symbol}: expected {{date: reason}}")
-        for d, reason in gaps.items():
+            raise ValueError(f"{symbol}: expected {{date: entry}}")
+        for d, entry in gaps.items():
             if not _ISO_DATE.fullmatch(str(d)):
                 raise ValueError(f"{symbol}: {d!r} is not an ISO date")
-            if reason not in _LEDGER_REASONS:
-                raise ValueError(f"{symbol} {d}: unknown reason {reason!r}")
+            if isinstance(entry, dict):
+                _check_accepted(symbol, d, entry)
+            elif not isinstance(entry, str) or entry not in _LEDGER_REASONS:
+                raise ValueError(f"{symbol} {d}: unknown reason {entry!r}")
         entries[symbol] = dict(gaps)
     return entries
 
 
-def render_ledger(entries: Mapping[str, Mapping[str, str]]) -> str:
+def render_ledger(entries: Mapping[str, Mapping[str, object]]) -> str:
     """Serialise the ledger. Stable, so an unchanged night writes no diff."""
     return json.dumps(entries, indent=2, sort_keys=True) + "\n"

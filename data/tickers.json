@@ -9,6 +9,11 @@
     "type": "etf",
     "currency": "EUR"
   },
+  "3EUS.MI": {
+    "name": "WisdomTree EURO STOXX 50 3x Daily Short",
+    "type": "etf",
+    "currency": "EUR"
+  },
   "3UKS.L": {
     "name": "WisdomTree FTSE 100 3x Daily Short",
     "type": "etf",

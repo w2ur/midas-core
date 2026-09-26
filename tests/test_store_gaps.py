@@ -10,6 +10,7 @@ reads the STORED series instead.
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 import pytest
@@ -229,3 +230,30 @@ class TestLedger:
     def test_a_malformed_ledger_raises(self, text: str) -> None:
         with pytest.raises(ValueError):
             parse_ledger(text)
+
+
+class TestAcceptedEntries:
+    """Regression: 579af1cd4 — an acceptance must carry its reason."""
+
+    ACCEPTED = {"status": "accepted", "reason": "split-basis rebase", "accepted_on": "2026-09-26"}
+
+    def test_an_accepted_entry_round_trips(self) -> None:
+        entries = {"BYND": {"2026-08-13": dict(self.ACCEPTED)}, "AI.PA": {"2026-07-31": "unfetched"}}
+        text = render_ledger(entries)
+        assert parse_ledger(text) == entries
+        assert render_ledger(parse_ledger(text)) == text
+
+    @pytest.mark.parametrize(
+        "entry, message",
+        [
+            ({"status": "accepted", "accepted_on": "2026-09-26"}, "reason"),
+            ({"status": "accepted", "reason": "", "accepted_on": "2026-09-26"}, "reason"),
+            ({"status": "accepted", "reason": "  ", "accepted_on": "2026-09-26"}, "reason"),
+            ({"status": "accepted", "reason": "x"}, "accepted_on"),
+            ({"status": "accepted", "reason": "x", "accepted_on": "26/09"}, "accepted_on"),
+            ({"status": "waived", "reason": "x", "accepted_on": "2026-09-26"}, "status"),
+        ],
+    )
+    def test_an_incomplete_acceptance_raises(self, entry: dict, message: str) -> None:
+        with pytest.raises(ValueError, match=message):
+            parse_ledger(json.dumps({"BYND": {"2026-08-13": entry}}))

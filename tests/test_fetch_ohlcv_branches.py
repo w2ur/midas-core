@@ -1842,3 +1842,123 @@ class TestStoreGapsAreHeldUntilTheStoreHoldsThem:
 def test_the_store_gap_exit_is_deliberate_and_committable() -> None:
     assert fo.EXIT_STORE_GAP not in (0, 1, fo.EXIT_QUARANTINED, fo.EXIT_VENDOR_OUTAGE)
     assert fo.EXIT_STORE_GAP in fo.COMMITTABLE_EXITS
+
+
+class TestAnAcceptedGapIsGreen:
+    """Regression: 579af1cd4 — a gap a human has accepted as unfillable is
+    green, with its reason on record. BYND 2026-08-13 is the first: the vendor
+    serves it on the post-split basis against a pre-split 08-12, so filling it
+    needs a basis rebase of the history, and that is not insert-only. Without
+    an accepted state such a gap keeps the nightly red for good."""
+
+    DE = TestStoreGapsAreHeldUntilTheStoreHoldsThem.DE
+    US = TestStoreGapsAreHeldUntilTheStoreHoldsThem.US
+
+    def _ledger_path(self) -> Path:
+        return get_config().data_dir / "data" / "market" / "store_gaps.json"
+
+    def _arrange(self, monkeypatch, missing: list[str], dates: list[str]) -> None:
+        for sym in self.US + self.DE:
+            held = [d for d in dates if not (sym == "EU0.DE" and d in missing)]
+            _write_raw(get_config().ohlcv_dir / f"{sym}.jsonl", [_tight_line(d, 1.5) for d in held])
+        series = {s: {d: _ROW for d in dates} for s in self.US + self.DE}
+        for d in missing:
+            series["EU0.DE"][d] = _NAN_ROW  # the vendor still cannot fill it
+        monkeypatch.setattr(fo, "_fetch_symbol", _gap_vendor(series, {}))
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+
+    def _run(self, monkeypatch) -> int:
+        return _run_main(monkeypatch, ["--symbols", ",".join(self.US + self.DE)])
+
+    def _accepted(self, reason: str = "needs a split-basis rebase") -> dict:
+        return {"status": "accepted", "reason": reason, "accepted_on": "2026-09-26"}
+
+    def test_an_accepted_gap_stays_green_inside_the_lookback(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        dates = _weekdays_to_end(4)
+        self._arrange(monkeypatch, [dates[1]], dates)
+        ledger = {"EU0.DE": {dates[1]: self._accepted()}}
+        self._ledger_path().write_text(json.dumps(ledger) + "\n")
+
+        assert self._run(monkeypatch) == 0
+        # Kept as it was, night after night, not re-opened by the scan.
+        assert json.loads(self._ledger_path().read_text()) == ledger
+        assert self._run(monkeypatch) == 0
+        assert json.loads(self._ledger_path().read_text()) == ledger
+
+    def test_an_accepted_entry_without_a_reason_is_never_green(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        dates = _weekdays_to_end(4)
+        self._arrange(monkeypatch, [dates[1]], dates)
+        text = json.dumps({"EU0.DE": {dates[1]: self._accepted(reason="  ")}}) + "\n"
+        self._ledger_path().write_text(text)
+
+        assert self._run(monkeypatch) == fo.EXIT_STORE_GAP
+        err = capsys.readouterr().err
+        assert "unreadable" in err and "reason" in err
+        assert self._ledger_path().read_text() == text
+
+    def test_a_fresh_gap_beside_an_accepted_one_still_goes_red(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        dates = _weekdays_to_end(4)
+        self._arrange(monkeypatch, [dates[1], dates[2]], dates)
+        self._ledger_path().write_text(
+            json.dumps({"EU0.DE": {dates[1]: self._accepted()}}) + "\n"
+        )
+
+        assert self._run(monkeypatch) == fo.EXIT_STORE_GAP
+        assert json.loads(self._ledger_path().read_text()) == {
+            "EU0.DE": {dates[1]: self._accepted(), dates[2]: "no-close"}
+        }
+
+    def test_the_cli_accepts_an_open_gap_with_its_reason(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        dates = _weekdays_to_end(4)
+        self._arrange(monkeypatch, [dates[1]], dates)
+        self._ledger_path().write_text(json.dumps({"EU0.DE": {dates[1]: "no-close"}}) + "\n")
+
+        rc = _run_main(monkeypatch, ["--accept-gap", f"EU0.DE:{dates[1]}", "--reason", "basis break"])
+
+        assert rc == 0
+        assert json.loads(self._ledger_path().read_text()) == {
+            "EU0.DE": {
+                dates[1]: {
+                    "status": "accepted",
+                    "reason": "basis break",
+                    "accepted_on": date.today().isoformat(),
+                }
+            }
+        }
+
+    def test_the_cli_refuses_an_acceptance_without_a_reason(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        dates = _weekdays_to_end(4)
+        self._arrange(monkeypatch, [dates[1]], dates)
+        with pytest.raises(SystemExit) as excinfo:
+            _run_main(monkeypatch, ["--accept-gap", f"EU0.DE:{dates[1]}", "--reason", " "])
+        assert excinfo.value.code == 2
+        assert "--accept-gap requires a non-empty --reason" in capsys.readouterr().err
+        assert not self._ledger_path().exists()
+
+    def test_the_cli_refuses_a_date_the_store_already_holds(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        dates = _weekdays_to_end(4)
+        self._arrange(monkeypatch, [dates[1]], dates)
+        with pytest.raises(SystemExit):
+            _run_main(monkeypatch, ["--accept-gap", f"EU0.DE:{dates[2]}", "--reason", "x"])
+        assert "already holds" in capsys.readouterr().err
+        assert not self._ledger_path().exists()
+
+    def test_a_reason_without_an_acceptance_is_refused(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        with pytest.raises(SystemExit) as excinfo:
+            _run_main(monkeypatch, ["--symbols", "SPY", "--reason", "x"])
+        assert excinfo.value.code == 2
+        assert "--reason is only used with --accept-gap" in capsys.readouterr().err

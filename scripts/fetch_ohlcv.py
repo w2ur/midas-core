@@ -51,7 +51,9 @@ from engine.store_gaps import (
     OPEN_VERDICTS,
     PROBE_SIZE,
     Verdict,
+    accepted_entry,
     bucket_traded,
+    is_accepted,
     lookback_start,
     parse_ledger,
     render_ledger,
@@ -852,14 +854,25 @@ def _heal_store_gaps(scope: set[str], end: date, crypto: frozenset[str]) -> Stor
         for d, reason in gaps.items()
         if reason == "quarantined" and d not in stored[symbol]
     }
+    # A gap a human accepted as unfillable, with a reason on record, is green:
+    # never refetched and never re-opened by the scan, however long it stays
+    # inside the lookback. It leaves the ledger only once the store holds it.
+    accepted = {
+        (symbol, d): entry
+        for symbol, gaps in held.items()
+        if symbol in scope
+        for d, entry in gaps.items()
+        if is_accepted(entry) and d not in stored[symbol]
+    }
+    settled = for_a_human | set(accepted)
     candidates: dict[str, set[str]] = {s: set(ds) for s, ds in scan.member_gaps.items()}
     for symbol, gaps in held.items():
         if symbol in scope:
             missing = {d for d in gaps if d not in stored[symbol]}
             if missing:
                 candidates.setdefault(symbol, set()).update(missing)
-    for symbol, d in for_a_human:
-        candidates[symbol].discard(d)
+    for symbol, d in settled:
+        candidates.get(symbol, set()).discard(d)
 
     # Every date a symbol may be asked about, so each is fetched ONCE, over a
     # window opening HEAL_WINDOW_DAYS before the oldest of them: wide, because
@@ -868,7 +881,12 @@ def _heal_store_gaps(scope: set[str], end: date, crypto: frozenset[str]) -> Stor
     # of it (a window starting on the date read 2026-05-01, May Day, as
     # unfetched).
     asked: dict[str, set[str]] = {s: set(ds) for s, ds in candidates.items()}
-    for (_, d), lacking in scan.bucket_candidates.items():
+    bucket_candidates = {
+        key: unsettled
+        for key, lacking in scan.bucket_candidates.items()
+        if (unsettled := tuple(s for s in lacking if (s, key[1]) not in settled))
+    }
+    for (_, d), lacking in bucket_candidates.items():
         for symbol in lacking:
             asked.setdefault(symbol, set()).add(d)
     frames: dict[str, pd.DataFrame | None] = {}
@@ -885,14 +903,13 @@ def _heal_store_gaps(scope: set[str], end: date, crypto: frozenset[str]) -> Stor
     # A date the bucket lacks wholesale: a holiday or a hole. The best-covered
     # members are asked first; a closed day is one their series runs across.
     closed: list[str] = []
-    for (bucket, d), lacking in scan.bucket_candidates.items():
+    for (bucket, d), lacking in bucket_candidates.items():
         traded = bucket_traded([verdict(serve(s), d) for s in lacking[:PROBE_SIZE]])
         if traded is False:
             closed.append(f"{bucket or 'US'} {d}")
             continue
         for symbol in lacking:
-            if (symbol, d) not in for_a_human:
-                candidates.setdefault(symbol, set()).add(d)
+            candidates.setdefault(symbol, set()).add(d)
 
     open_gaps: dict[str, dict[str, str]] = {}
     for symbol, d in sorted(for_a_human):
@@ -925,9 +942,13 @@ def _heal_store_gaps(scope: set[str], end: date, crypto: frozenset[str]) -> Stor
                 open_gaps.setdefault(symbol, {})[row.date] = "quarantined"
 
     if readable:
-        kept = {s: gaps for s, gaps in held.items() if s not in scope}
+        kept = {s: dict(gaps) for s, gaps in held.items() if s not in scope}
+        for (symbol, d), entry in accepted.items():
+            kept.setdefault(symbol, {})[d] = entry
+        for symbol, gaps in open_gaps.items():
+            kept.setdefault(symbol, {}).update(gaps)
         ledger_path.parent.mkdir(parents=True, exist_ok=True)
-        ledger_path.write_text(render_ledger({**kept, **open_gaps}), encoding="utf-8")
+        ledger_path.write_text(render_ledger(kept), encoding="utf-8")
 
     filled = sum(filled_by_date.values())
     print(
@@ -940,6 +961,7 @@ def _heal_store_gaps(scope: set[str], end: date, crypto: frozenset[str]) -> Stor
         )
         + f"; {not_traded} date(s) the vendor's own series skips (not traded)"
         + (f"; {quarantined} refused by the ingest tripwire, held" if quarantined else "")
+        + (f"; {len(accepted)} accepted as unfillable, green" if accepted else "")
         + (f"; closed: {', '.join(closed)}" if closed else "")
         + "."
     )
@@ -966,6 +988,43 @@ def _heal_store_gaps(scope: set[str], end: date, crypto: frozenset[str]) -> Stor
             file=sys.stderr,
         )
     return StoreGapReport(open_gaps, filled, quarantined, readable)
+
+
+def _accept_gap(parser: argparse.ArgumentParser, target: str, reason: str | None) -> int:
+    """``--accept-gap SYMBOL:DATE --reason TEXT``: record a human's acceptance.
+
+    Refuses an empty reason (an acceptance nobody can explain is not a
+    decision), a date the store already holds, and an unreadable ledger,
+    which it never overwrites.
+    """
+    if reason is None or not reason.strip():
+        parser.error("--accept-gap requires a non-empty --reason")
+    symbol, _, day = target.rpartition(":")
+    try:
+        accepted_on = date.today()
+        when = date.fromisoformat(day)
+    except ValueError:
+        parser.error(f"--accept-gap expects SYMBOL:YYYY-MM-DD, got {target!r}")
+    path = get_config().ohlcv_dir / f"{symbol}.jsonl"
+    if not symbol or not path.exists():
+        parser.error(f"--accept-gap: the store has no file for {symbol!r}")
+    if when.isoformat() in _existing_dates(path):
+        parser.error(
+            f"--accept-gap: the store already holds {when} for {symbol}; there "
+            "is no gap to accept"
+        )
+    ledger_path = _store_gaps_path()
+    held: dict = {}
+    if ledger_path.exists():
+        try:
+            held = parse_ledger(ledger_path.read_text(encoding="utf-8"))
+        except ValueError as exc:
+            parser.error(f"--accept-gap: the ledger at {ledger_path} is unreadable ({exc})")
+    held.setdefault(symbol, {})[when.isoformat()] = accepted_entry(reason, accepted_on)
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    ledger_path.write_text(render_ledger(held), encoding="utf-8")
+    print(f"Accepted the {symbol} gap on {when}: {reason.strip()}")
+    return 0
 
 
 def main() -> int:
@@ -1036,7 +1095,28 @@ def main() -> int:
             "re-runs after a universe change."
         ),
     )
+    parser.add_argument(
+        "--accept-gap",
+        metavar="SYMBOL:DATE",
+        default=None,
+        help=(
+            "Mark one store gap as accepted in data/market/store_gaps.json, "
+            "with a required --reason, then exit without fetching. An accepted "
+            "gap is green and never re-opened. It is for a date that cannot be "
+            "filled insert-only, e.g. a vendor row on another split basis."
+        ),
+    )
+    parser.add_argument(
+        "--reason",
+        default=None,
+        help="Why the --accept-gap date cannot be filled. Required with it.",
+    )
     args = parser.parse_args()
+
+    if args.accept_gap is not None:
+        return _accept_gap(parser, args.accept_gap, args.reason)
+    if args.reason is not None:
+        parser.error("--reason is only used with --accept-gap")
 
     if args.resweep and not args.symbols and not args.resweep_held:
         parser.error("--resweep requires an explicit --symbols list")
