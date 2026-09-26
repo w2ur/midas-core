@@ -17,6 +17,7 @@ import logging
 import re
 import os
 import sys
+from bisect import bisect_left
 from datetime import date, timedelta
 from pathlib import Path
 from typing import NamedTuple
@@ -435,12 +436,21 @@ def merge_rows(
         return MergeResult(append_new_rows(path, df, skip_dates=salvaged_dates), 0, 0)
 
     symbol = path.stem
-    # The newest stored close, used as the reference for a brand-new row.
-    # Taken by date rather than by file position: 529 of the committed files
-    # are not in date order, so "the last line" is not "the latest bar".
-    latest_stored_close: float | None = None
-    if stored:
-        latest_stored_close = _close_of(stored[max(stored)])
+    # The reference for a brand-new row is the newest stored close BEFORE its
+    # own date. For the nightly append that is the newest close in the file;
+    # for a date inserted inside the series (the store-gap refetch, follow-up
+    # review r6, I1) it is the bar before it, not one from weeks later —
+    # GBF.DE 2026-09-07 was refused at x1.47 against a close from after a real
+    # 30% fall. Taken by date rather than by file position: 529 of the
+    # committed files are not in date order, so "the last line" is not "the
+    # latest bar". Read from the lines as they stood before this merge, so a
+    # revision in the same frame never moves the reference.
+    stored_dates = sorted(stored)
+    as_read = dict(stored)
+
+    def reference_close(d: str) -> float | None:
+        before = bisect_left(stored_dates, d)
+        return _close_of(as_read[stored_dates[before - 1]]) if before else None
 
     new_rows: dict[str, str] = {}
     revised = 0
@@ -455,13 +465,12 @@ def merge_rows(
         line = json.dumps(record)
         incoming = record["close"]
         if d not in existing:
-            if quarantine is not None and latest_stored_close is not None:
-                ratio = _out_of_band(latest_stored_close, incoming, NEW_ROW_LIMIT)
+            reference = reference_close(d) if quarantine is not None else None
+            if reference is not None:
+                ratio = _out_of_band(reference, incoming, NEW_ROW_LIMIT)
                 if ratio is not None:
                     refused.append(
-                        QuarantinedRow(
-                            symbol, d, "new-row", latest_stored_close, incoming, ratio
-                        )
+                        QuarantinedRow(symbol, d, "new-row", reference, incoming, ratio)
                     )
                     continue
             new_rows[d] = line

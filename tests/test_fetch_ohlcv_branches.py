@@ -1705,6 +1705,35 @@ class TestStoreGapsAreHeldUntilTheStoreHoldsThem:
         assert self._run(monkeypatch, series) == 0
         assert self._ledger() == {}
 
+    def test_a_refetched_row_the_tripwire_refuses_is_held_for_a_human(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: 913a114a3 — the BYND shape: the store's 08-12 is on the
+        # pre-split basis and the vendor serves 08-13 on the post-split one. The refetch is insert-only;
+        # it must not hand the refusal to the adjudication pass, whose
+        # explained branch re-merges two years of history with the tripwire off.
+        dates = _weekdays_to_end(4)
+        missing = dates[1]
+        self._seed(["EU0.DE"], dates, missing)
+        series = {s: {d: _ROW for d in dates} for s in self.US + self.DE}
+        series["EU0.DE"][missing] = [1, 2, 0.5, 150.0, 150.0, 100]
+
+        def no_calendar(symbol):
+            raise AssertionError(f"adjudication asked about {symbol}")
+
+        monkeypatch.setattr(fo, "_fetch_actions", no_calendar)
+        assert self._run(monkeypatch, series) == fo.EXIT_STORE_GAP
+        assert self._ledger() == {"EU0.DE": {missing: "quarantined"}}
+        quarantine = get_config().data_dir / "data" / "market" / "quarantine" / "EU0.DE.jsonl"
+        assert len(quarantine.read_text().splitlines()) == 1
+
+        # Held, not re-tried: a quarantine is adjudicated by a human, never
+        # waved through because a later night's refetch happens to pass.
+        series["EU0.DE"][missing] = _ROW
+        assert self._run(monkeypatch, series) == fo.EXIT_STORE_GAP
+        assert missing not in fo._existing_dates(get_config().ohlcv_dir / "EU0.DE.jsonl")
+        assert len(quarantine.read_text().splitlines()) == 1
+
     def test_a_bank_holiday_the_vendor_confirms_stays_green(
         self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -40,7 +40,6 @@ from engine.fees import classify_ticker
 from engine.quotes import vendor_unit_scale
 from engine.ohlcv_ingest import (
     MergeResult,
-    QuarantinedRow,
     existing_dates as _existing_dates,
     fetch_window_start,
     flatten_columns,
@@ -790,8 +789,9 @@ class StoreGapReport(NamedTuple):
     open: dict[str, dict[str, str]]
     #: Rows inserted into the store from the refetch.
     filled: int
-    #: Rows the tripwire refused on the way in, for the adjudication pass.
-    refused: dict[str, tuple[QuarantinedRow, ...]]
+    #: Rows the tripwire refused on the way in. Held in the ledger for a
+    #: human, NOT handed to `_adjudicate`: its explained branch re-merges two
+    #: years of history with the tripwire off, and this pass only ever adds.
     quarantined: int
     #: False when the ledger could not be read. Never green: the held gaps
     #: it carries are unknown, and it is left untouched rather than rewritten.
@@ -841,12 +841,25 @@ def _heal_store_gaps(scope: set[str], end: date, crypto: frozenset[str]) -> Stor
                 file=sys.stderr,
             )
 
+    # A gap whose refetched row the tripwire refused waits for a human: a
+    # quarantine is adjudicated, never waved through because a later night's
+    # refetch happens to pass — and re-asking nightly would only append the
+    # same refusal to the quarantine file again.
+    for_a_human = {
+        (symbol, d)
+        for symbol, gaps in held.items()
+        if symbol in scope
+        for d, reason in gaps.items()
+        if reason == "quarantined" and d not in stored[symbol]
+    }
     candidates: dict[str, set[str]] = {s: set(ds) for s, ds in scan.member_gaps.items()}
     for symbol, gaps in held.items():
         if symbol in scope:
             missing = {d for d in gaps if d not in stored[symbol]}
             if missing:
                 candidates.setdefault(symbol, set()).update(missing)
+    for symbol, d in for_a_human:
+        candidates[symbol].discard(d)
 
     # Every date a symbol may be asked about, so each is fetched ONCE, over a
     # window opening HEAL_WINDOW_DAYS before the oldest of them: wide, because
@@ -878,10 +891,12 @@ def _heal_store_gaps(scope: set[str], end: date, crypto: frozenset[str]) -> Stor
             closed.append(f"{bucket or 'US'} {d}")
             continue
         for symbol in lacking:
-            candidates.setdefault(symbol, set()).add(d)
+            if (symbol, d) not in for_a_human:
+                candidates.setdefault(symbol, set()).add(d)
 
     open_gaps: dict[str, dict[str, str]] = {}
-    refused: dict[str, tuple[QuarantinedRow, ...]] = {}
+    for symbol, d in sorted(for_a_human):
+        open_gaps.setdefault(symbol, {})[d] = "quarantined"
     filled_by_date: dict[str, int] = {}
     not_traded = 0
     quarantined = 0
@@ -905,7 +920,6 @@ def _heal_store_gaps(scope: set[str], end: date, crypto: frozenset[str]) -> Stor
         for d in fill - {r.date for r in merged.refused}:
             filled_by_date[d] = filled_by_date.get(d, 0) + 1
         if merged.refused:
-            refused[symbol] = merged.refused
             quarantined += merged.quarantined
             for row in merged.refused:
                 open_gaps.setdefault(symbol, {})[row.date] = "quarantined"
@@ -925,6 +939,7 @@ def _heal_store_gaps(scope: set[str], end: date, crypto: frozenset[str]) -> Stor
             else ""
         )
         + f"; {not_traded} date(s) the vendor's own series skips (not traded)"
+        + (f"; {quarantined} refused by the ingest tripwire, held" if quarantined else "")
         + (f"; closed: {', '.join(closed)}" if closed else "")
         + "."
     )
@@ -950,7 +965,7 @@ def _heal_store_gaps(scope: set[str], end: date, crypto: frozenset[str]) -> Stor
             "tripwire refused. Each needs a human.",
             file=sys.stderr,
         )
-    return StoreGapReport(open_gaps, filled, refused, quarantined, readable)
+    return StoreGapReport(open_gaps, filled, quarantined, readable)
 
 
 def main() -> int:
@@ -1312,9 +1327,6 @@ def main() -> int:
     if not (args.names_only or args.resweep or args.backfill):
         store_gaps = _heal_store_gaps(set(symbols), end, crypto_bucket)
         total_new += store_gaps.filled
-        total_quarantined += store_gaps.quarantined
-        for symbol, rows in store_gaps.refused.items():
-            refused_rows[symbol] = refused_rows.get(symbol, ()) + rows
 
     if registry_updates:
         existing_reg = load_registry()
