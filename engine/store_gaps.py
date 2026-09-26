@@ -22,10 +22,11 @@ So this module reads the STORED series, not tonight's window:
   a **member gap**.
 - A date the bucket lacks wholesale is either a holiday or a vendor hole, and
   the store cannot tell them apart — `.L` on the 2026-08-31 bank holiday
-  (0 of 157) looks exactly like `.CO` on 2026-09-17 (0 of 23). It is a **bucket
-  candidate** when a reference says the market could have traded (SPY for US,
-  another equity bucket's majority elsewhere, every day for crypto, weekdays
-  for FX), and the vendor decides: asked over a wide window, it serves a
+  (0 of 157) looks exactly like `.CO` on 2026-09-17 (0 of 23). Every such
+  weekday (every day, for crypto) is a **bucket candidate**, and no
+  store-derived reference may call it closed: a reference can sit in the same
+  hole (follow-up review r7, I-1 — SPY missing with the US, or no equity
+  bucket holding the date). The vendor decides: asked over a wide window, it serves a
   closed day with no row inside an otherwise continuous series (measured
   2026-09-26: BP.L 08-31 and SPY 09-07 absent, SAP.DE 09-07/09-17, AI.PA 07-31
   and SPY 09-22 all present with a close).
@@ -79,14 +80,6 @@ HEAL_WINDOW_DAYS = 90
 #: Buckets that trade every calendar day, weekends included.
 EVERY_DAY_BUCKETS = frozenset({"crypto"})
 
-#: Buckets that trade every weekday and are nobody's reference: FX has no
-#: exchange holidays of its own, and neither it nor crypto says anything about
-#: whether an exchange opened.
-CALENDAR_BUCKETS = EVERY_DAY_BUCKETS | {"fx"}
-
-#: The US bucket (no suffix) and the series that says whether it traded.
-US_BUCKET = ""
-US_REFERENCE = "SPY"
 
 
 def lookback_start(end: date, trading_days: int = GAP_LOOKBACK_TRADING_DAYS) -> date:
@@ -108,7 +101,7 @@ class GapScan:
     #: Symbol -> dates its bucket traded (by majority) that it lacks.
     member_gaps: dict[str, frozenset[str]]
     #: (bucket, date) -> the in-scope symbols lacking a date their bucket does
-    #: not hold by majority but a reference says it could have traded. Ordered
+    #: not hold by majority, on a day it could have traded. Ordered
     #: best-covered first: the vendor is probed in that order.
     bucket_candidates: dict[tuple[str, str], tuple[str, ...]]
 
@@ -158,17 +151,13 @@ def scan_store(
                 lacking_by[(bucket, d)] = lacking
 
     def could_trade(bucket: str, d: str) -> bool:
-        if bucket in EVERY_DAY_BUCKETS:
-            return True
-        if bucket in CALENDAR_BUCKETS:
-            return _weekday(d)
-        if bucket == US_BUCKET and US_REFERENCE in spans:
-            return d in dates_by_symbol[US_REFERENCE]
-        return _weekday(d) and any(
-            d in held
-            for other, held in majority.items()
-            if other != bucket and other not in CALENDAR_BUCKETS
-        )
+        # No store-derived reference may call a weekday closed: a reference
+        # can sit in the same hole (follow-up review r7, I-1 — SPY missing
+        # with the US bucket, or no equity bucket holding the date at all),
+        # and then the hole read as a holiday and the run exited 0. A weekday
+        # a bucket lacks wholesale is undecided; the vendor probe
+        # (`bucket_traded`) tells a closed day from a hole.
+        return bucket in EVERY_DAY_BUCKETS or _weekday(d)
 
     def coverage(symbol: str) -> int:
         return sum(1 for d in dates_by_symbol[symbol] if start <= d <= end)

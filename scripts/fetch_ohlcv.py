@@ -807,7 +807,9 @@ def _served_closes(df: pd.DataFrame | None) -> dict[str, bool] | None:
     return {ts.date().isoformat(): bool(pd.notna(close)) for ts, close in df["Close"].items()}
 
 
-def _heal_store_gaps(scope: set[str], end: date, crypto: frozenset[str]) -> StoreGapReport:
+def _heal_store_gaps(
+    scope: set[str], end: date, crypto: frozenset[str], *, full_universe: bool = False
+) -> StoreGapReport:
     """Find the trading days the STORED series skips, refetch them, hold the rest.
 
     Follow-up money review r6, I1 — see `engine.store_gaps` for the rule.
@@ -828,6 +830,9 @@ def _heal_store_gaps(scope: set[str], end: date, crypto: frozenset[str]) -> Stor
         end=end.isoformat(),
     )
 
+    # Every symbol the universe still names, for closing out a departed
+    # symbol's entries. Taken before `scope` is narrowed to stored symbols.
+    universe = set(scope)
     ledger_path = _store_gaps_path()
     held: dict[str, dict[str, str]] = {}
     readable = True
@@ -926,6 +931,15 @@ def _heal_store_gaps(scope: set[str], end: date, crypto: frozenset[str]) -> Stor
         for d, v in verdicts.items():
             if v in OPEN_VERDICTS:
                 open_gaps.setdefault(symbol, {})[d] = v.value
+            elif (
+                v is Verdict.NOT_TRADED
+                and held.get(symbol, {}).get(d) == Verdict.NO_CLOSE.value
+            ):
+                # The vendor already served this date as a trading day (with
+                # no close). A later series that omits it is the request-shape
+                # inconsistency in the other direction, not a holiday: the
+                # gap stays held (follow-up review r7; r2 M-1, r3 M1).
+                open_gaps.setdefault(symbol, {})[d] = Verdict.NO_CLOSE.value
             elif v is Verdict.NOT_TRADED:
                 not_traded += 1
         fill = {d for d, v in verdicts.items() if v is Verdict.FILLED}
@@ -943,6 +957,19 @@ def _heal_store_gaps(scope: set[str], end: date, crypto: frozenset[str]) -> Stor
 
     if readable:
         kept = {s: dict(gaps) for s, gaps in held.items() if s not in scope}
+        if full_universe:
+            # Only a full-universe run knows a symbol has LEFT (a crypto-only
+            # or targeted run's scope is narrower by design, and leaves the
+            # rest alone). A departed symbol is never fetched again, so its
+            # entries would park an open gap in silence for good (follow-up
+            # review r7, r2 M-2): they are closed out, and the log says why.
+            for symbol in sorted(s for s in kept if s not in universe):
+                gaps = kept.pop(symbol)
+                print(
+                    f"Store-gap ledger: closed out {symbol} ({', '.join(sorted(gaps))}): "
+                    "the symbol has left the universe and no book holds it, so no "
+                    "run will fetch it again. Its store file keeps the gap."
+                )
         for (symbol, d), entry in accepted.items():
             kept.setdefault(symbol, {})[d] = entry
         for symbol, gaps in open_gaps.items():
@@ -1405,7 +1432,12 @@ def main() -> int:
     # their callers are a human or the weekly held-ticker sweep.
     store_gaps: StoreGapReport | None = None
     if not (args.names_only or args.resweep or args.backfill):
-        store_gaps = _heal_store_gaps(set(symbols), end, crypto_bucket)
+        store_gaps = _heal_store_gaps(
+            set(symbols),
+            end,
+            crypto_bucket,
+            full_universe=not (args.symbols or args.crypto_only),
+        )
         total_new += store_gaps.filled
 
     if registry_updates:

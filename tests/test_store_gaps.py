@@ -85,12 +85,13 @@ class TestMemberGaps:
 
     def test_exactly_half_is_not_a_majority(self) -> None:
         # Two of four hold it: the bucket's own calendar is undecided, so it is
-        # not a member gap — with no reference trading that day, nothing at all.
+        # not a member gap. It is a weekday, so the vendor probe decides.
         store = {"A.DE": set(DAYS), "B.DE": set(DAYS)}
         store["C.DE"] = _all_but("2026-09-17")
         store["D.DE"] = _all_but("2026-09-17")
         assert _scan(store).member_gaps == {}
-        assert _scan(store).bucket_candidates == {}
+        assert set(_scan(store).bucket_candidates) == {(".DE", "2026-09-17")}
+        assert set(_scan(store).bucket_candidates[(".DE", "2026-09-17")]) == {"C.DE", "D.DE"}
 
     def test_dates_before_a_symbols_first_row_are_never_counted(self) -> None:
         # A first ingest has no history before its first date; that is not a gap.
@@ -130,13 +131,18 @@ class TestBucketCandidates:
         assert set(scan.bucket_candidates) == {("", "2026-09-22")}
         assert set(scan.bucket_candidates[("", "2026-09-22")]) == {f"US{i}" for i in range(5)}
 
-    def test_a_us_holiday_spy_does_not_hold_is_nothing(self) -> None:
-        # 2026-09-07, Labor Day: one US-bucket file (^VIX) held it, SPY did not.
+    def test_a_us_date_spy_also_lacks_is_undecided_not_a_holiday(self) -> None:
+        # Regression: 82adee88d — follow-up review r7, I-1. A US holiday (Labor Day) and a
+        # vendor hole that took SPY with it (09-22, had SPY not come back on
+        # its own) are the same input here. SPY lacking the date used to mean
+        # "closed", before any vendor probe; now it is a candidate, and the
+        # probe decides.
         store = {"SPY": _all_but("2026-09-21"), "^VIX": set(DAYS)}
         for i in range(5):
             store[f"US{i}"] = _all_but("2026-09-21")
-        assert _scan(store).bucket_candidates == {}
-        assert _scan(store).member_gaps == {}
+        scan = _scan(store)
+        assert set(scan.bucket_candidates) == {("", "2026-09-21")}
+        assert scan.member_gaps == {}
 
     def test_a_date_another_exchange_traded_is_a_candidate_not_a_verdict(self) -> None:
         # Both a wholesale vendor hole (.CO on 09-17) and a bank holiday (.L on
@@ -148,11 +154,23 @@ class TestBucketCandidates:
         scan = _scan(store)
         assert set(scan.bucket_candidates) == {(".L", "2026-09-17")}
 
-    def test_a_date_no_other_equity_bucket_traded_is_nothing(self) -> None:
+    def test_a_date_no_other_equity_bucket_traded_is_still_undecided(self) -> None:
+        # Regression: 82adee88d — follow-up review r7, I-1. A hole across every equity
+        # bucket, or a European hole on a US holiday that also hits `.L`, left
+        # no bucket holding the date, and it read as a holiday. A weekday a
+        # non-calendar bucket lacks wholesale is undecided: both buckets go to
+        # the vendor probe.
         store = {f"P{i}.PA": _all_but("2026-09-17") for i in range(4)}
         for i in range(3):
             store[f"L{i}.L"] = _all_but("2026-09-17")
-        # Crypto trades every day, weekends included; it is no reference.
+        store["BTC-USD"] = set(DAYS) | {"2026-09-19", "2026-09-20"}
+        assert set(_scan(store).bucket_candidates) == {
+            (".PA", "2026-09-17"),
+            (".L", "2026-09-17"),
+        }
+
+    def test_a_weekend_is_never_an_equity_candidate(self) -> None:
+        store = {f"P{i}.PA": set(DAYS) for i in range(4)}
         store["BTC-USD"] = set(DAYS) | {"2026-09-19", "2026-09-20"}
         assert _scan(store).bucket_candidates == {}
 
