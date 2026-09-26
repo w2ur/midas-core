@@ -275,3 +275,39 @@ class TestAcceptedEntries:
     def test_an_incomplete_acceptance_raises(self, entry: dict, message: str) -> None:
         with pytest.raises(ValueError, match=message):
             parse_ledger(json.dumps({"BYND": {"2026-08-13": entry}}))
+
+
+class TestANullRowIsUndecided:
+    """Follow-up review r8 (r4 I1): a null row (no close, no volume) is how the
+    vendor serves a real trading day it has no price for, and sometimes a
+    holiday. Only "no row at all" is `NOT_TRADED`."""
+
+    def test_a_null_row_is_undecided(self) -> None:
+        served = {"2026-03-20": True, "2026-03-23": None, "2026-03-24": True}
+        assert verdict(served, "2026-03-23") is Verdict.UNDECIDED
+
+    def test_undecided_never_reaches_the_ledger(self) -> None:
+        from engine.store_gaps import OPEN_VERDICTS
+
+        assert Verdict.UNDECIDED not in OPEN_VERDICTS
+        with pytest.raises(ValueError):
+            parse_ledger('{"X.CO": {"2026-03-23": "undecided"}}')
+
+    def test_positive_hourly_volume_is_traded(self) -> None:
+        from engine.store_gaps import intraday_traded
+
+        vols = {"2026-03-20": 248_960.0, "2026-03-23": 144_824.0, "2026-03-24": 1.0}
+        assert intraday_traded(vols, "2026-03-23") is True
+
+    def test_no_hourly_volume_inside_the_series_is_closed(self) -> None:
+        from engine.store_gaps import intraday_traded
+
+        assert intraday_traded({"2026-08-28": 5.0, "2026-09-01": 5.0}, "2026-08-31") is False
+        assert intraday_traded({"2026-08-28": 5.0, "2026-08-31": 0.0, "2026-09-01": 5.0}, "2026-08-31") is False
+
+    def test_no_hourly_evidence_is_unknown(self) -> None:
+        from engine.store_gaps import intraday_traded
+
+        assert intraday_traded(None, "2026-03-23") is None
+        assert intraday_traded({}, "2026-03-23") is None
+        assert intraday_traded({"2026-03-24": 5.0}, "2026-03-23") is None

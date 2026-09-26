@@ -1814,6 +1814,60 @@ class TestStoreGapsAreHeldUntilTheStoreHoldsThem:
         assert self._run(monkeypatch, series) == fo.EXIT_STORE_GAP
         assert self._ledger() == {"EU0.DE": {missing: "no-close"}}
 
+    def test_a_held_no_close_gap_is_not_downgraded_by_an_empty_refetch(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: 180656fcc — follow-up review r8 (r5 M1, r6 N-M1). Night 1 the
+        # vendor serves the symbol nothing (UNFETCHED) and the entry was
+        # rewritten `unfetched`, erasing the evidence; night 2 its series
+        # omits the date and the `unfetched` entry cleared green.
+        dates = _weekdays_to_end(4)
+        missing = dates[1]
+        self._seed(["EU0.DE"], dates, missing)
+        ledger = get_config().data_dir / "data" / "market" / "store_gaps.json"
+        ledger.write_text(json.dumps({"EU0.DE": {missing: "no-close"}}) + "\n")
+        series = {s: {d: _ROW for d in dates} for s in self.US + self.DE}
+
+        # Night 1: the vendor serves EU0.DE nothing at all.
+        empty = _gap_vendor({s: v for s, v in series.items() if s != "EU0.DE"}, {})
+        monkeypatch.setattr(fo, "_fetch_symbol", empty)
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+        assert _run_main(monkeypatch, ["--symbols", ",".join(self.US + self.DE)]) == fo.EXIT_STORE_GAP
+        assert self._ledger() == {"EU0.DE": {missing: "no-close"}}
+
+        del series["EU0.DE"][missing]  # night 2: the series omits the date
+        assert self._run(monkeypatch, series) == fo.EXIT_STORE_GAP
+        assert self._ledger() == {"EU0.DE": {missing: "no-close"}}
+
+    def test_a_failed_holiday_probe_does_not_fan_out(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: b11a112a1 — follow-up review r8 (r4 M1). When every probe of a
+        # bucket-wide candidate failed, each lacking member got its own wide
+        # refetch: 579 requests for US Labor Day, 719 `unfetched` entries
+        # with every fetch failing, inside a job whose cancellation files no
+        # issue. The candidate is held on its probes alone, and stays red.
+        dates = _weekdays_to_end(4)
+        holiday = dates[1]
+        self._seed(self.US, dates, holiday)
+        series = {s: {d: _ROW for d in dates if not (s in self.US and d == holiday)} for s in self.US + self.DE}
+        narrow = _gap_vendor(series, {})
+        wide_calls: list[str] = []
+
+        def vendor(symbol, start, end, *, vendor_unit=None):
+            if (end - start).days >= 30:
+                wide_calls.append(symbol)
+                if symbol in self.US:
+                    return None  # the vendor is down for the probe window
+            return narrow(symbol, start, end)
+
+        monkeypatch.setattr(fo, "_fetch_symbol", vendor)
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+        assert _run_main(monkeypatch, ["--symbols", ",".join(self.US + self.DE)]) == fo.EXIT_STORE_GAP
+        assert len(wide_calls) <= fo.PROBE_SIZE
+        assert 0 < len(self._ledger()) <= fo.PROBE_SIZE
+        assert all(g == {holiday: "unfetched"} for g in self._ledger().values())
+
     def test_a_bank_holiday_the_vendor_confirms_stays_green(
         self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1851,7 +1905,9 @@ class TestStoreGapsAreHeldUntilTheStoreHoldsThem:
         monkeypatch.setattr(fo, "_fetch_symbol", vendor)
         monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
         assert _run_main(monkeypatch, ["--symbols", ",".join(self.US + self.DE)]) == fo.EXIT_STORE_GAP
-        assert self._ledger() == {s: {missing: "unfetched"} for s in self.DE}
+        # Held on its probes alone (r8, r4 M1), not fanned out to every member.
+        assert 0 < len(self._ledger()) <= fo.PROBE_SIZE
+        assert all(g == {missing: "unfetched"} for g in self._ledger().values())
 
     def test_a_thin_name_that_did_not_trade_stays_green(
         self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
@@ -1920,12 +1976,38 @@ class TestStoreGapsAreHeldUntilTheStoreHoldsThem:
         series = {s: {d: _ROW for d in dates} for s in self.US + self.DE}
         monkeypatch.setattr(fo, "_fetch_symbol", _gap_vendor(series, {}))
         monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
-        monkeypatch.setattr(fo, "_all_symbols", lambda: sorted(self.US + self.DE))
+        monkeypatch.setattr(fo, "_UNIVERSE_RESOLVERS", (lambda: self.US + self.DE,))
 
         assert _run_main(monkeypatch, []) == 0
         assert self._ledger() == {}
         out = capsys.readouterr().out
         assert "GONE.PA" in out and "left the universe" in out and dates[1] in out
+
+    def test_a_resolver_failure_closes_nothing_out(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        # Regression: 808be83d2 — follow-up review r8 (r5 M2). A resolver that raises
+        # (stoxx600.json missing, a corrupt universe file) is swallowed, and
+        # every symbol only it names looked "departed": the full run deleted
+        # their ledger entries, a human's accepted ones included, for good.
+        dates = _weekdays_to_end(4)
+        self._seed([], dates, dates[1])
+        ledger = get_config().data_dir / "data" / "market" / "store_gaps.json"
+        held = {"EU0.DE": {dates[1]: "no-close"}}
+        ledger.write_text(json.dumps(held) + "\n")
+        series = {s: {d: _ROW for d in dates} for s in self.US + self.DE}
+        monkeypatch.setattr(fo, "_fetch_symbol", _gap_vendor(series, {}))
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+
+        def stoxx600():
+            raise FileNotFoundError("data/universes/stoxx600.json")
+
+        others = [s for s in self.US + self.DE if s != "EU0.DE"]
+        monkeypatch.setattr(fo, "_UNIVERSE_RESOLVERS", (lambda: others, stoxx600))
+
+        _run_main(monkeypatch, [])
+        assert self._ledger() == held
+        assert "closed out" not in capsys.readouterr().out
 
     def test_an_unreadable_ledger_is_never_green(
         self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
@@ -2064,3 +2146,142 @@ class TestAnAcceptedGapIsGreen:
             _run_main(monkeypatch, ["--symbols", "SPY", "--reason", "x"])
         assert excinfo.value.code == 2
         assert "--reason is only used with --accept-gap" in capsys.readouterr().err
+
+
+# --- follow-up review r8 (r4 I1): the vendor's null row for a traded day ---
+
+
+class _FakeYahoo:
+    """`yf.download` as yfinance 1.5 behaves, for the fields the code reads.
+
+    Daily bars come from ``daily``: a row whose close is NaN and whose volume
+    is 0 is the vendor's "null row", and yfinance drops it unless
+    ``keepna=True`` (scrapers/history.py drops rows whose price and volume
+    columns are all NaN/0). That filter is the defect, so the fake must have
+    it: a hand-built frame hands the code rows yfinance never would.
+    ``hourly`` maps symbol -> {date: volume} for ``interval="1h"``; a symbol
+    in ``hourly_fails`` raises there.
+    """
+
+    def __init__(self, daily, hourly=None, hourly_fails=()):
+        self.daily, self.hourly, self.hourly_fails = daily, hourly or {}, set(hourly_fails)
+        self.calls: list[tuple[str, str]] = []
+
+    def __call__(self, symbol, start, end, interval="1d", keepna=False, **_kw):
+        start, end = date.fromisoformat(str(start)[:10]), date.fromisoformat(str(end)[:10])
+        self.calls.append((symbol, interval))
+        if interval == "1h":
+            if symbol in self.hourly_fails:
+                raise RuntimeError("1h unavailable")
+            vols = {d: v for d, v in self.hourly.get(symbol, {}).items() if start <= date.fromisoformat(d) < end}
+            idx = pd.DatetimeIndex([pd.Timestamp(f"{d} 10:00") for d in vols], name="Datetime")
+            return pd.DataFrame({f: [1.0] * len(vols) for f in _FIELDS[:-1]} | {"Volume": list(vols.values())}, index=idx)
+        rows = {
+            d: v for d, v in self.daily.get(symbol, {}).items()
+            if start <= date.fromisoformat(d) < end
+            and (keepna or not (v[3] != v[3] and not v[5]))
+        }
+        return _yf_frame(rows) if rows else pd.DataFrame()
+
+
+_NULL_ROW = [float("nan")] * 5 + [0]
+
+
+class TestTheVendorsNullRowIsNotAHoliday:
+    """Regression: 06e202664 — follow-up review r8 (r4 I1). The vendor serves a real
+    trading day it has no price for as a NaN-close, zero-volume row, and
+    yfinance's default `keepna=False` drops it. All 24 `.CO` files lack
+    2026-03-23; the 1h bars show full Copenhagen sessions that day; the heal
+    called it "closed" and exited 0. Holidays sometimes arrive as null rows
+    too (FX 12-25), so the null row is undecided, and the 1h bars settle it."""
+
+    US = TestStoreGapsAreHeldUntilTheStoreHoldsThem.US
+    CO = [f"EU{i}.CO" for i in range(20)]
+
+    def _arrange(self, monkeypatch, missing: str, dates: list[str], *, hourly_on_missing: float | None,
+                 hourly_fails=()):
+        for sym in self.US + self.CO:
+            held = [d for d in dates if not (sym in self.CO and d == missing)]
+            _write_raw(get_config().ohlcv_dir / f"{sym}.jsonl", [_tight_line(d, 1.5) for d in held])
+        daily = {s: {d: _ROW for d in dates} for s in self.US + self.CO}
+        for sym in self.CO:
+            daily[sym][missing] = _NULL_ROW
+        hourly = {}
+        for sym in self.CO:
+            hourly[sym] = {d: 5000.0 for d in dates if d != missing}
+            if hourly_on_missing is not None:
+                hourly[sym][missing] = hourly_on_missing
+        fake = _FakeYahoo(daily, hourly, hourly_fails)
+        monkeypatch.setattr(fo.yf, "download", fake)
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+        return fake
+
+    def _ledger(self) -> dict:
+        path = get_config().data_dir / "data" / "market" / "store_gaps.json"
+        return json.loads(path.read_text()) if path.exists() else {}
+
+    def _run(self, monkeypatch) -> int:
+        return _run_main(monkeypatch, ["--symbols", ",".join(self.US + self.CO)])
+
+    def test_a_null_row_on_a_day_the_hourly_bars_traded_is_held(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        dates = _weekdays_to_end(4)
+        self._arrange(monkeypatch, dates[1], dates, hourly_on_missing=144_824.0)
+        assert self._run(monkeypatch) == fo.EXIT_STORE_GAP
+        assert self._ledger() == {s: {dates[1]: "no-close"} for s in self.CO}
+
+    def test_a_null_row_on_a_holiday_with_no_hourly_volume_stays_green(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        dates = _weekdays_to_end(4)
+        self._arrange(monkeypatch, dates[1], dates, hourly_on_missing=None)
+        assert self._run(monkeypatch) == 0
+        assert self._ledger() == {}
+
+    def test_a_failed_hourly_probe_holds_the_day(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        dates = _weekdays_to_end(4)
+        self._arrange(monkeypatch, dates[1], dates, hourly_on_missing=None, hourly_fails=self.CO)
+        assert self._run(monkeypatch) == fo.EXIT_STORE_GAP
+        assert set(self._ledger()) <= set(self.CO) and self._ledger()
+        assert all(set(g.values()) == {"unfetched"} for g in self._ledger().values())
+
+    def test_the_nightly_hole_detector_sees_a_null_row_on_end(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        # Night N: the whole exchange served `end` as a null row. The
+        # exchange-wide hole check must fire the same night.
+        dates = _weekdays_to_end(4)
+        end = dates[-1]
+        for sym in self.US + self.CO:
+            _write_raw(get_config().ohlcv_dir / f"{sym}.jsonl", [_tight_line(d, 1.5) for d in dates[:-1]])
+        daily = {s: {d: _ROW for d in dates} for s in self.US + self.CO}
+        for sym in self.CO:
+            daily[sym][end] = _NULL_ROW
+        monkeypatch.setattr(fo.yf, "download", _FakeYahoo(daily))
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+        assert self._run(monkeypatch) == fo.EXIT_VENDOR_OUTAGE
+        assert "wide hole" in capsys.readouterr().err  # vendor- or exchange-wide
+
+    def test_a_futures_null_row_is_read_as_no_daily_bar(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Juneteenth 2025: CME traded (GC=F 1h volume at 0.90 of its median),
+        # NYSE did not, and the vendor served the futures a null daily row.
+        # A future's daily bar is a settlement convention: a null row there is
+        # no daily bar, not a hole, or every CME-open US holiday goes red.
+        dates = _weekdays_to_end(4)
+        holiday = dates[1]
+        futs = ["CL=F", "GC=F", "HG=F"]
+        for sym in self.US + futs:
+            held = [d for d in dates if d != holiday]
+            _write_raw(get_config().ohlcv_dir / f"{sym}.jsonl", [_tight_line(d, 1.5) for d in held])
+        daily = {s: {d: _ROW for d in dates if d != holiday} for s in self.US}
+        daily |= {s: {d: (_NULL_ROW if d == holiday else _ROW) for d in dates} for s in futs}
+        hourly = {s: {d: 90_000.0 for d in dates} for s in futs}
+        monkeypatch.setattr(fo.yf, "download", _FakeYahoo(daily, hourly))
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+        assert _run_main(monkeypatch, ["--symbols", ",".join(self.US + futs)]) == 0
+        assert self._ledger() == {}

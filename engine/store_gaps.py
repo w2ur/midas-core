@@ -194,21 +194,52 @@ class Verdict(str, Enum):
     #: Nothing to judge by — no frame, or one that does not reach across the
     #: date (a vendor serving only today's quote). Unknown, never healthy.
     UNFETCHED = "unfetched"
+    #: A null row: no close and no volume. The vendor serves a real trading
+    #: day it has no price for this way (all of `.CO` on 2026-03-23), and
+    #: sometimes a holiday too, so the daily series cannot decide. The caller
+    #: settles it with `intraday_traded`; it never reaches the ledger.
+    UNDECIDED = "undecided"
 
 
 #: The verdicts that leave a gap open, and so the reasons a ledger may record.
 OPEN_VERDICTS = frozenset({Verdict.NO_CLOSE, Verdict.UNFETCHED})
 
 
-def verdict(served: Mapping[str, bool] | None, d: str) -> Verdict:
-    """Classify date ``d`` against what the vendor served: date -> has a close."""
+def verdict(served: Mapping[str, bool | None] | None, d: str) -> Verdict:
+    """Classify date ``d`` against what the vendor served.
+
+    ``served`` maps date -> True (a close), False (a row with volume and no
+    close) or None (a null row: no close, no volume). Only "no row at all
+    inside a series that runs across the date" is `NOT_TRADED`.
+    """
     if not served:
         return Verdict.UNFETCHED
     if d in served:
+        if served[d] is None:
+            return Verdict.UNDECIDED
         return Verdict.FILLED if served[d] else Verdict.NO_CLOSE
     if min(served) < d < max(served):
         return Verdict.NOT_TRADED
     return Verdict.UNFETCHED
+
+
+def intraday_traded(volumes: Mapping[str, float] | None, d: str) -> bool | None:
+    """Whether the vendor's 1h bars show trading on ``d`` (follow-up review r8).
+
+    ``volumes`` maps date -> summed 1h volume. True on positive volume. False
+    when there is none on ``d`` while the 1h series runs across it. None when
+    the bars are unavailable or do not reach ``d``, which is not a holiday.
+    Measured on the cases that decided the rule: 2026-03-23 in Copenhagen
+    (ALK-B.CO 144,824 shares, a null daily row) traded; HSBA.L 2026-04-13
+    traded (9.37M); BP.L 2026-08-31 and SPY 2026-09-07 have no bars at all.
+    """
+    if not volumes:
+        return None
+    if volumes.get(d, 0) > 0:
+        return True
+    if min(volumes) < d < max(volumes):
+        return False
+    return None
 
 
 def bucket_traded(probes: Iterable[Verdict]) -> bool | None:
