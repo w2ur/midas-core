@@ -21,6 +21,7 @@ import json
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_PROJECT_ROOT))
@@ -39,10 +40,24 @@ from engine.fees import classify_ticker
 from engine.quotes import vendor_unit_scale
 from engine.ohlcv_ingest import (
     MergeResult,
+    QuarantinedRow,
     existing_dates as _existing_dates,
     fetch_window_start,
     flatten_columns,
     merge_rows,
+)
+from engine.store_gaps import (
+    GAP_LOOKBACK_TRADING_DAYS,
+    HEAL_WINDOW_DAYS,
+    OPEN_VERDICTS,
+    PROBE_SIZE,
+    Verdict,
+    bucket_traded,
+    lookback_start,
+    parse_ledger,
+    render_ledger,
+    scan_store,
+    verdict,
 )
 from engine.tickers import (
     load_registry,
@@ -343,9 +358,17 @@ def exchange_wide_holes(
 #: (`add_snapshot` refuses a later session's rewrite of that market date).
 EXIT_QUARANTINED = 2
 EXIT_VENDOR_OUTAGE = 3
+#: The stored series still skips a trading day after the run refetched it (a
+#: date the vendor serves with no close, or cannot be asked about). Follow-up
+#: review r6, I1: the hole used to be visible only on the night the vendor
+#: served it, so the next night exited 0 and `failure-issue` closed the alert
+#: as "Recovered" with the date missing for good. The run stays red while
+#: `data/market/store_gaps.json` holds an in-scope gap, so only a night that
+#: finds the store holding the date can close it.
+EXIT_STORE_GAP = 4
 
 #: The exits on which the workflow should still commit what arrived.
-COMMITTABLE_EXITS = (0, EXIT_QUARANTINED, EXIT_VENDOR_OUTAGE)
+COMMITTABLE_EXITS = (0, EXIT_QUARANTINED, EXIT_VENDOR_OUTAGE, EXIT_STORE_GAP)
 
 
 def _fetch_symbol(
@@ -752,6 +775,184 @@ def _apply_split_to_holders(symbol: str, ratio: float) -> list[str]:
     return adjusted
 
 
+def _store_gaps_path() -> Path:
+    """The ledger of held store gaps (`engine.store_gaps`).
+
+    Beside the store and under the same push gate, for `_ledger_path`'s
+    reason. It is what keeps a gap from ageing out of the lookback into a
+    false "Recovered": an entry leaves only when the store holds its date.
+    """
+    return get_config().data_dir / "data" / "market" / "store_gaps.json"
+
+
+class StoreGapReport(NamedTuple):
+    #: symbol -> {date: reason}: in-scope gaps the refetch could not close.
+    open: dict[str, dict[str, str]]
+    #: Rows inserted into the store from the refetch.
+    filled: int
+    #: Rows the tripwire refused on the way in, for the adjudication pass.
+    refused: dict[str, tuple[QuarantinedRow, ...]]
+    quarantined: int
+    #: False when the ledger could not be read. Never green: the held gaps
+    #: it carries are unknown, and it is left untouched rather than rewritten.
+    ledger_readable: bool
+
+
+def _served_closes(df: pd.DataFrame | None) -> dict[str, bool] | None:
+    """date -> whether the vendor served a close for it, for `verdict`."""
+    if df is None or "Close" not in df.columns:
+        return None
+    return {ts.date().isoformat(): bool(pd.notna(close)) for ts, close in df["Close"].items()}
+
+
+def _heal_store_gaps(scope: set[str], end: date, crypto: frozenset[str]) -> StoreGapReport:
+    """Find the trading days the STORED series skips, refetch them, hold the rest.
+
+    Follow-up money review r6, I1 — see `engine.store_gaps` for the rule.
+    Everything the refetch inserts is a date the store does not hold, merged
+    with revision off, so no stored row can change: the pass only ever adds.
+    The tripwire stays on, because a unit flip in an old row is as costly as
+    one in tonight's.
+    """
+    ohlcv_dir = get_config().ohlcv_dir
+    stored = {p.stem: frozenset(_existing_dates(p)) for p in sorted(ohlcv_dir.glob("*.jsonl"))}
+    scope = {s for s in scope if stored.get(s)}
+    start = lookback_start(end)
+    scan = scan_store(
+        stored,
+        bucket_of=lambda s: hole_bucket(s, crypto),
+        scope=scope,
+        start=start.isoformat(),
+        end=end.isoformat(),
+    )
+
+    ledger_path = _store_gaps_path()
+    held: dict[str, dict[str, str]] = {}
+    readable = True
+    if ledger_path.exists():
+        try:
+            held = parse_ledger(ledger_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            readable = False
+            print(
+                f"\nERROR: the store-gap ledger at {ledger_path} is unreadable "
+                f"({exc}). The gaps it holds are unknown, so this run cannot be "
+                "green; the file is left as it is for a human to repair.",
+                file=sys.stderr,
+            )
+
+    candidates: dict[str, set[str]] = {s: set(ds) for s, ds in scan.member_gaps.items()}
+    for symbol, gaps in held.items():
+        if symbol in scope:
+            missing = {d for d in gaps if d not in stored[symbol]}
+            if missing:
+                candidates.setdefault(symbol, set()).update(missing)
+
+    # Every date a symbol may be asked about, so each is fetched ONCE, over a
+    # window opening HEAL_WINDOW_DAYS before the oldest of them: wide, because
+    # the one-day window is the request shape that missed, and reaching BEFORE
+    # the date, because "not traded" needs the vendor's series on both sides
+    # of it (a window starting on the date read 2026-05-01, May Day, as
+    # unfetched).
+    asked: dict[str, set[str]] = {s: set(ds) for s, ds in candidates.items()}
+    for (_, d), lacking in scan.bucket_candidates.items():
+        for symbol in lacking:
+            asked.setdefault(symbol, set()).add(d)
+    frames: dict[str, pd.DataFrame | None] = {}
+    served: dict[str, dict[str, bool] | None] = {}
+
+    def serve(symbol: str) -> dict[str, bool] | None:
+        if symbol not in frames:
+            oldest = date.fromisoformat(min(asked[symbol]))
+            window_start = oldest - timedelta(days=HEAL_WINDOW_DAYS)
+            frames[symbol] = _fetch_symbol(symbol, window_start, end)
+            served[symbol] = _served_closes(frames[symbol])
+        return served[symbol]
+
+    # A date the bucket lacks wholesale: a holiday or a hole. The best-covered
+    # members are asked first; a closed day is one their series runs across.
+    closed: list[str] = []
+    for (bucket, d), lacking in scan.bucket_candidates.items():
+        traded = bucket_traded([verdict(serve(s), d) for s in lacking[:PROBE_SIZE]])
+        if traded is False:
+            closed.append(f"{bucket or 'US'} {d}")
+            continue
+        for symbol in lacking:
+            candidates.setdefault(symbol, set()).add(d)
+
+    open_gaps: dict[str, dict[str, str]] = {}
+    refused: dict[str, tuple[QuarantinedRow, ...]] = {}
+    filled_by_date: dict[str, int] = {}
+    not_traded = 0
+    quarantined = 0
+    # Revision is off for the refetch: past `end`, so no stored date is on or
+    # after it. Every row handed over is one the store lacks, and merge_rows
+    # appends those after the existing lines, which it rewrites verbatim.
+    no_revision = (end + timedelta(days=1)).isoformat()
+    for symbol in sorted(candidates):
+        verdicts = {d: verdict(serve(symbol), d) for d in sorted(candidates[symbol])}
+        for d, v in verdicts.items():
+            if v in OPEN_VERDICTS:
+                open_gaps.setdefault(symbol, {})[d] = v.value
+            elif v is Verdict.NOT_TRADED:
+                not_traded += 1
+        fill = {d for d, v in verdicts.items() if v is Verdict.FILLED}
+        if not fill:
+            continue
+        df = frames[symbol]
+        rows = df[[ts.date().isoformat() in fill for ts in df.index]]
+        merged = _write_rows(symbol, rows, no_revision, guard_anomalies=True)
+        for d in fill - {r.date for r in merged.refused}:
+            filled_by_date[d] = filled_by_date.get(d, 0) + 1
+        if merged.refused:
+            refused[symbol] = merged.refused
+            quarantined += merged.quarantined
+            for row in merged.refused:
+                open_gaps.setdefault(symbol, {})[row.date] = "quarantined"
+
+    if readable:
+        kept = {s: gaps for s, gaps in held.items() if s not in scope}
+        ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        ledger_path.write_text(render_ledger({**kept, **open_gaps}), encoding="utf-8")
+
+    filled = sum(filled_by_date.values())
+    print(
+        f"\nStore gaps (last {GAP_LOOKBACK_TRADING_DAYS} trading days, from "
+        f"{start}): filled {filled} row(s) from the vendor"
+        + (
+            " (" + ", ".join(f"{d}: {n}" for d, n in sorted(filled_by_date.items())) + ")"
+            if filled_by_date
+            else ""
+        )
+        + f"; {not_traded} date(s) the vendor's own series skips (not traded)"
+        + (f"; closed: {', '.join(closed)}" if closed else "")
+        + "."
+    )
+    if open_gaps:
+        by_date: dict[str, list[str]] = {}
+        for symbol, gaps in open_gaps.items():
+            for d in gaps:
+                by_date.setdefault(d, []).append(symbol)
+        listed = "; ".join(
+            f"{d} ({len(syms)} symbol(s): {', '.join(sorted(syms)[:5])}"
+            + ("…" if len(syms) > 5 else "")
+            + ")"
+            for d, syms in sorted(by_date.items())
+        )
+        print(
+            f"\nFAILED: store gap — the stored series still skips a trading day "
+            f"after a refetch reaching {HEAL_WINDOW_DAYS} days before it: {listed}. Held "
+            f"in {ledger_path.name}; this run stays red until the store holds "
+            "each date, so a later night cannot close the issue on a store "
+            "that still lacks it. `no-close` is a date the vendor serves "
+            "without a price; `unfetched` is one it cannot be asked about "
+            "(no data, or only today's quote); `quarantined` is one the ingest "
+            "tripwire refused. Each needs a human.",
+            file=sys.stderr,
+        )
+    return StoreGapReport(open_gaps, filled, refused, quarantined, readable)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -1101,6 +1302,20 @@ def main() -> int:
         if symbol not in registry_updates:  # a first ingest fetched it above
             registry_updates[symbol] = resolve_name(symbol, _fetch_ticker_info(symbol))
 
+    # The holes above are only the ones the vendor served INSIDE tonight's
+    # window, so a date it answered with no row at all on the next night
+    # vanished from view (follow-up review r6, I1). This reads the stored
+    # series instead, after tonight's rows landed. Not on a resweep or a
+    # backfill: those rewrite or re-append a whole window on purpose, and
+    # their callers are a human or the weekly held-ticker sweep.
+    store_gaps: StoreGapReport | None = None
+    if not (args.names_only or args.resweep or args.backfill):
+        store_gaps = _heal_store_gaps(set(symbols), end, crypto_bucket)
+        total_new += store_gaps.filled
+        total_quarantined += store_gaps.quarantined
+        for symbol, rows in store_gaps.refused.items():
+            refused_rows[symbol] = refused_rows.get(symbol, ()) + rows
+
     if registry_updates:
         existing_reg = load_registry()
         merged = _merge_registry(existing_reg, registry_updates)
@@ -1276,6 +1491,10 @@ def main() -> int:
     # reports above are never cut off by an early return.
     if unadjudicated:
         return EXIT_QUARANTINED
+    # Last, so an outage or a quarantine still names itself first; the gap is
+    # reported by `_heal_store_gaps` either way and held in its ledger.
+    if store_gaps is not None and (store_gaps.open or not store_gaps.ledger_readable):
+        return EXIT_STORE_GAP
     return 0
 
 

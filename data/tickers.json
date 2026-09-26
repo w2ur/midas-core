@@ -3984,12 +3984,12 @@
     "currency": "NOK"
   },
   "LTC-EUR": {
-    "name": "Litecoin",
+    "name": "Litecoin EUR",
     "type": "crypto",
     "currency": "EUR"
   },
   "LTC-USD": {
-    "name": "Litecoin",
+    "name": "Litecoin USD",
     "type": "crypto",
     "currency": "USD"
   },

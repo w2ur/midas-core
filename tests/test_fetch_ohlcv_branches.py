@@ -758,16 +758,22 @@ def _all_symbols_fail(symbol: str, start: date, end: date, **_kw):
     return None
 
 
-def _cover(symbols: list[str], close: float = 1.5) -> None:
+def _cover(symbols: list[str], close: float = 1.5, on: str = "2026-08-05") -> None:
     """Give each symbol a store file, i.e. a history of having served rows.
 
     The gate's denominator is store coverage, so a test that does not seed the
     store is testing the "cannot measure" branch whatever else it sets up.
+
+    ``on`` dates that row. Once the run appends `end`, a row on 2026-08-05
+    leaves the file skipping every trading day in between. The store-level
+    detector (follow-up review r6, I1) reads that as a gap wherever something
+    says the market traded — every weekday for FX, another exchange's rows for
+    an equity bucket — so tests shaped like that pass the day before `end`.
     """
     for symbol in symbols:
         _write_raw(
             get_config().ohlcv_dir / f"{symbol}.jsonl",
-            [_tight_line("2026-08-05", close)],
+            [_tight_line(on, close)],
         )
 
 
@@ -1044,6 +1050,7 @@ class TestExitCodes:
             0,
             fo.EXIT_QUARANTINED,
             fo.EXIT_VENDOR_OUTAGE,
+            fo.EXIT_STORE_GAP,
         }
         assert 1 not in fo.COMMITTABLE_EXITS, "an unhandled traceback exits 1"
 
@@ -1334,7 +1341,7 @@ class TestVendorWideHoleNeedsAPopulation:
         self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         covered = [f"FX{i}=X" for i in range(20)]
-        _cover(covered)
+        _cover(covered, on=(_fetch_end() - timedelta(days=1)).isoformat())
         end = _fetch_end()
         today = (end + timedelta(days=1)).isoformat()
         nan = float("nan")
@@ -1402,7 +1409,7 @@ class TestExchangeWideHole:
         assert self._run(monkeypatch, us=200, exchange=".LS", listed=n, holed=n) == 0
 
     def _run_symbols(self, monkeypatch, covered: list[str], holed: set[str]) -> int:
-        _cover(covered)
+        _cover(covered, on=(_fetch_end() - timedelta(days=1)).isoformat())
         d = _fetch_end().isoformat()
         nan = float("nan")
         frames = {
@@ -1493,7 +1500,7 @@ class TestExchangeWideHole:
         ldn = [f"LN{i}.L" for i in range(40)]
         for sym in ldn:
             _write_raw(get_config().ohlcv_dir / f"{sym}.jsonl", [_tight_line(before, 1.5)])
-        _cover(us)
+        _cover(us, on=before)
         frames = {s: {end.isoformat(): [1, 2, 0.5, 1.5, 1.5, 100]} for s in us}
         frames.update({s: {before: [1, 2, 0.5, 1.5, 1.5, 100]} for s in ldn})
         monkeypatch.setattr(fo, "_fetch_symbol", _make_fake_fetch_symbol(frames))
@@ -1553,3 +1560,256 @@ def test_exchange_wide_holes_applies_the_rate_and_floor_per_exchange() -> None:
     }
     # Exactly half is not over the share.
     assert fo.exchange_wide_holes({".VI": {"2026-09-22": 5}}, {".VI": 10}) == {}
+
+
+# --- follow-up review r6, I1: a hole must be read from the STORE ------------
+
+
+def _weekdays_to_end(n: int) -> list[str]:
+    """The last ``n`` weekdays on or before the run's ``end``, ascending."""
+    out: list[str] = []
+    d = _fetch_end()
+    while len(out) < n:
+        if d.weekday() < 5:
+            out.append(d.isoformat())
+        d -= timedelta(days=1)
+    return sorted(out)
+
+
+_ROW = [1, 2, 0.5, 1.5, 1.5, 100]
+_NAN_ROW = [1, 2, 0.5, float("nan"), float("nan"), 100]
+
+
+def _gap_vendor(series: dict[str, dict[str, list]], wide_only: dict[str, set[str]]):
+    """A vendor that serves some dates only over a WIDE window.
+
+    The request-shape miss of the midas-market-data skill: over the next
+    night's one-day revision window the vendor answered with no row for the
+    holed date at all, while a longer window served it (verified live for
+    SAP.DE and AI.PA on 2026-09-25). ``wide_only[symbol]`` holds those dates.
+    """
+
+    def fake(symbol: str, start: date, end: date, *, vendor_unit: str | None = None):
+        rows = {
+            d: v
+            for d, v in series.get(symbol, {}).items()
+            if start <= date.fromisoformat(d) <= end
+            and (d not in wide_only.get(symbol, set()) or (end - start).days >= 30)
+        }
+        return _yf_frame(rows) if rows else None
+
+    return fake
+
+
+class TestStoreGapsAreHeldUntilTheStoreHoldsThem:
+    """Regression: 634222b53 — follow-up money review r6, I1. On night N the
+    vendor served `.DE` with no close for D and the run went red; on night N+1
+    the store's last date was D-1, the one-day revision window asked for
+    D-1..D+1, the vendor answered that short window with NO row for D, D+1 was
+    appended, the run exited 0, and `failure-issue` closed the issue as
+    "Recovered". D stayed missing for good: SAP.DE went 2026-09-16, 2026-09-18
+    in the store until the 2026-09-26 backfill."""
+
+    DE = [f"EU{i}.DE" for i in range(20)]
+    US = ["SPY"] + [f"US{i}" for i in range(19)]
+
+    def _seed(self, holed: list[str], dates: list[str], missing: str) -> dict[str, bytes]:
+        before: dict[str, bytes] = {}
+        for sym in self.US + self.DE:
+            held = [d for d in dates if not (sym in holed and d == missing)]
+            path = get_config().ohlcv_dir / f"{sym}.jsonl"
+            _write_raw(path, [_tight_line(d, 1.5) for d in held])
+            before[sym] = path.read_bytes()
+        return before
+
+    def _run(self, monkeypatch, series, wide_only=None) -> int:
+        monkeypatch.setattr(fo, "_fetch_symbol", _gap_vendor(series, wide_only or {}))
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+        return _run_main(monkeypatch, ["--symbols", ",".join(self.US + self.DE)])
+
+    def _ledger(self) -> dict:
+        path = get_config().data_dir / "data" / "market" / "store_gaps.json"
+        return json.loads(path.read_text()) if path.exists() else {}
+
+    def test_the_next_night_refetches_the_hole_over_a_wide_window(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        dates = _weekdays_to_end(4)
+        missing = dates[1]
+        before = self._seed(self.DE, dates, missing)
+        series = {s: {d: _ROW for d in dates} for s in self.US + self.DE}
+
+        rc = self._run(monkeypatch, series, wide_only={s: {missing} for s in self.DE})
+
+        assert rc == 0
+        for sym in self.DE:
+            path = get_config().ohlcv_dir / f"{sym}.jsonl"
+            assert missing in fo._existing_dates(path), f"{sym} still lacks {missing}"
+            # Insert-only: every stored line survives byte-for-byte, in order.
+            assert path.read_bytes().startswith(before[sym])
+        assert self._ledger() == {}
+
+    def test_a_hole_the_vendor_still_cannot_fill_is_held_red(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        dates = _weekdays_to_end(4)
+        missing = dates[1]
+        self._seed(self.DE, dates, missing)
+        series = {s: {d: _ROW for d in dates} for s in self.US + self.DE}
+        for sym in self.DE:
+            series[sym][missing] = _NAN_ROW
+
+        assert self._run(monkeypatch, series) == fo.EXIT_STORE_GAP
+        assert "store gap" in capsys.readouterr().err
+        assert self._ledger() == {s: {missing: "no-close"} for s in self.DE}
+        # The next night is the one that used to exit 0 and close the issue.
+        assert self._run(monkeypatch, series) == fo.EXIT_STORE_GAP
+
+    def test_a_held_gap_does_not_age_out_of_the_lookback(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Older than the 30-trading-day scan, so only the ledger remembers it.
+        dates = _weekdays_to_end(fo.GAP_LOOKBACK_TRADING_DAYS + 10)
+        old = dates[2]
+        self._seed(["EU0.DE"], dates, old)
+        ledger = get_config().data_dir / "data" / "market" / "store_gaps.json"
+        ledger.write_text(json.dumps({"EU0.DE": {old: "no-close"}}) + "\n")
+        series = {s: {d: _ROW for d in dates} for s in self.US + self.DE}
+        series["EU0.DE"][old] = _NAN_ROW
+
+        assert self._run(monkeypatch, series) == fo.EXIT_STORE_GAP
+        assert self._ledger() == {"EU0.DE": {old: "no-close"}}
+
+        # Only the store holding the date closes it.
+        series["EU0.DE"][old] = _ROW
+        assert self._run(monkeypatch, series) == 0
+        assert old in fo._existing_dates(get_config().ohlcv_dir / "EU0.DE.jsonl")
+        assert self._ledger() == {}
+
+    def test_the_refetch_reaches_before_the_oldest_date_it_asks_about(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A held date older than the refetch floor: a window STARTING on it can
+        # never show a row on its far side, so a day the vendor's series skips
+        # would read "unfetched" forever instead of "not traded". Found on the
+        # one-off backfill, where 2026-05-01 (May Day) came back unfetched.
+        dates = _weekdays_to_end(80)
+        old = dates[3]
+        assert (_fetch_end() - date.fromisoformat(old)).days > fo.HEAL_WINDOW_DAYS
+        self._seed(["EU0.DE"], dates, old)
+        ledger = get_config().data_dir / "data" / "market" / "store_gaps.json"
+        ledger.write_text(json.dumps({"EU0.DE": {old: "unfetched"}}) + "\n")
+        series = {s: {d: _ROW for d in dates} for s in self.US + self.DE}
+        del series["EU0.DE"][old]
+
+        assert self._run(monkeypatch, series) == 0
+        assert self._ledger() == {}
+
+    def test_a_bank_holiday_the_vendor_confirms_stays_green(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # 2026-08-31: `.L` shut, every other market open. Wholesale absence
+        # looks the same as a vendor hole in the store; the vendor's own
+        # series, which skips the date, is what says "closed".
+        dates = _weekdays_to_end(4)
+        holiday = dates[1]
+        before = self._seed(self.DE, dates, holiday)
+        series = {s: {d: _ROW for d in dates} for s in self.US + self.DE}
+        for sym in self.DE:
+            del series[sym][holiday]
+
+        assert self._run(monkeypatch, series) == 0
+        assert self._ledger() == {}
+        for sym in self.DE:
+            assert (get_config().ohlcv_dir / f"{sym}.jsonl").read_bytes() == before[sym]
+
+    def test_a_bucket_the_vendor_cannot_be_asked_about_is_not_a_holiday(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The wide refetch fails for the whole exchange: no probe has evidence
+        # either way, and silence is not "closed".
+        dates = _weekdays_to_end(4)
+        missing = dates[1]
+        self._seed(self.DE, dates, missing)
+        series = {s: {d: _ROW for d in dates} for s in self.US + self.DE}
+        narrow = _gap_vendor(series, {})
+
+        def vendor(symbol, start, end, *, vendor_unit=None):
+            if symbol in self.DE and (end - start).days >= 30:
+                return None
+            return narrow(symbol, start, end)
+
+        monkeypatch.setattr(fo, "_fetch_symbol", vendor)
+        monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+        assert _run_main(monkeypatch, ["--symbols", ",".join(self.US + self.DE)]) == fo.EXIT_STORE_GAP
+        assert self._ledger() == {s: {missing: "unfetched"} for s in self.DE}
+
+    def test_a_thin_name_that_did_not_trade_stays_green(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        dates = _weekdays_to_end(4)
+        quiet = dates[1]
+        self._seed(["EU0.DE"], dates, quiet)
+        series = {s: {d: _ROW for d in dates} for s in self.US + self.DE}
+        del series["EU0.DE"][quiet]
+
+        assert self._run(monkeypatch, series) == 0
+        assert self._ledger() == {}
+
+    def test_a_vendor_that_serves_only_todays_quote_cannot_say_not_traded(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # 3EUS.L and SGLN.MI since 2026-09: one row, the latest, for any window.
+        dates = _weekdays_to_end(4)
+        missing = dates[1]
+        self._seed(["EU0.DE"], dates, missing)
+        series = {s: {d: _ROW for d in dates} for s in self.US + self.DE}
+        series["EU0.DE"] = {dates[-1]: _ROW}
+
+        assert self._run(monkeypatch, series) == fo.EXIT_STORE_GAP
+        assert self._ledger() == {"EU0.DE": {missing: "unfetched"}}
+
+    def test_a_first_ingest_is_never_backfilled_before_its_first_row(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        dates = _weekdays_to_end(4)
+        self._seed([], dates, dates[1])
+        late = get_config().ohlcv_dir / "EU0.DE.jsonl"
+        _write_raw(late, [_tight_line(d, 1.5) for d in dates[2:]])
+        before = late.read_bytes()
+        series = {s: {d: _ROW for d in dates} for s in self.US + self.DE}
+
+        assert self._run(monkeypatch, series) == 0
+        assert late.read_bytes() == before
+
+    def test_a_run_whose_scope_excludes_a_held_gap_leaves_it_alone(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A crypto-only (or targeted) run neither closes nor fails on a gap in
+        # a symbol it did not fetch; the entry waits for a run that does.
+        dates = _weekdays_to_end(4)
+        self._seed([], dates, dates[1])
+        ledger = get_config().data_dir / "data" / "market" / "store_gaps.json"
+        ledger.write_text(json.dumps({"ELSEWHERE.PA": {dates[1]: "no-close"}}) + "\n")
+
+        series = {s: {d: _ROW for d in dates} for s in self.US + self.DE}
+        assert self._run(monkeypatch, series) == 0
+        assert self._ledger() == {"ELSEWHERE.PA": {dates[1]: "no-close"}}
+
+    def test_an_unreadable_ledger_is_never_green(
+        self, midas_data_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        dates = _weekdays_to_end(4)
+        self._seed([], dates, dates[1])
+        ledger = get_config().data_dir / "data" / "market" / "store_gaps.json"
+        ledger.write_text("{not json")
+
+        series = {s: {d: _ROW for d in dates} for s in self.US + self.DE}
+        assert self._run(monkeypatch, series) == fo.EXIT_STORE_GAP
+        assert "unreadable" in capsys.readouterr().err
+        assert ledger.read_text() == "{not json"  # never overwritten blind
+
+
+def test_the_store_gap_exit_is_deliberate_and_committable() -> None:
+    assert fo.EXIT_STORE_GAP not in (0, 1, fo.EXIT_QUARANTINED, fo.EXIT_VENDOR_OUTAGE)
+    assert fo.EXIT_STORE_GAP in fo.COMMITTABLE_EXITS
