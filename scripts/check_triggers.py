@@ -6,8 +6,8 @@ check-triggers-crypto.yml hourly with --crypto-only. Crypto is the only
 class whose price moves intraday (live ccxt); everything else reads the
 once-daily OHLCV store, so an hourly full sweep re-read identical data.
 Walks pending orders, fetches current prices, fires when triggers are hit,
-expires old ones (expiry is date-based, so the daily sweep owns it). Blackout window 19:55-21:00 UTC to avoid commit-races with the
-20:00 UTC daily session (see BLACKOUT_END for why it tracks the session).
+expires old ones (expiry is date-based, so the daily sweep owns it). Blackout window 21:55-23:00 UTC to avoid commit-races with the
+22:00 UTC daily session (see BLACKOUT_END for why it tracks the session).
 
 Usage:
     python scripts/check_triggers.py            # normal run
@@ -97,8 +97,17 @@ logger = logging.getLogger(__name__)
 # lives in the RemoteTrigger config on claude.ai — but three things here are
 # functions of it (BLACKOUT_START, BLACKOUT_END and the auto-merge deferral
 # window), so it is written down ONCE and they are stated against it.
-# `tests/test_check_triggers.py` pins the two derived offsets.
-SESSION_START = time(20, 0)
+# `tests/test_check_triggers.py` pins the two derived offsets, and
+# `tests/test_trigger_gate_parity.py` pins the Cloudflare gate's skipped hour
+# and the two close-run crons against it.
+#
+# 22:00 since 2026-09-28 (20:00 before). The session now prices the day it
+# runs on: the two same-evening close runs (workers/trigger-gate/, 19:15 and
+# 21:20 UTC) land today's European and US cash closes before it starts, where
+# the morning-only collector gave it the previous day's. The US close run is
+# after the winter US close (21:00 UTC) with ~10 min of fetch to spare, which
+# is what puts the session here and not earlier.
+SESSION_START = time(22, 0)
 
 # SESSION_START minus five minutes: a fire started just before the session
 # anchors can still be committing and pushing when it does, so the watcher
@@ -109,7 +118,7 @@ SESSION_START = time(20, 0)
 # was the slice that trapped a branch — the merge waited, the 20:00 session
 # then wrote the same dated inbox file, and the stale check refused the branch
 # forever while every watcher run refused to evaluate behind it).
-BLACKOUT_START = time(19, 55)
+BLACKOUT_START = time(21, 55)
 # THE BLACKOUT END IS A FUNCTION OF THE SESSION START — move one and move the
 # other, in the same change. That coupling is the whole content of this
 # constant, and it has now been got wrong in both directions.
@@ -130,13 +139,17 @@ BLACKOUT_START = time(19, 55)
 #   21:00 → 21:30  2026-08-10  session moved to 20:30 UTC (22:30 Paris), which
 #                              slid the whole distribution to 20:42-21:15.
 #   21:30 → 21:00  2026-08-11  session moved back to 20:00 UTC.
+#   21:00 → 23:00  2026-09-28  session moved to 22:00 UTC, behind the US close
+#                              run; same start + 60 min as before.
 #
-# It does not clear everything — 2026-07-29 committed at 21:46. A blackout is
-# a race-narrower, not a lock; `session_guard` is the correctness mechanism.
+# It does not clear everything — 2026-07-29 committed at 21:46 (start + 1:46;
+# at a 22:00 start that tail would cross midnight UTC, which `session_guard`
+# aborts on rather than mis-dates). A blackout is a race-narrower, not a lock;
+# `session_guard` is the correctness mechanism.
 #
 # NB the cron is UTC and ignores DST, so a session anchored to a Paris wall
 # time silently shifts an hour in late October and this must be revisited.
-BLACKOUT_END = time(21, 0)
+BLACKOUT_END = time(23, 0)
 
 # Type alias for the injectable committer used in process_fired_order.
 # Signature: (order_id, today, paths) -> None

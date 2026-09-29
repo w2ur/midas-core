@@ -34,7 +34,7 @@ deliberate: the steps already run were computed against a ledger that no
 longer exists. ``assert_session_fresh`` aborts outright when the movement
 touched the ledger; when it did not, re-running is the conservative answer.
 
-Timezone note: State files are keyed on UTC dates (sessions fire 20:00 UTC);
+Timezone note: State files are keyed on UTC dates (sessions fire 22:00 UTC);
 ``engine.output_bundle.get_day_number`` and commit messages use local dates —
 safe in UTC-pinned CI/sandbox runners, would drift for a local operator near
 midnight.

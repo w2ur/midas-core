@@ -12,6 +12,8 @@ Usage:
     python scripts/fetch_ohlcv.py --history-days 60     # short refresh
     python scripts/fetch_ohlcv.py --symbols AAPL,MSFT   # targeted
     python scripts/fetch_ohlcv.py --dry-run             # list resolved symbols
+    python scripts/fetch_ohlcv.py --close-run eu        # tonight's European closes
+    python scripts/fetch_ohlcv.py --close-run us        # tonight's US closes
 """
 
 from __future__ import annotations
@@ -328,6 +330,84 @@ def hole_bucket(symbol: str, crypto: frozenset[str] = frozenset()) -> str:
         return "crypto"
     asset_class = classify_ticker(symbol)
     return "" if asset_class == "equity" else asset_class
+
+
+#: The exchange suffixes the `--close-run eu` evening pass collects. Every
+#: venue here has closed by 16:30 UTC on a winter day (Euronext, Xetra, SIX,
+#: the LSE, the Nordics, Madrid, Milan, Vienna, Warsaw, Athens, Dublin,
+#: Lisbon). NOT `.F`: the Frankfurt floor trades until 20:00 local, so its bar
+#: is still forming when this pass runs. A suffix absent here stays on the
+#: morning run, whose previous-day rule is right for any close hour.
+EU_CLOSE_SUFFIXES = frozenset(
+    {
+        ".AS", ".AT", ".BR", ".CO", ".DE", ".HE", ".IR", ".L", ".LS", ".MC",
+        ".MI", ".OL", ".PA", ".ST", ".SW", ".VI", ".WA",
+    }
+)
+
+
+def close_run_bucket(symbol: str, crypto: frozenset[str] = frozenset()) -> str | None:
+    """Which same-evening pass collects ``symbol``: ``"eu"``, ``"us"`` or None.
+
+    Why there are evening passes at all (measured by `eu-close-probe.yml`,
+    2026-08-14..18): the vendor publishes a cash-equity day's close the same
+    evening — populated from about 1.5 h after the bell, still there at 20:18
+    UTC for Europe — then WITHDRAWS it overnight (a null row by 22:23, still
+    null at 07:22, the US included) and restores it the next afternoon. The
+    06:00 morning run sits inside that withdrawal, and its real start (4-7 h
+    late, GitHub's scheduler) lands on the restoration edge, which is where
+    the store's random one-day holes came from. Collecting in the evening
+    asks for the bar while it exists.
+
+    ``"us"`` is a US cash listing: no exchange suffix, and not a 24/7 or
+    settlement-priced instrument (crypto, `=X` FX, `=F` futures — their daily
+    bar completes at 00:00 UTC and stays on the morning run's previous-day
+    rule). Indices (`^VIX`) count as US: they print with the cash close.
+    """
+    bucket = hole_bucket(symbol, crypto)
+    if bucket in EU_CLOSE_SUFFIXES:
+        return "eu"
+    if bucket == "" and not symbol.endswith("=F"):
+        return "us"
+    return None
+
+
+def _report_close_run_reach(
+    close_run: str, end: date, reached: dict[str, list[int]]
+) -> None:
+    """Per exchange, how many of tonight's served symbols carried ``end``'s close.
+
+    Deliberately not an exit code. A bucket that served nothing for ``end`` is
+    either the vendor publishing late — the measured population window opens
+    ~1.5 h after the bell — or a holiday on that exchange, and at this hour the
+    two have the same shape. Either way the next evening's revision window
+    and the store-gap pass land the date once it exists, and tonight's session
+    marks that bucket at its previous close. The `::warning::` names it, so the
+    run summary says which books that was.
+    """
+    if not reached:
+        print(f"\nClose run ({close_run}): no symbol served a frame for {end}.")
+        print(
+            f"::warning::close run ({close_run}) reached nothing for {end} — "
+            "the vendor served no frame at all; tonight's session marks this "
+            "bucket at the previous close"
+        )
+        return
+    parts = []
+    short: list[str] = []
+    for ex, (got, served) in sorted(reached.items()):
+        label = ex or "US"
+        parts.append(f"{label} {got}/{served}")
+        if got == 0:
+            short.append(f"{label} (0/{served})")
+    print(f"\nClose run ({close_run}) reach for {end}: " + ", ".join(parts) + ".")
+    if short:
+        print(
+            f"::warning::close run ({close_run}): no {end} close served for "
+            + ", ".join(short)
+            + " — vendor late or exchange closed; those books mark at the "
+            "previous close tonight, and the date lands with the next pass"
+        )
 
 
 def exchange_wide_holes(
@@ -1170,7 +1250,7 @@ def _universe_is_complete(args: argparse.Namespace) -> bool:
     A targeted or crypto-only run's scope is narrow by design. A full run whose
     universe resolution swallowed an error is narrow by accident, and says so.
     """
-    if args.symbols or args.crypto_only:
+    if args.symbols or args.crypto_only or args.close_run:
         return False
     if _resolver_failures:
         print(
@@ -1236,6 +1316,19 @@ def main() -> int:
         "--crypto-only",
         action="store_true",
         help="Restrict to crypto pairs (weekend fetch — crypto trades 24/7)",
+    )
+    parser.add_argument(
+        "--close-run",
+        choices=("eu", "us"),
+        default=None,
+        help=(
+            "Same-evening pass over ONE cash-equity bucket, asking the vendor "
+            "for TODAY's close: `eu` is every exchange suffix in "
+            "EU_CLOSE_SUFFIXES, `us` every US listing (no suffix; crypto, FX "
+            "and futures excluded). Dispatched by the Cloudflare Worker after "
+            "that bucket's markets close; the morning run keeps its "
+            "previous-day rule for everything else. See `close_run_bucket`."
+        ),
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="List symbols without fetching"
@@ -1319,6 +1412,19 @@ def main() -> int:
         )
     if args.resweep_held and args.backfill:
         parser.error("--resweep-held and --backfill are mutually exclusive")
+    if args.close_run and (
+        args.symbols
+        or args.crypto_only
+        or args.resweep
+        or args.resweep_held
+        or args.backfill
+        or args.names_only
+    ):
+        parser.error(
+            "--close-run resolves its own bucket and asks for today's bar; it "
+            "cannot be combined with --symbols, --crypto-only, --resweep, "
+            "--resweep-held, --backfill or --names-only"
+        )
 
     # Only THIS run's resolution may license a close-out (`_resolver_failures`).
     global _resolver_failures
@@ -1336,6 +1442,11 @@ def main() -> int:
             return 0
     elif args.crypto_only:
         symbols = _crypto_symbols()
+    elif args.close_run:
+        crypto_set = frozenset(_crypto_symbols())
+        symbols = [
+            s for s in _all_symbols() if close_run_bucket(s, crypto_set) == args.close_run
+        ]
     else:
         symbols = _all_symbols()
 
@@ -1345,27 +1456,33 @@ def main() -> int:
             print(f"  {s}")
         return 0
 
-    # NEVER today (2026-08-12). `end` is the newest day this run will ask the
-    # vendor for, and asking for today is asking for a bar that is still
-    # forming. On a cash market that costs nothing — the day has not opened, so
-    # the vendor returns nothing — but a 24/7 instrument (crypto, FX, and
-    # futures on Globex) is served a partial bar the moment the UTC day opens.
-    # Measured on 2026-08-12: Yahoo returns a same-day BTC-USD close at 07:49
-    # UTC. Under the 06:00 cron that row is roughly six hours old, the 20:00
-    # session publishes it, and `PortfolioManager.add_snapshot` then freezes it
-    # — the next morning's revision arrives too late to move the published
-    # mark. Under the old 22:30 cron the same row was ~22.5 h formed, which was
-    # wrong more cheaply rather than right.
+    # The MORNING run never asks for today (2026-08-12). `end` is the newest
+    # day this run will ask the vendor for, and asking for today is asking for
+    # a bar that is still forming. On a cash market that costs nothing — the
+    # day has not opened, so the vendor returns nothing — but a 24/7 instrument
+    # (crypto, FX, and futures on Globex) is served a partial bar the moment
+    # the UTC day opens. Measured on 2026-08-12: Yahoo returns a same-day
+    # BTC-USD close at 07:49 UTC. Under the 06:00 cron that row is roughly six
+    # hours old, the evening session publishes it, and
+    # `PortfolioManager.add_snapshot` then freezes it — the next morning's
+    # revision arrives too late to move the published mark. Under the old
+    # 22:30 cron the same row was ~22.5 h formed, which was wrong more cheaply
+    # rather than right. Ending at yesterday means every row the morning run
+    # stores is a COMPLETE daily bar, on every instrument.
     #
-    # Ending at yesterday means every row this run stores is a COMPLETE daily
-    # bar, on every instrument. The published mark becomes a final close.
-    #
-    # The snapshot dating is unchanged by this, which is the point: at 06:00 on
-    # day D the store advances to D-1 and the 20:00 session on D publishes a
-    # D-1-dated row — exactly what the 22:30 cron on D-1 produced. Verified
-    # against the live record (`data/portfolios/*/snapshots.json`): the 08-04
-    # session published 08-03, the 08-05 session published 08-04.
-    end = date.today() - timedelta(days=1)
+    # A CLOSE RUN asks for today (2026-09-28), for one cash-equity bucket
+    # whose markets have all closed by the hour it is dispatched — see
+    # `close_run_bucket` for the vendor behaviour that makes the evening the
+    # only hour a day's close is reliably served. Its bar is complete by
+    # construction (the bell has rung), and the 22:00 UTC session then prices
+    # the day it is running on: the snapshot it publishes is dated on the
+    # session's own day, where the morning-only regime dated it on the
+    # previous one (the 08-04 session published 08-03). Crypto, FX and futures
+    # keep the previous-day rule, so their mark stays a completed bar.
+    if args.close_run:
+        end = date.today()
+    else:
+        end = date.today() - timedelta(days=1)
 
     # Universal 1-day revision window: re-request the trailing stored day and
     # let its final value replace it.
@@ -1387,6 +1504,16 @@ def main() -> int:
     revise_days = 1
 
     registry_updates: dict[str, dict] = {}
+    # The vendor-name registry is refreshed by the morning run, once a day
+    # for every symbol (one info request each). A close run only re-reads the
+    # names of symbols it ingests for the FIRST time, where the vendor's unit
+    # decides the scale; re-asking ~600 names a second and third time a day
+    # would double the request volume for nothing.
+    refresh_names = not args.close_run
+    #: exchange suffix -> [symbols whose frame carried `end`'s close, symbols
+    #: served], on a close run. Reported, never an exit code — see
+    #: `_report_close_run_reach`.
+    reached_by_exchange: dict[str, list[int]] = {}
 
     total_new = 0
     total_revised = 0
@@ -1431,9 +1558,10 @@ def main() -> int:
                     last, end, args.history_days, revise_days=revise_days
                 )
                 if window_start is None:
-                    registry_updates[symbol] = resolve_name(
-                        symbol, _fetch_ticker_info(symbol)
-                    )
+                    if refresh_names:
+                        registry_updates[symbol] = resolve_name(
+                            symbol, _fetch_ticker_info(symbol)
+                        )
                     # A symbol the store already carries through `end` is
                     # evidence the store is healthy, so it belongs in the
                     # gate's denominator even though nothing was requested for
@@ -1569,6 +1697,13 @@ def main() -> int:
                 total_new += n
                 total_revised += r
                 total_quarantined += q
+                if args.close_run:
+                    reach = reached_by_exchange.setdefault(
+                        hole_bucket(symbol, crypto_bucket), [0, 0]
+                    )
+                    reach[1] += 1
+                    if (_served_closes(df) or {}).get(end.isoformat()) is True:
+                        reach[0] += 1
                 if merged.refused:
                     # Kept for the adjudication pass below, which needs the
                     # dates and ratios rather than the count.
@@ -1588,8 +1723,11 @@ def main() -> int:
                         f"~{r} revised{suffix}"
                     )
 
-        if symbol not in registry_updates:  # a first ingest fetched it above
+        if refresh_names and symbol not in registry_updates:  # a first ingest fetched it above
             registry_updates[symbol] = resolve_name(symbol, _fetch_ticker_info(symbol))
+
+    if args.close_run and not args.names_only:
+        _report_close_run_reach(args.close_run, end, reached_by_exchange)
 
     # The holes above are only the ones the vendor served INSIDE tonight's
     # window, so a date it answered with no row at all on the next night

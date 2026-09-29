@@ -107,9 +107,11 @@ def fetch_window_start(
 ) -> date | None:
     """Return the inclusive start date for the next fetch, or None to skip.
 
-    ``end`` is the last day we want, and since 2026-08-12 its caller sets it to
-    **yesterday, never today** — so this function is never asked for a day that
-    has not closed. That is the point: a cash market would simply serve nothing
+    ``end`` is the last day we want, and since 2026-08-12 the scheduled runs
+    set it to **yesterday, never today** — so this function is never asked for
+    a day that has not closed. (A same-evening close run, 2026-09-28, sets it
+    to today for one cash-equity bucket whose bell has rung; the rule below
+    is unchanged by that: a store holding ``end`` is skipped.) That is the point: a cash market would simply serve nothing
     for the current day, but a 24/7 instrument (crypto, FX, futures on Globex)
     is served a bar the moment the UTC day opens (verified 2026-08-12: a
     same-day BTC-USD close is returned at 07:49 UTC), and under the 06:00 cron

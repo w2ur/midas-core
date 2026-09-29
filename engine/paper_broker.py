@@ -1,9 +1,10 @@
 """Paper broker — Hands side of the Brain/Hands split.
 
 Reads orders from data/orders/outbox/, applies the safety rails, fills at end-of-day
-close from the committed OHLCV store (latest-on-or-before the trade date — critical
-because the daily session fires at 20:00 UTC but fetch-ohlcv.yml's 06:00 UTC run
-only captures the previous day's close),
+close from the committed OHLCV store (latest-on-or-before the trade date — the
+22:00 UTC session runs after the same-evening close runs have landed the day's
+cash closes, so a cash equity fills at that day's close; crypto, FX and futures
+come from the 06:00 UTC run and fill at the previous day's completed bar),
 writes data/orders/inbox/, mutates portfolios via PortfolioManager.apply_trade.
 
 Rejection reason codes:

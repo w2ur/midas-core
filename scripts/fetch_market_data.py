@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import date
 from pathlib import Path
@@ -65,6 +66,82 @@ _BENCHMARK_SOURCES: dict[str, list[tuple[str, float, str]]] = {
 # staleness probe: crypto trades every day, so BTC alone cannot tell a healthy
 # store from one whose equity feed died three weeks ago.
 EQUITY_BENCHMARKS = ("sp500", "msci_world")
+
+#: Fewest store files an exchange bucket needs before its newest date is
+#: reported by `exchange_dates`: below this a bucket is a handful of names whose
+#: staleness says nothing about the exchange (`.F` and `.NYB` hold one each).
+MIN_EXCHANGE_POPULATION = 5
+
+
+def _newest_stored_date(path: Path) -> str | None:
+    """The `date` of a store file's last non-empty line, read from the tail."""
+    try:
+        with path.open("rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - 4096))
+            tail = fh.read().decode("utf-8", errors="replace")
+    except OSError:
+        return None
+    for line in reversed(tail.splitlines()):
+        if line.strip():
+            try:
+                d = json.loads(line).get("date")
+            except (json.JSONDecodeError, AttributeError):
+                return None
+            return d if isinstance(d, str) else None
+    return None
+
+
+def _exchange_bucket(symbol: str) -> str | None:
+    """The cash-equity exchange a store symbol trades on: its Yahoo suffix, or
+    ``"US"`` for a suffix-less listing. None for anything whose daily bar is
+    not a cash close — crypto pairs, `=X` FX, `=F` futures and `^` indices."""
+    if "=" in symbol or symbol.startswith("^"):
+        return None
+    head, dot, tail = symbol.rpartition(".")
+    if dot and head and tail:
+        return f".{tail}"
+    if symbol.endswith(("-USD", "-EUR")):
+        return None
+    return "US"
+
+
+def exchange_dates(store: Path | None = None) -> dict[str, str]:
+    """Per cash-equity exchange, the newest close AT LEAST HALF its store files hold.
+
+    Reads the tail of every `*.jsonl` in the store (cheap: one seek per file).
+    Half rather than the maximum, because a single first-ingest file or one
+    day-late fund must not speak for an exchange; half rather than all, because
+    the chronic day-late UCITS funds would otherwise hold `.DE` a day behind
+    forever. Buckets under `MIN_EXCHANGE_POPULATION` are left out.
+
+    This is what tells the bundle — and a reader of it — which exchanges the
+    row's positions were actually marked at. Since the same-evening close runs
+    (2026-09-28) the European and US closes arrive in two separate passes, so
+    "the equity date" is no longer one date by construction: a European bucket
+    the vendor published late is a day behind the row, and a European bucket
+    the session read before the US pass landed is a day AHEAD of it.
+    """
+    store = store if store is not None else get_config().ohlcv_dir
+    if not store.exists():
+        return {}
+    newest: dict[str, list[str]] = {}
+    for path in sorted(store.glob("*.jsonl")):
+        bucket = _exchange_bucket(path.stem)
+        if bucket is None:
+            continue
+        d = _newest_stored_date(path)
+        if d is not None:
+            newest.setdefault(bucket, []).append(d)
+    out: dict[str, str] = {}
+    for bucket, dates in newest.items():
+        if len(dates) < MIN_EXCHANGE_POPULATION:
+            continue
+        ranked = sorted(dates, reverse=True)
+        out[bucket] = ranked[len(ranked) // 2]
+    return out
+
 
 # Calendar days, not trading days. The bound is set by which market DATES can
 # legitimately be missing between the newest stored close and the session
@@ -181,7 +258,13 @@ def fetch_and_save(
         the snapshot written at `date` then values equity positions at
         `equity_date`'s close. That is a correct mark (`latest_price` reads
         the last close on-or-before the date), but it used to go unrecorded;
-        `equity_date` plus the `mixed_dates` note make it legible.
+        `equity_date` plus the `mixed_dates` note make it legible. Since the
+        same-evening close runs (2026-09-28) the note also covers the other
+        direction — equities at today's close, crypto/gold at yesterday's
+        completed bar — and `notes["exchange_dates"]` records, per exchange,
+        the close at least half its store files hold, with `exchange_behind`
+        / `exchange_ahead` naming any exchange marked at a different close
+        than the row's.
 
     Raises
     ------
@@ -222,6 +305,46 @@ def fetch_and_save(
             f"snapshot dated {snapshot_date} (crypto/gold); equity positions "
             f"are marked at the {equity_date} close — no equity session since."
         )
+    else:
+        # The other direction, since the same-evening close runs (2026-09-28):
+        # the equity benchmarks carry today's close while crypto, FX and
+        # futures — whose bar completes at 00:00 UTC and lands with the morning
+        # run — are still at the previous completed bar. A correct mark,
+        # recorded for the same reason the first direction is.
+        behind = {
+            name: src_date
+            for name, src_date in source_dates.items()
+            if name not in EQUITY_BENCHMARKS and src_date < snapshot_date
+        }
+        if behind:
+            listed = ", ".join(f"{name} at {d}" for name, d in sorted(behind.items()))
+            notes["mixed_dates"] = (
+                f"snapshot dated {snapshot_date} (equity close); {listed} — "
+                "crypto, FX and futures positions are marked at the previous "
+                "completed UTC bar, which the morning collector lands."
+            )
+
+    # Which exchanges the row's cash positions were actually marked at. The
+    # benchmarks above are all US-listed, so `equity_date` alone cannot see a
+    # European bucket the vendor published late (a day BEHIND the row) or one
+    # the session read before the US close pass landed (a day AHEAD of it,
+    # which is a mislabelled row and is said out loud).
+    exchanges = exchange_dates()
+    if exchanges:
+        notes["exchange_dates"] = exchanges
+        behind_ex = {ex: d for ex, d in exchanges.items() if d < equity_date}
+        ahead_ex = {ex: d for ex, d in exchanges.items() if d > snapshot_date}
+        if behind_ex:
+            notes["exchange_behind"] = (
+                "marked at an older close than the row's equity date: "
+                + ", ".join(f"{ex} at {d}" for ex, d in sorted(behind_ex.items()))
+            )
+        if ahead_ex:
+            notes["exchange_ahead"] = (
+                f"marked at a NEWER close than the row date {snapshot_date}: "
+                + ", ".join(f"{ex} at {d}" for ex, d in sorted(ahead_ex.items()))
+                + " — the row is dated on the benchmarks, which had not advanced"
+            )
 
     payload = {
         "date": snapshot_date,
@@ -242,6 +365,10 @@ def fetch_and_save(
     )
     if "mixed_dates" in notes:
         print(f"  [note] {notes['mixed_dates']}")
+    if "exchange_behind" in notes:
+        print(f"  [WARN] {notes['exchange_behind']}")
+    if "exchange_ahead" in notes:
+        print(f"  [WARN] {notes['exchange_ahead']}")
     for name in ("sp500", "msci_world", "gold", "btc"):
         print(f"  {name:11s}: {benchmarks[name]}  ({notes[f'{name}_source']})")
     return payload

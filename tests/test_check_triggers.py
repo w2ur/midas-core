@@ -117,16 +117,18 @@ class TestBlackoutWindow:
     @pytest.mark.parametrize(
         "hh,mm",
         [
-            (19, 55),
-            (20, 0),
-            (20, 15),
-            (20, 30),
-            # Extended 20:30 → 21:00 on 2026-08-07: the measured session tail
-            # (auto-merge as late as 20:45) fell outside the old window, and a
-            # fire in the tail discards the whole session via StaleSessionError.
-            (20, 31),
-            (20, 45),
-            (21, 0),
+            (21, 55),
+            (22, 0),
+            (22, 15),
+            (22, 30),
+            # Extended start+30 → start+60 on 2026-08-07: the measured session
+            # tail (auto-merge as late as start+45) fell outside the old window,
+            # and a fire in the tail discards the whole session via
+            # StaleSessionError. The whole window moved with the session to
+            # 22:00 UTC on 2026-09-28.
+            (22, 31),
+            (22, 45),
+            (23, 0),
         ],
     )
     def test_blackout_skips_processing(self, broker_env, hh, mm) -> None:
@@ -138,10 +140,11 @@ class TestBlackoutWindow:
         assert result["blacked_out"] is True
         assert len(list_pending()) == 1  # untouched
 
-    # 21:01 is the first minute outside the window (21:31 while the session
-    # ran at 20:30 UTC, 2026-08-10..11). Both edges are pinned, so a blackout
-    # that tracks the session start cannot silently become an all-day one.
-    @pytest.mark.parametrize("hh,mm", [(19, 54), (21, 1), (3, 0), (14, 30)])
+    # 23:01 is the first minute outside the window (21:01 while the session
+    # ran at 20:00 UTC, 21:31 while it ran at 20:30, 2026-08-10..11). Both
+    # edges are pinned, so a blackout that tracks the session start cannot
+    # silently become an all-day one.
+    @pytest.mark.parametrize("hh,mm", [(21, 54), (23, 1), (3, 0), (14, 30)])
     def test_normal_hours_do_run(self, broker_env, monkeypatch, hh, mm) -> None:
         from scripts import check_triggers
         from engine import triggers as triggers_mod
@@ -649,7 +652,7 @@ class TestFailedPushExitsNonZero:
         """A blackout is a deliberate no-op, not a failure."""
         _order, pm = self._fireable(broker_env, monkeypatch)
         self._always_fail_push(monkeypatch)
-        now = datetime(2026, 5, 17, 20, 15, tzinfo=timezone.utc)
+        now = datetime(2026, 5, 17, 22, 15, tzinfo=timezone.utc)
         self._run_main(monkeypatch, pm, now)()
 
     def test_a_no_op_run_stays_green(self, broker_env, monkeypatch) -> None:
@@ -2595,13 +2598,13 @@ class TestSessionStartIsTheOneConstant:
     @pytest.mark.parametrize(
         "hh,mm,evaluation,merge",
         [
-            (19, 54, False, False),
+            (21, 54, False, False),
             # The trap: the watcher stops evaluating, the merge must NOT stop.
-            (19, 55, True, False),
-            (19, 59, True, False),
-            (20, 0, True, True),
-            (21, 0, True, True),
-            (21, 1, False, False),
+            (21, 55, True, False),
+            (21, 59, True, False),
+            (22, 0, True, True),
+            (23, 0, True, True),
+            (23, 1, False, False),
             (13, 0, False, False),
         ],
     )

@@ -438,6 +438,11 @@
     "type": "equity",
     "currency": "EUR"
   },
+  "ALPHA.AT": {
+    "name": "Alpha Bank S.A.",
+    "type": "equity",
+    "currency": "EUR"
+  },
   "ALSYDB.CO": {
     "name": "AL Sydbank A/S",
     "type": "equity",
@@ -980,6 +985,11 @@
     "name": "Beijer Ref AB (publ)",
     "type": "equity",
     "currency": "SEK"
+  },
+  "BELA.AT": {
+    "name": "Jumbo S.A.",
+    "type": "equity",
+    "currency": "EUR"
   },
   "BEN": {
     "name": "Franklin Templeton Inc.",
@@ -2361,6 +2371,11 @@
     "type": "equity",
     "currency": "SEK"
   },
+  "ETE.AT": {
+    "name": "National Bank of Greece S.A.",
+    "type": "equity",
+    "currency": "EUR"
+  },
   "ETH-EUR": {
     "name": "Ethereum EUR",
     "type": "crypto",
@@ -2390,6 +2405,11 @@
     "name": "EUR/JPY",
     "type": "forex",
     "currency": "JPY"
+  },
+  "EUROB.AT": {
+    "name": "Eurobank S.A.",
+    "type": "equity",
+    "currency": "EUR"
   },
   "EURUSD=X": {
     "name": "EUR/USD",
@@ -2815,6 +2835,11 @@
     "name": "GE HealthCare Technologies Inc.",
     "type": "equity",
     "currency": "USD"
+  },
+  "GEKTERNA.AT": {
+    "name": "Gek Terna S.A.",
+    "type": "equity",
+    "currency": "EUR"
   },
   "GEN": {
     "name": "Gen Digital Inc.",
@@ -4262,6 +4287,11 @@
     "type": "equity",
     "currency": "CHF"
   },
+  "MOH.AT": {
+    "name": "Motor Oil (Hellas) Corinth Refineries S.A.",
+    "type": "equity",
+    "currency": "EUR"
+  },
   "MONC.MI": {
     "name": "Moncler S.p.A.",
     "type": "equity",
@@ -4939,7 +4969,7 @@
     "currency": "PLN"
   },
   "PL=F": {
-    "name": "Platinum Oct 26",
+    "name": "Platinum Jan 27",
     "type": "unknown",
     "currency": "USD"
   },
@@ -5006,6 +5036,11 @@
   "POOL": {
     "name": "Pool Corporation",
     "type": "equity"
+  },
+  "PPC.AT": {
+    "name": "Public Power Corporation S.A.",
+    "type": "equity",
+    "currency": "EUR"
   },
   "PPFB.DE": {
     "name": "iShares Physical Gold ETC",
@@ -5386,6 +5421,11 @@
   },
   "ROR.L": {
     "name": "Rotork plc",
+    "type": "equity",
+    "currency": "GBp"
+  },
+  "ROSE.L": {
+    "name": "Rosebank Industries plc",
     "type": "equity",
     "currency": "GBp"
   },
@@ -5904,12 +5944,12 @@
     "currency": "EUR"
   },
   "SOL-EUR": {
-    "name": "Solana",
+    "name": "Solana EUR",
     "type": "crypto",
     "currency": "EUR"
   },
   "SOL-USD": {
-    "name": "Solana",
+    "name": "Solana USD",
     "type": "crypto",
     "currency": "USD"
   },
@@ -6448,6 +6488,11 @@
     "name": "TAURON Polska Energia S.A.",
     "type": "equity",
     "currency": "PLN"
+  },
+  "TPEIR.AT": {
+    "name": null,
+    "type": "unknown",
+    "currency": null
   },
   "TPG.L": {
     "name": null,
@@ -7218,6 +7263,11 @@
     "name": "XRP",
     "type": "crypto",
     "currency": "USD"
+  },
+  "XTB.WA": {
+    "name": null,
+    "type": "unknown",
+    "currency": null
   },
   "XYL": {
     "name": "Xylem Inc.",

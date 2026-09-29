@@ -2285,3 +2285,224 @@ class TestTheVendorsNullRowIsNotAHoliday:
         monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
         assert _run_main(monkeypatch, ["--symbols", ",".join(self.US + futs)]) == 0
         assert self._ledger() == {}
+
+
+# --- same-evening close runs (2026-09-28) -----------------------------------
+#
+# Why they exist: the vendor publishes a cash-equity day's close the same
+# evening and withdraws it overnight (measured by eu-close-probe.yml), so the
+# morning run — and its 4-7 h late real start — sat on the edge of the
+# restoration and left random one-day holes. A close run asks for TODAY's bar,
+# for one bucket whose markets have all closed, and for nothing else.
+
+
+class TestCloseRunBucket:
+    """`close_run_bucket` partitions the universe into the two evening passes
+    and the morning run; no symbol lands in two of them."""
+
+    CRYPTO = frozenset({"BTC-USD", "HBAR-USD"})
+
+    @pytest.mark.parametrize(
+        "symbol,expected",
+        [
+            ("AIR.PA", "eu"),
+            ("SAP.DE", "eu"),
+            ("SHEL.L", "eu"),
+            ("BT.A.L", "eu"),  # the suffix is what follows the LAST dot
+            ("NOVO-B.CO", "eu"),
+            ("ALPHA.AT", "eu"),
+            ("AAPL", "us"),
+            ("BRK-B", "us"),  # a dash is not a crypto pair
+            ("SPY", "us"),
+            ("URTH", "us"),  # the msci_world benchmark: equity_date depends on it
+            ("^VIX", "us"),  # an index prints with the cash close
+            ("GC=F", None),  # settlement-priced: the morning run's previous-day rule
+            ("EURUSD=X", None),
+            ("BTC-USD", None),
+            ("HBAR-USD", None),  # crypto by the run's own set, not the fee allowlist
+            ("DX-Y.NYB", None),  # a suffix nobody enumerated stays on the morning run
+            ("FRE.F", None),  # the Frankfurt floor trades until 20:00 local
+        ],
+    )
+    def test_partition(self, symbol: str, expected: str | None) -> None:
+        assert fo.close_run_bucket(symbol, self.CRYPTO) == expected
+
+    def test_the_two_passes_and_the_morning_run_are_disjoint_over_the_store(
+        self,
+    ) -> None:
+        """Every symbol goes to exactly one pass, by construction of the
+        function — pinned over the shapes the live store carries."""
+        symbols = [
+            "AIR.PA", "AAPL", "GC=F", "EURUSD=X", "BTC-USD", "DX-Y.NYB", "^VIX",
+            "BRK-B", "SHEL.L", "FRE.F",
+        ]
+        buckets = {s: fo.close_run_bucket(s, self.CRYPTO) for s in symbols}
+        assert set(buckets.values()) == {"eu", "us", None}
+        assert all(v in ("eu", "us", None) for v in buckets.values())
+
+    def test_every_eu_suffix_is_a_yahoo_exchange_suffix(self) -> None:
+        for suffix in fo.EU_CLOSE_SUFFIXES:
+            assert suffix.startswith(".") and suffix[1:].isalpha() and suffix.isupper()
+        assert ".F" not in fo.EU_CLOSE_SUFFIXES, "the Frankfurt floor closes at 20:00 local"
+
+
+def _close_run_env(monkeypatch: pytest.MonkeyPatch, universe: list[str]) -> list[tuple[str, date]]:
+    """A universe of four shapes, a vendor that serves nothing, and the record
+    of what was asked."""
+    requested: list[tuple[str, date]] = []
+
+    def fake(
+        symbol: str, start: date, end: date, *, vendor_unit: str | None = None
+    ) -> pd.DataFrame | None:
+        requested.append((symbol, end))
+        return None
+
+    monkeypatch.setattr(fo, "_fetch_symbol", fake)
+    monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+    monkeypatch.setattr(fo, "_all_symbols", lambda: universe)
+    monkeypatch.setattr(fo, "_crypto_symbols", lambda: ["BTC-USD"])
+    return requested
+
+
+def test_a_close_run_asks_the_vendor_for_todays_bar(
+    midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one place `end` is today: the bell has rung for every symbol in the
+    bucket, so the bar is complete by construction. The morning run's
+    yesterday rule (`test_the_run_never_asks_the_vendor_for_todays_bar`) is
+    untouched — it is the control for this test."""
+    requested = _close_run_env(monkeypatch, ["AAPL", "AIR.PA", "BTC-USD", "GC=F"])
+
+    rc = _run_main(monkeypatch, ["--close-run", "us"])
+
+    # The vendor served nothing on an empty store, which is the collector's
+    # designed bootstrap-outage exit (see `main`); what this test pins is the
+    # day that was asked for, and that only the US listing was.
+    assert rc == fo.EXIT_VENDOR_OUTAGE
+    assert requested == [("AAPL", date.today())]
+
+
+def test_a_close_run_fetches_only_its_own_bucket(
+    midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`eu` never touches a US listing or a 24/7 instrument: the US bar is still
+    forming at the European hour, and the crypto bar until midnight."""
+    requested = _close_run_env(monkeypatch, ["AAPL", "AIR.PA", "SAP.DE", "BTC-USD", "GC=F"])
+
+    _run_main(monkeypatch, ["--close-run", "eu"])
+
+    assert sorted(requested) == [("AIR.PA", date.today()), ("SAP.DE", date.today())]
+
+
+def test_a_close_run_refuses_the_other_modes(
+    midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It resolves its own bucket and asks for today; combined with any mode
+    that means something else about `end` or the scope, the run is ambiguous."""
+    _close_run_env(monkeypatch, ["AAPL"])
+    for extra in (["--crypto-only"], ["--symbols", "AAPL"], ["--backfill"], ["--names-only"]):
+        with pytest.raises(SystemExit):
+            _run_main(monkeypatch, ["--close-run", "us", *extra])
+
+
+def test_a_close_run_is_never_a_full_universe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only a full run may close out a departed symbol's store-gap entries; a
+    close run's scope is one bucket by design."""
+    import argparse
+
+    monkeypatch.setattr(fo, "_resolver_failures", [])
+    args = argparse.Namespace(symbols=None, crypto_only=False, close_run="eu")
+    assert fo._universe_is_complete(args) is False
+    control = argparse.Namespace(symbols=None, crypto_only=False, close_run=None)
+    assert fo._universe_is_complete(control) is True
+
+
+def test_a_close_run_lands_todays_bar_without_re_reading_a_covered_name(
+    midas_data_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The store holds yesterday; the close run appends today and does NOT ask
+    the vendor for the symbol's name again — the morning run refreshes the
+    registry once a day for every symbol, and a second and third ~600-name
+    pass would double that request volume for nothing."""
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    path = get_config().ohlcv_dir / "AAPL.jsonl"
+    _write_raw(path, [_tight_line(yesterday.isoformat(), 200.0)])
+
+    frames = {
+        "AAPL": {
+            yesterday.isoformat(): [1, 2, 0.5, 200.0, 200.0, 1],
+            today.isoformat(): [1, 2, 0.5, 201.0, 201.0, 1],
+        }
+    }
+    monkeypatch.setattr(fo, "_fetch_symbol", _make_fake_fetch_symbol(frames))
+
+    def no_info(symbol: str):
+        raise AssertionError(f"a close run must not re-read {symbol}'s vendor info")
+
+    monkeypatch.setattr(fo, "_fetch_ticker_info", no_info)
+    monkeypatch.setattr(fo, "_all_symbols", lambda: ["AAPL"])
+    monkeypatch.setattr(fo, "_crypto_symbols", lambda: [])
+
+    rc = _run_main(monkeypatch, ["--close-run", "us"])
+
+    assert rc == 0
+    dates = [json.loads(l)["date"] for l in path.read_text(encoding="utf-8").splitlines() if l]
+    assert dates == [yesterday.isoformat(), today.isoformat()]
+
+
+def test_a_close_run_warns_when_the_vendor_has_not_published_today(
+    midas_data_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A bucket served without today's close is named in a `::warning::`, not
+    an exit code: at this hour a late vendor and a closed exchange have the
+    same shape, and both land with the next pass. What must not happen is
+    silence — that is the five-week European lag again, one bucket at a time."""
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    for symbol in ("AAPL", "MSFT"):
+        _write_raw(get_config().ohlcv_dir / f"{symbol}.jsonl", [_tight_line(yesterday.isoformat(), 100.0)])
+    frames = {
+        s: {yesterday.isoformat(): [1, 2, 0.5, 100.0, 100.0, 1]} for s in ("AAPL", "MSFT")
+    }
+    monkeypatch.setattr(fo, "_fetch_symbol", _make_fake_fetch_symbol(frames))
+    monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+    monkeypatch.setattr(fo, "_all_symbols", lambda: ["AAPL", "MSFT"])
+    monkeypatch.setattr(fo, "_crypto_symbols", lambda: [])
+
+    rc = _run_main(monkeypatch, ["--close-run", "us"])
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "::warning::close run (us)" in out
+    assert f"no {today.isoformat()} close served for US (0/2)" in out
+
+
+def test_a_close_run_that_reached_every_symbol_does_not_warn(
+    midas_data_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The control for the warning above."""
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    _write_raw(get_config().ohlcv_dir / "AAPL.jsonl", [_tight_line(yesterday.isoformat(), 100.0)])
+    frames = {
+        "AAPL": {
+            yesterday.isoformat(): [1, 2, 0.5, 100.0, 100.0, 1],
+            today.isoformat(): [1, 2, 0.5, 101.0, 101.0, 1],
+        }
+    }
+    monkeypatch.setattr(fo, "_fetch_symbol", _make_fake_fetch_symbol(frames))
+    monkeypatch.setattr(fo, "_fetch_ticker_info", lambda symbol: None)
+    monkeypatch.setattr(fo, "_all_symbols", lambda: ["AAPL"])
+    monkeypatch.setattr(fo, "_crypto_symbols", lambda: [])
+
+    rc = _run_main(monkeypatch, ["--close-run", "us"])
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "::warning::" not in out
+    assert f"Close run (us) reach for {today.isoformat()}: US 1/1." in out
