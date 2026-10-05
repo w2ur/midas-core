@@ -20,6 +20,16 @@ See ``task-11-report.md`` for the full reasoning. Every other bundle field
 (commentary, trades, posts, reasoning, ``portfolio.cash``, ``portfolio.positions``)
 is narrative or ledger-recorded, never touched.
 
+**One exception: the stale-marks disclosure.** ``agents[id].portfolio``
+carries ``marked_on`` and ``stale_marks`` when the session copied them from the
+book's newest snapshot row (``daily_session.build_portfolio_summaries``). That
+list is not a bundle fact but a copy of the row's, and
+``restate_valuations.py`` recomputes the row's copy from the closes the
+restated value used. So the bundle's copy is re-read from the row dated
+``marked_on`` (``restate_bundle_stale_marks``); leaving it alone would publish
+two different disclosures of the same row. A bundle without the keys predates
+the check and gains none; a row without the field leaves the bundle as it is.
+
 **Eligibility mirrors the 176-row exclusion exactly.** For a given bundle
 date and agent, this script looks up that agent's ``snapshots.json`` row
 keyed on the *same* date string. If no such row exists, or the row is one of
@@ -306,13 +316,48 @@ def restate_bundle_leaderboard(
     return result
 
 
-def _bundle_leaderboard_agent_ids(output_dir: Path) -> list[str]:
-    """Every agent id that appears in any bundle's leaderboard array."""
+def restate_bundle_stale_marks(
+    bundle: dict, agent_states: dict[str, AgentState]
+) -> list[str]:
+    """Re-copy each agent's ``stale_marks`` from the snapshot row it came from.
+
+    Mutates ``bundle["agents"][id]["portfolio"]`` in place and returns the ids
+    whose disclosure changed. Only a portfolio that already carries both
+    ``marked_on`` and ``stale_marks`` is eligible, and only from a row dated
+    ``marked_on`` that carries the field itself — the same "no check ran is not
+    an empty list" rule the session writer follows. See module docstring.
+    """
+    changed: list[str] = []
+    for agent_id, entry in sorted(bundle.get("agents", {}).items()):
+        portfolio = entry.get("portfolio") if isinstance(entry, dict) else None
+        if not isinstance(portfolio, dict):
+            continue
+        if "stale_marks" not in portfolio or "marked_on" not in portfolio:
+            continue
+        state = agent_states.get(agent_id)
+        row = state.by_date.get(portfolio["marked_on"]) if state else None
+        if row is None or "stale_marks" not in row:
+            continue
+        if portfolio["stale_marks"] != row["stale_marks"]:
+            portfolio["stale_marks"] = row["stale_marks"]
+            changed.append(agent_id)
+    return changed
+
+
+def _bundle_agent_ids(output_dir: Path) -> list[str]:
+    """Every agent id in a bundle's leaderboard, or whose bundle portfolio
+    carries a ``stale_marks`` disclosure."""
     ids: set[str] = set()
     for path in sorted(output_dir.glob("*.json")):
         bundle = json.loads(path.read_text(encoding="utf-8"))
         for row in bundle.get("leaderboard", []):
             ids.add(row["agent"])
+        # Only a portfolio carrying the disclosure needs a state; the agents
+        # map also holds non-trading entries with no book to load.
+        for agent_id, entry in bundle.get("agents", {}).items():
+            portfolio = entry.get("portfolio") if isinstance(entry, dict) else None
+            if isinstance(portfolio, dict) and "stale_marks" in portfolio:
+                ids.add(agent_id)
     return sorted(ids)
 
 
@@ -321,8 +366,9 @@ def run(apply: bool) -> list[BundleResult]:
     manager = PortfolioManager(base_dir=cfg.portfolios_dir)
     output_dir = cfg.output_dir
 
-    agent_ids = _bundle_leaderboard_agent_ids(output_dir)
+    agent_ids = _bundle_agent_ids(output_dir)
     agent_states = _load_agent_states(manager, agent_ids)
+    disclosure_changes: list[tuple[str, str]] = []
 
     results: list[BundleResult] = []
     largest: RowChange | None = None
@@ -330,7 +376,11 @@ def run(apply: bool) -> list[BundleResult]:
     for path in sorted(output_dir.glob("*.json")):
         bundle_date = path.stem
         bundle = json.loads(path.read_text(encoding="utf-8"))
+        for agent_id in restate_bundle_stale_marks(bundle, agent_states):
+            disclosure_changes.append((bundle_date, agent_id))
         if "leaderboard" not in bundle:
+            if apply and any(d == bundle_date for d, _ in disclosure_changes):
+                path.write_text(json.dumps(bundle, indent=2), encoding="utf-8")
             continue
 
         result = restate_bundle_leaderboard(bundle, bundle_date, agent_states)
@@ -368,6 +418,12 @@ def run(apply: bool) -> list[BundleResult]:
         )
     else:
         print("  no rows changed")
+    if disclosure_changes:
+        print(
+            f"  stale_marks disclosure changed on {len(disclosure_changes)} "
+            "bundle portfolio(s): "
+            + ", ".join(f"{d} {a}" for d, a in disclosure_changes)
+        )
     print(f"  mode: {'APPLY' if apply else 'DRY RUN'}")
 
     return results

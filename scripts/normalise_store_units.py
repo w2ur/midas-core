@@ -20,9 +20,10 @@ was written under the old contract.
 
 **What changes:** `open`/`high`/`low`/`close`/`adj_close` are multiplied by the
 sub-unit scale (0.01 for GBp). `volume` is a share count and is never scaled.
-`date` is untouched, and **line order is preserved exactly** — 529 of the
-store's files are deliberately out of date order, and re-sorting them would
-emit a 230 MB reorder commit.
+`date` is untouched, and line order is left as found: this migration scales
+prices and does not reorder. (The store was out of date order in 529 files when
+this ran; it is now canonical ascending-date, kept by the writers in
+`engine/ohlcv_ingest.py`.)
 
 **What must NOT change:** any published valuation. Every reader that consumed
 these prices already divided by 100 at read time, so scaling the store and

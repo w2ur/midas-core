@@ -27,6 +27,11 @@ class PositionValuation:
 
     value: float | None
     reason: str | None = None
+    #: Market date of the close the value was priced at (`Quote.as_of`),
+    #: earlier than the valuation date whenever the store holds no row for
+    #: it. `None` when the position has no value. Read by the snapshot writer
+    #: to disclose stale marks (`engine.stale_marks`).
+    price_date: date | None = None
 
     @property
     def ok(self) -> bool:
@@ -63,12 +68,12 @@ def value_position(
 
     native_value = shares * quote.price
     if quote.currency == book_currency:
-        return PositionValuation(native_value)
+        return PositionValuation(native_value, price_date=quote.as_of)
 
     converted = _fx_convert(native_value, quote.currency, book_currency, on)
     if converted is None:
         return PositionValuation(None, "NO_FX_RATE")
-    return PositionValuation(converted)
+    return PositionValuation(converted, price_date=quote.as_of)
 
 
 def portfolio_mtm(portfolio_summary: dict, on: date | None = None) -> float | None:

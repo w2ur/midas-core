@@ -182,9 +182,10 @@ def is_expired(order: Order, today: date) -> bool:
 
 # ---------- Price fetch dispatch ----------
 
-from engine.ohlcv_store import (
+from engine.ohlcv_store import (  # placed here to keep module-level imports tidy
+    DatedClose,
     latest_close_on_or_before,
-)  # placed here to keep module-level imports tidy
+)
 
 _CRYPTO_BASES = frozenset(
     {
@@ -233,11 +234,14 @@ def _get_crypto_exchange():
     return _crypto_exchange
 
 
-def get_current_price(ticker: str, today: date) -> float | None:
-    """Return latest price for trigger evaluation.
+def get_current_quote(ticker: str, today: date) -> DatedClose | None:
+    """Return the latest price for trigger evaluation, with the date it belongs to.
 
-    - Crypto (BTC-EUR etc.): live fetch via ccxt (Coinbase). Returns None on any error.
-    - Everything else: latest close from the committed OHLCV store on-or-before `today`.
+    - Crypto (BTC-EUR etc.): live fetch via ccxt (Coinbase), dated `today` — it
+      is an intraday observation made now. Returns None on any error.
+    - Everything else: latest close from the committed OHLCV store on-or-before
+      `today`, dated by the store row it came from (earlier than `today` when
+      the store has no row for `today`).
 
     The crypto path is intraday and 24/7; equity/FX triggers effectively re-evaluate
     once per day, after fetch-ohlcv.yml updates the store post-close.
@@ -249,7 +253,7 @@ def get_current_price(ticker: str, today: date) -> float | None:
             symbol = f"{base}/{quote}"
             tick = exchange.fetch_ticker(symbol)
             last = tick.get("last")
-            return float(last) if last is not None else None
+            return DatedClose(float(last), today) if last is not None else None
         except Exception:
             # ccxt raises a wide variety of exception classes; treat all as "price unavailable
             # right now" and carry the pending order forward.

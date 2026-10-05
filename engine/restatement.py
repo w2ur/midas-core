@@ -198,7 +198,28 @@ def revalue_snapshot(
         or before ``market_date``, or if converting its native currency to
         ``currency`` requires an FX rate that isn't available.
     """
+    portfolio_value, positions_value, _marks = revalue_snapshot_with_marks(
+        positions, cash, market_date, currency
+    )
+    return portfolio_value, positions_value
+
+
+def revalue_snapshot_with_marks(
+    positions: dict[str, float],
+    cash: float,
+    market_date: date,
+    currency: str,
+) -> tuple[float, float, list[tuple[str, date]]]:
+    """`revalue_snapshot`, plus each priced position's ``(ticker, price_date)``.
+
+    ``price_date`` is the date of the close the position was re-priced at, so
+    a restatement can recompute the row's ``stale_marks`` disclosure
+    (`engine.stale_marks`) from the prices it actually used: a row restated
+    after the missing close landed is no longer marked at the old date, and
+    must not keep saying it was.
+    """
     positions_value = 0.0
+    marks: list[tuple[str, date]] = []
 
     for ticker, shares in positions.items():
         if abs(shares) < _EPSILON:
@@ -212,5 +233,7 @@ def revalue_snapshot(
         if not valuation.ok:
             raise MissingPriceError(ticker, market_date, what=valuation.reason)
         positions_value += valuation.value
+        if valuation.price_date is not None:
+            marks.append((ticker, valuation.price_date))
 
-    return cash + positions_value, positions_value
+    return cash + positions_value, positions_value, marks

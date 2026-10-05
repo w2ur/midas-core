@@ -66,10 +66,20 @@ class Quote(NamedTuple):
     exists. `currency` is therefore always an ISO 4217 code, never `GBp` —
     and never `None`, because a price whose currency is unresolvable is
     returned as `None` instead of as a Quote carrying an empty unit.
+
+    `as_of` is the market date the price belongs to: the store row's own
+    date for `latest_price`, the observation date for a price handed in
+    (`store_quote(..., as_of=)`). It is `None` only where no date exists
+    to give — a vendor quote converted at ingest, or a caller that has not
+    been told one. It is deliberately the last field with a default, so a
+    price-and-currency comparison built without it still reads as before;
+    but it is not decoration: a quote's age is what separates "today's
+    close" from "the last close the store happens to hold" (2026-10-03).
     """
 
     price: float
     currency: str
+    as_of: date | None = None
 
 
 # Vendor sub-unit codes: quote unit → (ISO currency, multiplier to reach it).
@@ -365,7 +375,9 @@ def normalise_vendor_quote(ticker: str, vendor_price: float) -> Quote | None:
     return Quote(vendor_price * scale, iso)
 
 
-def store_quote(ticker: str, stored_price: float) -> Quote | None:
+def store_quote(
+    ticker: str, stored_price: float, as_of: date | None = None
+) -> Quote | None:
     """Attach the ISO currency to a price read from the store.
 
     Deliberately applies **no** scaling: the store is ISO-denominated at
@@ -378,11 +390,14 @@ def store_quote(ticker: str, stored_price: float) -> Quote | None:
     not a quote, and returning one anyway is how an unlabelled number
     reaches `fx.convert` and comes back as if it were already in the book's
     own currency.
+
+    `as_of` is passed through untouched: the date of the row (or of the
+    observation) the price came from.
     """
     currency = ticker_currency(ticker)
     if currency is None:
         return None
-    return Quote(stored_price, currency)
+    return Quote(stored_price, currency, as_of)
 
 
 def latest_price(
@@ -402,8 +417,11 @@ def latest_price(
     over calling the raw reader plus `ticker_currency` separately — that
     pair is what silently dropped the pence conversion on three pricing
     paths at once, and it would now silently reintroduce it.
+
+    `Quote.as_of` is the date of the row the close was read from, which is
+    earlier than `on` whenever the store holds no row for `on` itself.
     """
     raw = latest_close_on_or_before(ticker, on, store=store)
     if raw is None:
         return None
-    return store_quote(ticker, raw)
+    return store_quote(ticker, raw.close, as_of=raw.as_of)

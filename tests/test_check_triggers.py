@@ -9,10 +9,21 @@ from pathlib import Path
 import pytest
 
 from engine.config import get_config
+from engine.ohlcv_store import DatedClose
 
 from engine.orders import Order, read_inbox
 from engine.portfolio import PortfolioManager
 from engine.triggers import list_pending, save_pending
+
+
+def _quote(price: float | None):
+    """Stub for `engine.triggers.get_current_quote`: `price` observed on the
+    evaluation day (a live quote's shape), or None for "unavailable"."""
+
+    def _get(ticker: str, today: date) -> DatedClose | None:
+        return None if price is None else DatedClose(price, today)
+
+    return _get
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +166,7 @@ class TestBlackoutWindow:
             broker_env["pm_base"], "satoshi", cash=10_000.0, currency="EUR"
         )
         # Force trigger NOT to fire so the run is a no-op besides the blackout check.
-        monkeypatch.setattr(triggers_mod, "get_current_price", lambda t, today: 70000.0)
+        monkeypatch.setattr(triggers_mod, "get_current_quote", _quote(70000.0))
         fake_now = datetime(2026, 5, 17, hh, mm, tzinfo=timezone.utc)
         result = check_triggers.run(now=fake_now, portfolio_manager=pm)
         assert result["blacked_out"] is False
@@ -195,7 +206,7 @@ class TestTriggerFire:
             ),
         )
         monkeypatch.setattr(
-            triggers_mod, "get_current_price", lambda t, today: 85123.45
+            triggers_mod, "get_current_quote", _quote(85123.45)
         )
         fake_now = datetime(2026, 5, 17, 14, 30, tzinfo=timezone.utc)
         check_triggers.run(now=fake_now, portfolio_manager=pm)
@@ -208,6 +219,61 @@ class TestTriggerFire:
         assert triggered[0].trigger_fired is True
         assert triggered[0].fill_price == 85123.45
 
+    def test_fire_labels_the_broker_quote_with_the_observation_date(
+        self, broker_env, monkeypatch
+    ) -> None:
+        """The date the watcher's price belongs to reaches the broker's Quote.
+
+        Stage 1.1 (2026-10-03): a fired order fills at a price the watcher
+        hands in, so the broker cannot read the price's age from the store
+        itself. The observation is dated two days before the run here, and
+        the Quote the broker builds must carry that date, not the run date.
+        """
+        from engine import paper_broker
+        from engine import triggers as triggers_mod
+        from engine.types import Trade
+        from scripts import check_triggers
+
+        _seed_pending(broker_env)
+        _write_config(broker_env["config_dir"], "satoshi")
+        pm = _init_portfolio(
+            broker_env["pm_base"], "satoshi", cash=8000.0, currency="EUR"
+        )
+        pm.apply_trade(
+            "satoshi",
+            Trade(
+                id="seed_001",
+                timestamp=datetime(2026, 5, 1, tzinfo=timezone.utc),
+                action="BUY",
+                ticker="BTC-EUR",
+                shares=0.1,
+                price=70000.0,
+                total=7000.0,
+                fees=0.0,
+                reasoning="seed",
+            ),
+        )
+        observed_on = date(2026, 5, 15)
+        monkeypatch.setattr(
+            triggers_mod,
+            "get_current_quote",
+            lambda t, today: DatedClose(85123.45, observed_on),
+        )
+        labelled = []
+        real_store_quote = paper_broker.store_quote
+
+        def _spy(ticker, price, as_of=None):
+            quote = real_store_quote(ticker, price, as_of=as_of)
+            labelled.append(quote)
+            return quote
+
+        monkeypatch.setattr(paper_broker, "store_quote", _spy)
+        fake_now = datetime(2026, 5, 17, 14, 30, tzinfo=timezone.utc)
+        check_triggers.run(now=fake_now, portfolio_manager=pm)
+
+        assert [q.as_of for q in labelled] == [observed_on]
+        assert labelled[0].price == 85123.45
+
     def test_no_fire_when_price_doesnt_meet_trigger(
         self, broker_env, monkeypatch
     ) -> None:
@@ -219,7 +285,7 @@ class TestTriggerFire:
         pm = _init_portfolio(
             broker_env["pm_base"], "satoshi", cash=10_000.0, currency="EUR"
         )
-        monkeypatch.setattr(triggers_mod, "get_current_price", lambda t, today: 80000.0)
+        monkeypatch.setattr(triggers_mod, "get_current_quote", _quote(80000.0))
         fake_now = datetime(2026, 5, 17, 14, 30, tzinfo=timezone.utc)
         check_triggers.run(now=fake_now, portfolio_manager=pm)
 
@@ -235,7 +301,7 @@ class TestTriggerFire:
         pm = _init_portfolio(
             broker_env["pm_base"], "satoshi", cash=10_000.0, currency="EUR"
         )
-        monkeypatch.setattr(triggers_mod, "get_current_price", lambda t, today: None)
+        monkeypatch.setattr(triggers_mod, "get_current_quote", _quote(None))
         fake_now = datetime(2026, 5, 17, 14, 30, tzinfo=timezone.utc)
         check_triggers.run(now=fake_now, portfolio_manager=pm)
 
@@ -261,7 +327,7 @@ class TestExpiry:
             broker_env["pm_base"], "satoshi", cash=10_000.0, currency="EUR"
         )
         monkeypatch.setattr(
-            triggers_mod, "get_current_price", lambda t, today: 85123.45
+            triggers_mod, "get_current_quote", _quote(85123.45)
         )  # would fire if not expired
         fake_now = datetime(2026, 5, 17, 14, 30, tzinfo=timezone.utc)
         check_triggers.run(now=fake_now, portfolio_manager=pm)
@@ -292,7 +358,7 @@ class TestBrokerRailsApplyOnFire:
         _write_config(broker_env["config_dir"], "satoshi")
         # Initialize with 0 cash so a BUY will fail INSUFFICIENT_CASH.
         pm = _init_portfolio(broker_env["pm_base"], "satoshi", cash=0.0, currency="EUR")
-        monkeypatch.setattr(triggers_mod, "get_current_price", lambda t, today: 80000.0)
+        monkeypatch.setattr(triggers_mod, "get_current_quote", _quote(80000.0))
         fake_now = datetime(2026, 5, 17, 14, 30, tzinfo=timezone.utc)
         check_triggers.run(now=fake_now, portfolio_manager=pm)
 
@@ -339,7 +405,7 @@ class TestManagerChannelIsolation:
         )
         cash_before = pm.load("the-manager").cash
 
-        monkeypatch.setattr(triggers_mod, "get_current_price", lambda t, today: 80000.0)
+        monkeypatch.setattr(triggers_mod, "get_current_quote", _quote(80000.0))
         fake_now = datetime(2026, 5, 17, 14, 30, tzinfo=timezone.utc)
         check_triggers.run(now=fake_now, portfolio_manager=pm)
 
@@ -393,7 +459,7 @@ class TestManagerChannelIsolation:
             ),
         )
         monkeypatch.setattr(
-            triggers_mod, "get_current_price", lambda t, today: 85123.45
+            triggers_mod, "get_current_quote", _quote(85123.45)
         )
         fake_now = datetime(2026, 5, 17, 14, 30, tzinfo=timezone.utc)
         check_triggers.run(now=fake_now, portfolio_manager=pm)
@@ -441,7 +507,7 @@ class TestCryptoOnly:
         )
         _write_config(broker_env["config_dir"], "satoshi")
         pm = _init_portfolio(broker_env["pm_base"], "satoshi", cash=10_000.0)
-        monkeypatch.setattr(triggers_mod, "get_current_price", lambda t, today: 1.0)
+        monkeypatch.setattr(triggers_mod, "get_current_quote", _quote(1.0))
         fake_now = datetime(2026, 5, 17, 14, 30, tzinfo=timezone.utc)
 
         result = check_triggers.run(
@@ -475,7 +541,7 @@ class TestCryptoOnly:
         )
         _write_config(broker_env["config_dir"], "satoshi")
         pm = _init_portfolio(broker_env["pm_base"], "satoshi", cash=10_000.0)
-        monkeypatch.setattr(triggers_mod, "get_current_price", lambda t, today: 1.0)
+        monkeypatch.setattr(triggers_mod, "get_current_quote", _quote(1.0))
         fake_now = datetime(2026, 5, 17, 14, 30, tzinfo=timezone.utc)
 
         result = check_triggers.run(
@@ -591,7 +657,7 @@ class TestFailedPushExitsNonZero:
             ),
         )
         monkeypatch.setattr(
-            triggers_mod, "get_current_price", lambda t, today: 85123.45
+            triggers_mod, "get_current_quote", _quote(85123.45)
         )
         return order, pm
 
@@ -663,7 +729,7 @@ class TestFailedPushExitsNonZero:
         pm = _init_portfolio(
             broker_env["pm_base"], "satoshi", cash=8000.0, currency="EUR"
         )
-        monkeypatch.setattr(triggers_mod, "get_current_price", lambda t, today: 1.0)
+        monkeypatch.setattr(triggers_mod, "get_current_quote", _quote(1.0))
         self._always_fail_push(monkeypatch)
         now = datetime(2026, 5, 17, 14, 30, tzinfo=timezone.utc)
         self._run_main(monkeypatch, pm, now)()
@@ -920,7 +986,7 @@ class TestDryRunIsActuallyDry:
             ),
         )
         monkeypatch.setattr(
-            triggers_mod, "get_current_price", lambda t, today: 85123.45
+            triggers_mod, "get_current_quote", _quote(85123.45)
         )
         _init_tmp_git_repo(midas_data_root)
         from scripts import check_triggers
@@ -1029,7 +1095,7 @@ class TestDryRunIsActuallyDry:
             broker_env["pm_base"], "satoshi", cash=10_000.0, currency="EUR"
         )
         monkeypatch.setattr(
-            triggers_mod, "get_current_price", lambda t, today: 85123.45
+            triggers_mod, "get_current_quote", _quote(85123.45)
         )
         now = datetime(2026, 5, 17, 14, 30, tzinfo=timezone.utc)
 
@@ -1134,7 +1200,7 @@ class TestDryRunMainSkipsTheGitHelpers:
             ),
         )
         monkeypatch.setattr(
-            triggers_mod, "get_current_price", lambda t, today: 85123.45
+            triggers_mod, "get_current_quote", _quote(85123.45)
         )
         return order, pm
 
@@ -1340,7 +1406,7 @@ class TestRefusedPushFallsBack:
             ),
         )
         monkeypatch.setattr(
-            triggers_mod, "get_current_price", lambda t, today: 85123.45
+            triggers_mod, "get_current_quote", _quote(85123.45)
         )
         return order, pm
 
@@ -2220,6 +2286,34 @@ class TestRunReportTable:
         assert "None" not in table
 
 
+    def test_a_held_row_names_the_broker_reason(self) -> None:
+        """Regression (review of feat/stage1-asof-reads, finding 2): a fire the
+        broker refused STALE_PRICE was kept armed with no inbox row and a green
+        run, and the table dropped the reason — only "error" entries got a
+        reason line — so the report read "held" with no cause."""
+        from scripts import check_triggers as ct
+
+        entries = [
+            {
+                "order_id": "ord_stop",
+                "agent_id": "goldfinger",
+                "ticker": "SGLN.MI",
+                "action": "SELL",
+                "shares": 3,
+                "op": "<=",
+                "level": 70.0,
+                "observed_price": 69.0,
+                "fill_price": None,
+                "notional": None,
+                "kind": "held",
+                "error": "STALE_PRICE",
+                "commit": ct.REPORT_COMMIT_NONE,
+            }
+        ]
+        table = ct._report_markdown_table(entries)
+        assert "`ord_stop` [goldfinger] SGLN.MI: STALE_PRICE" in table
+
+
 class TestWriteRunReport:
     """The env-var contract: `WATCHER_REPORT_PATH`, `$RUNNER_TEMP` as its
     default AND as the home of the markdown twin the workflows read back,
@@ -2392,7 +2486,7 @@ class TestRunReportThroughMain:
             ),
         )
         monkeypatch.setattr(
-            triggers_mod, "get_current_price", lambda t, today: 85123.45
+            triggers_mod, "get_current_quote", _quote(85123.45)
         )
         return order, pm
 
@@ -2812,7 +2906,7 @@ class TestABrokerCrashReachesTheReport:
             broker_env["pm_base"], "satoshi", cash=10_000.0, currency="EUR"
         )
         monkeypatch.setattr(
-            triggers_mod, "get_current_price", lambda t, today: 95_000.0
+            triggers_mod, "get_current_quote", _quote(95_000.0)
         )
 
         def boom(*a, **kw):

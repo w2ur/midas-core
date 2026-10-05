@@ -9,6 +9,7 @@ replay_holdings, _resolve_session_date) already has its own test coverage.
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 import pytest
@@ -298,3 +299,107 @@ def test_metric_era_fields_covers_every_field_the_engine_emits(monkeypatch):
     # era block. Everything else is what the era block has to carry.
     handled_elsewhere = {"agent", "rank", "return_pct"}
     assert set(row) - handled_elsewhere == set(rb._METRIC_ERA_FIELDS)
+
+
+# --- stale_marks disclosure -------------------------------------------------
+# Regression: restate_valuations recomputes a row's `stale_marks`, but the
+# bundle's copy of that same disclosure (agents[id].portfolio, written by
+# daily_session.build_portfolio_summaries) was never restated, so the two
+# published records of one row disagreed after a backfilled close.
+
+
+def _bundle_with_disclosure(stale_marks: list[dict]) -> dict:
+    return {
+        "date": "2026-10-02",
+        "leaderboard": [],
+        "agents": {
+            "a": {
+                "portfolio": {
+                    "cash": 1.0,
+                    "marked_on": "2026-10-02",
+                    "stale_marks": stale_marks,
+                }
+            }
+        },
+    }
+
+
+_STALE = [{"ticker": "4GLD.DE", "close_date": "2026-10-01"}]
+
+
+def test_bundle_stale_marks_follow_the_restated_row():
+    state = _state()
+    state.by_date = {"2026-10-02": {"date": "2026-10-02", "stale_marks": []}}
+    bundle = _bundle_with_disclosure(list(_STALE))
+
+    changed = rb.restate_bundle_stale_marks(bundle, {"a": state})
+
+    assert bundle["agents"]["a"]["portfolio"]["stale_marks"] == []
+    assert changed == ["a"]
+
+
+def test_bundle_stale_marks_read_the_row_named_by_marked_on():
+    # The bundle's portfolio copies the book's newest row, which need not be
+    # the bundle's own date — the disclosure is re-read from `marked_on`.
+    state = _state()
+    state.by_date = {
+        "2026-10-01": {"date": "2026-10-01", "stale_marks": []},
+        "2026-10-02": {"date": "2026-10-02", "stale_marks": list(_STALE)},
+    }
+    bundle = _bundle_with_disclosure([])
+    bundle["agents"]["a"]["portfolio"]["marked_on"] = "2026-10-01"
+
+    assert rb.restate_bundle_stale_marks(bundle, {"a": state}) == []
+    assert bundle["agents"]["a"]["portfolio"]["stale_marks"] == []
+
+
+def test_bundle_without_the_disclosure_gains_none():
+    # No check ran when this bundle was published: an empty list would claim
+    # one had.
+    state = _state()
+    state.by_date = {"2026-10-02": {"date": "2026-10-02", "stale_marks": []}}
+    bundle = {"agents": {"a": {"portfolio": {"cash": 1.0}}}}
+
+    assert rb.restate_bundle_stale_marks(bundle, {"a": state}) == []
+    assert bundle == {"agents": {"a": {"portfolio": {"cash": 1.0}}}}
+
+
+def test_bundle_disclosure_untouched_without_a_row_carrying_the_field():
+    state = _state()
+    state.by_date = {"2026-10-02": {"date": "2026-10-02"}}
+    bundle = _bundle_with_disclosure(list(_STALE))
+
+    assert rb.restate_bundle_stale_marks(bundle, {"a": state}) == []
+    assert bundle["agents"]["a"]["portfolio"]["stale_marks"] == _STALE
+    assert rb.restate_bundle_stale_marks(_bundle_with_disclosure([]), {}) == []
+
+
+def test_run_apply_writes_the_restated_disclosure(tmp_path, monkeypatch):
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    path = output_dir / "2026-10-02.json"
+    path.write_text(
+        json.dumps(_bundle_with_disclosure(list(_STALE))),
+        encoding="utf-8",
+    )
+    state = _state()
+    state.by_date = {"2026-10-02": {"date": "2026-10-02", "stale_marks": []}}
+
+    class _Cfg:
+        portfolios_dir = tmp_path / "portfolios"
+
+    _Cfg.output_dir = output_dir
+    monkeypatch.setattr(rb, "get_config", lambda: _Cfg)
+    seen: list[list[str]] = []
+
+    def _states(manager, agent_ids):
+        seen.append(agent_ids)
+        return {"a": state}
+
+    monkeypatch.setattr(rb, "_load_agent_states", _states)
+
+    rb.run(apply=True)
+
+    written = json.loads(path.read_text(encoding="utf-8"))
+    assert written["agents"]["a"]["portfolio"]["stale_marks"] == []
+    assert seen == [["a"]]

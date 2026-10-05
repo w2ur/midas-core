@@ -247,3 +247,37 @@ class TestSessionCommitSanitisesConcerns:
             cwd=repo, capture_output=True, text=True, check=True,
         ).stdout.split("\n")
         assert [t for t in trailers if t] == ["one sentence"]
+
+    def _trailers(self, repo: Path) -> list[str]:
+        out = subprocess.run(
+            ["git", "log", "-1", "--format=%(trailers:key=Concerns,valueonly)"],
+            cwd=repo, capture_output=True, text=True, check=True,
+        ).stdout.split("\n")
+        return [t for t in out if t]
+
+    def test_a_suspended_instrument_refusal_becomes_a_trailer(self, tmp_path, monkeypatch):
+        """Plan 2026-10-03, 1.3 (review SHOULD 5): a refused SELL traps the
+        holder, so the commit names the holders without relying on the model
+        to report it."""
+        from datetime import date
+
+        repo = self._repo(tmp_path, monkeypatch)
+        line = "INSTRUMENT_SUSPENDED refused o1 (a1, SELL CTVA): held by a1"
+        monkeypatch.setattr(
+            daily_session, "instrument_refusal_concerns", lambda d: [line]
+        )
+        daily_session.step_commit_session(date(2026, 10, 2), concerns=["model's own"])
+        assert self._trailers(repo) == ["model's own", line]
+
+    def test_a_failure_to_list_refusals_still_commits(self, tmp_path, monkeypatch):
+        from datetime import date
+
+        repo = self._repo(tmp_path, monkeypatch)
+
+        def boom(d):
+            raise ValueError("bad inbox line")
+
+        monkeypatch.setattr(daily_session, "instrument_refusal_concerns", boom)
+        daily_session.step_commit_session(date(2026, 10, 2))
+        (trailer,) = self._trailers(repo)
+        assert trailer.startswith("INSTRUMENT_SUSPENDED and STALE_PRICE holds could not be listed")

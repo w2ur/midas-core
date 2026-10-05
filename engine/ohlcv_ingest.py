@@ -8,6 +8,14 @@ On-disk format (``data/market/ohlcv/{SYMBOL}.jsonl``): one JSON object per line,
 in the order ``date, open, high, low, close, adj_close, volume``, serialized with
 ``json.dumps()`` defaults. This byte layout is committed to git and read by the
 sandboxed agent — preserving it exactly is a hard requirement.
+
+**Canonical form (2026-10-03):** every file holds rows in ascending date order
+with one row per date. The writers keep it that way: ``merge_rows`` rewrites
+sorted, and ``append_new_rows`` appends only dates after the newest stored one
+and rewrites the file sorted when a date lands inside the series (the store-gap
+heal). The history was brought into that form by a one-off normaliser that
+lives in the live repo only; a store that is out of order is sorted on its
+first rewrite by either writer.
 """
 
 from __future__ import annotations
@@ -212,13 +220,78 @@ def build_new_rows(
     return rows_to_append
 
 
+def _read_store_lines(path: Path) -> tuple[dict[str, str], int]:
+    """Read a store file as ``({date: line}, unrewritable_count)``.
+
+    Dict order is the file's line order. Lines are returned verbatim, never
+    re-serialised, so a rewrite from this map is byte-neutral per row.
+
+    ``unrewritable_count`` counts lines a sorted rewrite from the map could not
+    reproduce: unparseable lines, and a second line for a date that differs
+    byte-wise from the first (a rewrite would keep one and silently drop the
+    other; ``scripts/normalise_store_order.py`` calls that a human decision, and
+    the writer must agree). A byte-identical repeat is harmless and collapses.
+    """
+    stored: dict[str, str] = {}
+    unparseable = 0
+    if path.exists():
+        with path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    d = json.loads(line).get("date")
+                except (json.JSONDecodeError, AttributeError):
+                    unparseable += 1
+                    continue
+                if not d:
+                    unparseable += 1
+                elif d in stored and stored[d] != line:
+                    logger.warning(
+                        "%s holds two different rows for %s; not rewriting the file",
+                        path.name,
+                        d,
+                    )
+                    unparseable += 1
+                else:
+                    stored[d] = line
+    return stored, unparseable
+
+
+def _write_store_sorted(path: Path, stored: dict[str, str]) -> None:
+    """Atomically rewrite ``path`` with ``stored``'s rows in ascending date order."""
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        with tmp.open("w", encoding="utf-8") as f:
+            for d in sorted(stored):
+                f.write(stored[d] + "\n")
+            # os.replace makes the rename atomic, but the bytes behind it
+            # are not durable until they reach disk — without this a crash
+            # could leave the renamed file truncated. This is the source of
+            # truth for every valuation.
+            f.flush()
+            os.fsync(f.fileno())
+        tmp.replace(path)
+    finally:
+        # An orphan `{SYMBOL}.jsonl.tmp` would be committed into the store by
+        # the fetch-ohlcv workflow's `git add data/market/ohlcv/`.
+        tmp.unlink(missing_ok=True)
+
+
 def append_new_rows(
     path: Path, df: pd.DataFrame, *, skip_dates: set[str] | None = None
 ) -> int:
-    """Append every new daily row in ``df`` to the ``{SYMBOL}.jsonl`` store at ``path``.
+    """Add every new daily row in ``df`` to the ``{SYMBOL}.jsonl`` store at ``path``.
 
     Reads the existing dates from ``path``, keeps only unseen dates (idempotent
-    re-write), and appends them in date order. Returns the number of rows written.
+    re-write). Returns the number of rows written.
+
+    The file stays in canonical (ascending-date) order: new dates later than the
+    newest stored one are appended; a date that lands INSIDE the series (the
+    store-gap heal) makes the file be rewritten sorted, so it lands in place.
+    A file with an unparseable line, or two different rows for one date, is only
+    ever appended to, because a rewrite would drop one of them.
 
     ``skip_dates`` adds dates to treat as already present. Its one caller is
     ``merge_rows``'s degraded path: a date carried only by an unparseable line
@@ -228,10 +301,25 @@ def append_new_rows(
     existing = existing_dates(path) | (skip_dates or set())
     path.parent.mkdir(parents=True, exist_ok=True)
     rows_to_append = build_new_rows(df, existing, symbol=path.stem)
-    if rows_to_append:
+    if not rows_to_append:
+        return 0
+    newest = max(existing, default="")
+    if rows_to_append[0][0] > newest or not path.exists():
         with path.open("a", encoding="utf-8") as f:
             for _, line in rows_to_append:
                 f.write(line + "\n")
+        return len(rows_to_append)
+    stored, unparseable = _read_store_lines(path)
+    if unparseable:
+        # Cannot rewrite without dropping a line (broken, or a conflicting
+        # duplicate); append and accept the out-of-place row.
+        with path.open("a", encoding="utf-8") as f:
+            for _, line in rows_to_append:
+                f.write(line + "\n")
+        return len(rows_to_append)
+    for d, line in rows_to_append:
+        stored[d] = line
+    _write_store_sorted(path, stored)
     return len(rows_to_append)
 
 
@@ -357,19 +445,18 @@ def merge_rows(
     weekly resweep). A bar the vendor does not revise re-fetches identical, so
     no stored value is replaced.
 
-    **The store's existing line order is preserved.** A revision overwrites its
-    row in place; new dates are appended at the end, in ascending date order
-    among themselves. The file is NOT re-sorted — 529 of the 1,046 committed
-    files are not in date order (a later long-history backfill was appended
-    behind the original window), and since the universal revision window means
-    the rewrite path runs nightly, sorting here would make a scheduled job emit
-    a ~230 MB, 1.3-million-line reorder commit. Nightly diffs stay one or two
-    lines per file. Readers are order-insensitive; canonicalising the store is a
-    deliberate, separately-reviewed decision, not a cron side effect.
+    **The rewrite is sorted by date** (canonical form since 2026-10-03). A
+    revision overwrites its row, new dates join, and the file is emitted in
+    ascending date order, one row per date. Untouched rows are written back
+    verbatim, so the nightly diff is still one or two lines per file once the
+    store has been normalised (``scripts/normalise_store_order.py``); before
+    that, the first rewrite of an out-of-order file would reorder it.
 
     Revision rewrites the whole file from a date-keyed map, so a line carrying no
-    parseable date has no key to survive under. Such a store is left alone and
-    degrades to append-only rather than losing that line.
+    parseable date has no key to survive under, and neither does the second of two
+    byte-different rows for one date. Such a store is left alone and degrades to
+    append-only rather than losing that line (a human decision, as in
+    ``append_new_rows``).
 
     ``quarantine`` enables the anomaly tripwire: a revision moving a stored
     close by more than ``REVISION_LIMIT``, or a new row more than
@@ -395,9 +482,6 @@ def merge_rows(
     if revise_from is None:
         return MergeResult(append_new_rows(path, df), 0)
 
-    # Read top to bottom: dicts preserve insertion order, so `stored`'s order
-    # IS the file's line order, and assigning to an existing key replaces that
-    # row without moving it.
     stored: dict[str, str] = {}
     unparseable = 0
     salvaged_dates: set[str] = set()
@@ -415,10 +499,20 @@ def merge_rows(
                     if salvage:
                         salvaged_dates.add(salvage.group(1))
                     continue
-                if d:
-                    stored[d] = line
-                else:
+                if not d:
                     unparseable += 1
+                elif d in stored and stored[d] != line:
+                    # Two different rows for one date: a dict rewrite would
+                    # keep the last and silently drop the other. Same human
+                    # decision as _read_store_lines; degrade to append-only.
+                    logger.warning(
+                        "%s holds two different rows for %s; not rewriting the file",
+                        path.name,
+                        d,
+                    )
+                    unparseable += 1
+                else:
+                    stored[d] = line
     if unparseable:
         # Degrading to append-only preserves the broken line (a rewrite from a
         # date-keyed map would drop it), but it is not a free pass: revision is
@@ -443,9 +537,9 @@ def merge_rows(
     # for a date inserted inside the series (the store-gap refetch, follow-up
     # review r6, I1) it is the bar before it, not one from weeks later —
     # GBF.DE 2026-09-07 was refused at x1.47 against a close from after a real
-    # 30% fall. Taken by date rather than by file position: 529 of the
-    # committed files are not in date order, so "the last line" is not "the
-    # latest bar". Read from the lines as they stood before this merge, so a
+    # 30% fall. Taken by date rather than by file position: a file
+    # not yet normalised may be out of date order, so "the last line" is not
+    # "the latest bar". Read from the lines as they stood before this merge, so a
     # revision in the same frame never moves the reference.
     stored_dates = sorted(stored)
     as_read = dict(stored)
@@ -485,38 +579,17 @@ def merge_rows(
                         QuarantinedRow(symbol, d, "revision", previous, incoming, ratio)
                     )
                     continue
-            stored[d] = line  # in place — keeps this row's position in the file
+            stored[d] = line  # replaces the row; _write_store_sorted sets its position by date
             revised += 1
 
     _warn_dropped_no_close(symbol, dropped_no_close)
 
-    # Only the NEW dates are sorted, so a multi-day catch-up lands
-    # chronologically among itself; the pre-existing order is untouched. On an
-    # empty store every row is new, so the file comes out ascending.
-    for d in sorted(new_rows):
+    for d in new_rows:
         stored[d] = new_rows[d]
     appended = len(new_rows)
 
     if appended or revised:
-        tmp = path.with_name(path.name + ".tmp")
-        try:
-            with tmp.open("w", encoding="utf-8") as f:
-                for d in stored:
-                    f.write(stored[d] + "\n")
-                # os.replace makes the rename atomic, but the bytes behind it
-                # are not durable until they reach disk — without this a crash
-                # could leave the renamed file truncated. (The directory entry
-                # is still un-fsynced, so the rename itself survives only at the
-                # filesystem's discretion.) This is the source of truth for
-                # every valuation.
-                f.flush()
-                os.fsync(f.fileno())
-            tmp.replace(path)
-        finally:
-            # A crash between open and replace would otherwise leave an orphan
-            # `{SYMBOL}.jsonl.tmp` that the fetch-ohlcv workflow's
-            # `git add data/market/ohlcv/` would commit into the store.
-            tmp.unlink(missing_ok=True)
+        _write_store_sorted(path, stored)
 
     if refused:
         write_quarantine(quarantine, refused)

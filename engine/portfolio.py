@@ -305,6 +305,7 @@ class PortfolioManager:
         positions_value: float,
         benchmarks: dict,
         session_date: date | None = None,
+        stale_marks: list[dict] | None = None,
     ) -> bool:
         """Append a daily snapshot to snapshots.json. History is immutable.
 
@@ -344,6 +345,12 @@ class PortfolioManager:
             The session that observed this valuation. Defaults to
             ``snapshot_date``, which is the honest reading for a backfill
             replaying history one market day at a time.
+        stale_marks:
+            ``[{ticker, price_date}]`` for each position marked at a close its
+            exchange has since passed (`engine.stale_marks`). Written on the
+            row when given, an empty list included ("checked, none"); omitted
+            when ``None``, so a caller that never checked never claims to have.
+            Rows written before 2026-10-03 carry no key and are never touched.
 
         Returns
         -------
@@ -361,6 +368,8 @@ class PortfolioManager:
             "positions_value": positions_value,
             "benchmarks": benchmarks,
         }
+        if stale_marks is not None:
+            snapshot["stale_marks"] = list(stale_marks)
         path = self._snapshots_path(strategy_id)
         records: list[dict] = self._read_json(path)  # type: ignore[assignment]
         date_key = snapshot["date"]

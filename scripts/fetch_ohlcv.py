@@ -14,13 +14,17 @@ Usage:
     python scripts/fetch_ohlcv.py --dry-run             # list resolved symbols
     python scripts/fetch_ohlcv.py --close-run eu        # tonight's European closes
     python scripts/fetch_ohlcv.py --close-run us        # tonight's US closes
+    python scripts/fetch_ohlcv.py --settlement-shadow   # read-only: what a 10-day window would do
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
 import sys
+import tempfile
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import NamedTuple
@@ -38,7 +42,10 @@ from engine.corporate_actions import (
     explain_quarantine,
     ratios_agree,
 )
-from engine.fees import classify_ticker
+from engine.market_calendar import EU_CLOSE_SUFFIXES as _EU_CLOSE_SUFFIXES
+from engine.market_calendar import bucket_of
+from engine.market_calendar import close_run_bucket as _close_run_bucket
+from engine import instrument_status
 from engine.quotes import vendor_unit_scale
 from engine.ohlcv_ingest import (
     MergeResult,
@@ -310,66 +317,18 @@ MIN_SMALL_BUCKET_POPULATION = 5
 SMALL_BUCKET_HOLE_SHARE = 0.5
 
 
-def hole_bucket(symbol: str, crypto: frozenset[str] = frozenset()) -> str:
-    """The population ``symbol``'s missing closes are rated within.
-
-    A Yahoo exchange suffix (``".PA"``: what follows the LAST dot, so
-    ``BT.A.L`` is ``.L``) when there is one. Otherwise the instrument class, by
-    the repo's own classifier (`engine.fees.classify_ticker`): ``"crypto"``,
-    also for any pair in ``crypto`` (the set this script fetches in its
-    crypto-only mode, which carries pairs such as HBAR-USD that the fee
-    allowlist does not), ``"fx"``, and ``""`` for the rest — US listings and
-    the handful of `=F` futures. Money review r1 (J6 follow-ups), M1: crypto
-    and FX folded into the US bucket, where a hole across all 34 crypto pairs
-    read 5.3% and passed.
-    """
-    head, dot, tail = symbol.rpartition(".")
-    if dot and head and tail:
-        return f".{tail}"
-    if symbol in crypto:
-        return "crypto"
-    asset_class = classify_ticker(symbol)
-    return "" if asset_class == "equity" else asset_class
+#: The population ``symbol``'s missing closes are rated within. One definition,
+#: in the engine since 2026-10-03 because the broker's STALE_PRICE rail judges a
+#: price's age within the same bucket (`engine.market_calendar.bucket_of`).
+hole_bucket = bucket_of
 
 
-#: The exchange suffixes the `--close-run eu` evening pass collects. Every
-#: venue here has closed by 16:30 UTC on a winter day (Euronext, Xetra, SIX,
-#: the LSE, the Nordics, Madrid, Milan, Vienna, Warsaw, Athens, Dublin,
-#: Lisbon). NOT `.F`: the Frankfurt floor trades until 20:00 local, so its bar
-#: is still forming when this pass runs. A suffix absent here stays on the
-#: morning run, whose previous-day rule is right for any close hour.
-EU_CLOSE_SUFFIXES = frozenset(
-    {
-        ".AS", ".AT", ".BR", ".CO", ".DE", ".HE", ".IR", ".L", ".LS", ".MC",
-        ".MI", ".OL", ".PA", ".ST", ".SW", ".VI", ".WA",
-    }
-)
-
-
-def close_run_bucket(symbol: str, crypto: frozenset[str] = frozenset()) -> str | None:
-    """Which same-evening pass collects ``symbol``: ``"eu"``, ``"us"`` or None.
-
-    Why there are evening passes at all (measured by `eu-close-probe.yml`,
-    2026-08-14..18): the vendor publishes a cash-equity day's close the same
-    evening — populated from about 1.5 h after the bell, still there at 20:18
-    UTC for Europe — then WITHDRAWS it overnight (a null row by 22:23, still
-    null at 07:22, the US included) and restores it the next afternoon. The
-    06:00 morning run sits inside that withdrawal, and its real start (4-7 h
-    late, GitHub's scheduler) lands on the restoration edge, which is where
-    the store's random one-day holes came from. Collecting in the evening
-    asks for the bar while it exists.
-
-    ``"us"`` is a US cash listing: no exchange suffix, and not a 24/7 or
-    settlement-priced instrument (crypto, `=X` FX, `=F` futures — their daily
-    bar completes at 00:00 UTC and stays on the morning run's previous-day
-    rule). Indices (`^VIX`) count as US: they print with the cash close.
-    """
-    bucket = hole_bucket(symbol, crypto)
-    if bucket in EU_CLOSE_SUFFIXES:
-        return "eu"
-    if bucket == "" and not symbol.endswith("=F"):
-        return "us"
-    return None
+#: Which same-evening pass collects a symbol. Defined in the engine since
+#: 2026-10-04, because `engine.stale_marks` must know which buckets a session
+#: holds at the row's own date and which only at the previous one; re-exported
+#: here, where the close runs select by it.
+EU_CLOSE_SUFFIXES = _EU_CLOSE_SUFFIXES
+close_run_bucket = _close_run_bucket
 
 
 def _report_close_run_reach(
@@ -645,7 +604,41 @@ def _write_rows(
         quarantine = (
             get_config().data_dir / "data" / "market" / "quarantine" / f"{symbol}.jsonl"
         )
-    return merge_rows(path, df, revise_from, quarantine=quarantine)
+    merged = merge_rows(path, df, revise_from, quarantine=quarantine)
+    if merged.quarantined:
+        _suspend(symbol, merged)
+    return merged
+
+
+def _suspend(symbol: str, merged: MergeResult) -> None:
+    """A tripwire refusal marks the symbol ``suspended`` in the status registry.
+
+    The store has stopped short of what the vendor served, so its newest close
+    may belong to a different instrument (CTVA 2026-10-01). Only adjudication
+    clears it: `_adjudicate` once its re-merge lands, or a human. A registry
+    that cannot be read is left untouched and said so: `status_of` already
+    answers ``suspended`` for every symbol while it is unreadable, and the run
+    is red anyway, because the refusal itself exits non-zero.
+    """
+    dates = sorted(r.date for r in merged.refused)
+    since = dates[0] if dates else date.today().isoformat()
+    try:
+        instrument_status.mark_suspended(
+            symbol,
+            since=since,
+            source="tripwire",
+            reason=(
+                f"ingest tripwire refused {merged.quarantined} row(s)"
+                + (f" ({', '.join(dates)})" if dates else "")
+                + "; see data/market/quarantine/"
+            ),
+        )
+    except instrument_status.RegistryUnreadable as exc:
+        print(
+            f"ERROR: instrument status registry unreadable ({exc}); "
+            f"{symbol} not recorded as suspended (every lookup fails closed).",
+            file=sys.stderr,
+        )
 
 
 def _read_store_rows(path: Path) -> list[dict]:
@@ -873,6 +866,17 @@ def _adjudicate(
             )
             continue
 
+        try:
+            instrument_status.clear(
+                symbol,
+                reason=f"adjudicated: {action.effective} corporate action, re-merged",
+            )
+        except instrument_status.RegistryUnreadable as exc:
+            print(
+                f"ERROR: instrument status registry unreadable ({exc}); "
+                f"{symbol} adjudicated but its status was not cleared.",
+                file=sys.stderr,
+            )
         print(
             f"  ! {symbol}: ADJUDICATED — {action.effective} corporate action, "
             f"shares x{action.shares_ratio:.6g} (price x{action.price_ratio:.6g}), "
@@ -1244,6 +1248,142 @@ def _heal_store_gaps(
     return StoreGapReport(open_gaps, filled, quarantined, readable)
 
 
+#: The settlement window the shadow measures, in weekdays (plan: Stage 2,
+#: subtask 2.2). A proposal under measurement, not a policy: nothing but
+#: `--settlement-shadow` reads it.
+SETTLEMENT_WINDOW_BDAYS = 10
+
+#: Exit when the shadow could not form a view at all (nothing served). Not 0:
+#: an empty report is "unknown", never "nothing would change".
+EXIT_SHADOW_NO_DATA = 2
+
+
+def settlement_window_start(end: date, bdays: int = SETTLEMENT_WINDOW_BDAYS) -> date:
+    """The date `bdays` weekdays before `end` (weekends skipped, holidays not)."""
+    day = end
+    remaining = bdays
+    while remaining > 0:
+        day -= timedelta(days=1)
+        if day.weekday() < 5:
+            remaining -= 1
+    return day
+
+
+def shadow_merge(path: Path, df: pd.DataFrame, revise_from: str) -> dict:
+    """What `merge_rows` WOULD do to the store file at `path`, without doing it.
+
+    Runs the real `merge_rows` (tripwire on) against a throwaway copy, so the
+    shadow can never drift from the logic it is measuring and can never write
+    the store, the quarantine sidecar or a `.tmp` orphan. Returns the dates it
+    would insert, the rows it would revise (old and new close), the rows the
+    tripwire would refuse, and the dates served with no close.
+    """
+    before = {r.get("date"): r for r in _read_store_rows(path)}
+    with tempfile.TemporaryDirectory(prefix="settlement-shadow-") as tmp:
+        scratch = Path(tmp) / path.name
+        shutil.copyfile(path, scratch)
+        result = merge_rows(
+            scratch, df, revise_from, quarantine=Path(tmp) / "quarantine.jsonl"
+        )
+        after = {r.get("date"): r for r in _read_store_rows(scratch)}
+    inserts = sorted(d for d in after if d not in before)
+    revisions = [
+        {
+            "date": d,
+            "old_close": before[d].get("close"),
+            "new_close": after[d].get("close"),
+        }
+        for d in sorted(after)
+        if d in before and after[d] != before[d]
+    ]
+    return {
+        "inserts": inserts,
+        "revisions": revisions,
+        "quarantined": [r._asdict() for r in result.refused],
+        "holes": list(result.holes),
+    }
+
+
+def run_settlement_shadow(symbols: list[str], end: date, out_dir: Path) -> int:
+    """Request `[end - window, end]` for every store-covered symbol and report.
+
+    READ-ONLY with respect to the store, the ledgers and git: it writes one
+    JSON file under `out_dir` (gitignored, uploaded as a workflow artifact) and
+    nothing else. A symbol with no store file is counted and skipped, because
+    its first ingest is a different code path the window does not change.
+    """
+    start = settlement_window_start(end)
+    ohlcv_dir = get_config().ohlcv_dir
+    report: dict = {
+        "end": end.isoformat(),
+        "window_start": start.isoformat(),
+        "window_bdays": SETTLEMENT_WINDOW_BDAYS,
+        # Provenance, so a night's report names the main it measured and the
+        # run that produced it; the comparison needs no hand-built --base.
+        # Absent outside Actions.
+        "base_sha": os.environ.get("GITHUB_SHA"),
+        "run_id": os.environ.get("GITHUB_RUN_ID"),
+        "event": os.environ.get("GITHUB_EVENT_NAME"),
+        "requested": len(symbols),
+        "skipped_no_store": [],
+        "failed": [],
+        "served": 0,
+        "inserts": {},
+        "revisions": {},
+        "quarantined": [],
+        "holes": {},
+    }
+    for i, symbol in enumerate(symbols, start=1):
+        path = ohlcv_dir / f"{symbol}.jsonl"
+        if not path.exists():
+            report["skipped_no_store"].append(symbol)
+            continue
+        df = _fetch_symbol(symbol, start, end)
+        if df is None:
+            report["failed"].append(symbol)
+            continue
+        report["served"] += 1
+        outcome = shadow_merge(path, df, start.isoformat())
+        if outcome["inserts"]:
+            report["inserts"][symbol] = outcome["inserts"]
+        if outcome["revisions"]:
+            report["revisions"][symbol] = outcome["revisions"]
+        if outcome["quarantined"]:
+            report["quarantined"].extend(outcome["quarantined"])
+        if outcome["holes"]:
+            report["holes"][symbol] = outcome["holes"]
+        if i % 100 == 0:
+            print(f"  shadow: {i}/{len(symbols)} symbols", file=sys.stderr)
+    report["totals"] = {
+        "inserts": sum(len(v) for v in report["inserts"].values()),
+        "revisions": sum(len(v) for v in report["revisions"].values()),
+        "quarantined": len(report["quarantined"]),
+        "failed": len(report["failed"]),
+    }
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"{date.today().isoformat()}.json"
+    out.write_text(json.dumps(report, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+    print(
+        f"Settlement shadow: window {start}..{end}, served {report['served']}, "
+        f"would insert {report['totals']['inserts']}, revise "
+        f"{report['totals']['revisions']}, quarantine "
+        f"{report['totals']['quarantined']}, failed {report['totals']['failed']} "
+        f"-> {out}"
+    )
+    if report["served"] == 0:
+        print("::warning::settlement shadow served no symbol; report is UNKNOWN", file=sys.stderr)
+        return EXIT_SHADOW_NO_DATA
+    asked = report["served"] + len(report["failed"])
+    if len(report["failed"]) / asked > MAX_FAILURE_RATE:
+        print(
+            f"::warning::settlement shadow fetch failed for {len(report['failed'])} of {asked} "
+            f"symbols (limit {MAX_FAILURE_RATE:.0%}); report is UNKNOWN",
+            file=sys.stderr,
+        )
+        return EXIT_SHADOW_NO_DATA
+    return 0
+
+
 def _universe_is_complete(args: argparse.Namespace) -> bool:
     """Whether this run's scope is the whole universe, resolved without error.
 
@@ -1331,6 +1471,30 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--settlement-shadow",
+        action="store_true",
+        help=(
+            "READ-ONLY measurement for the settlement-window proposal: request "
+            "the last SETTLEMENT_WINDOW_BDAYS weekdays for every store-covered "
+            "symbol and write what merge_rows (tripwire on) WOULD insert or "
+            "revise to data/market/settlement_shadow/YYYY-MM-DD.json. Never "
+            "touches the store, the quarantine, the ledgers or git. Run by the "
+            "`settlement-shadow` job in fetch-ohlcv.yml, after the real fetch."
+        ),
+    )
+    parser.add_argument(
+        "--shadow-end",
+        metavar="YYYY-MM-DD",
+        type=date.fromisoformat,
+        default=None,
+        help=(
+            "With --settlement-shadow only: the `end` the real fetch job used, "
+            "so both jobs measure the same window even when a dispatched run "
+            "crosses 00:00 UTC between them. Default: yesterday. Must be "
+            "before today, never a still-forming bar."
+        ),
+    )
+    parser.add_argument(
         "--dry-run", action="store_true", help="List symbols without fetching"
     )
     parser.add_argument(
@@ -1397,6 +1561,23 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    if args.settlement_shadow and (
+        args.symbols
+        or args.crypto_only
+        or args.close_run
+        or args.resweep
+        or args.resweep_held
+        or args.backfill
+        or args.names_only
+        or args.dry_run
+        or args.accept_gap is not None
+        or args.reason is not None
+    ):
+        parser.error(
+            "--settlement-shadow measures the full universe on its own; it "
+            "cannot be combined with any other mode"
+        )
+
     if args.accept_gap is not None:
         return _accept_gap(parser, args.accept_gap, args.reason)
     if args.reason is not None:
@@ -1426,6 +1607,12 @@ def main() -> int:
             "--resweep-held, --backfill or --names-only"
         )
 
+    if args.shadow_end is not None:
+        if not args.settlement_shadow:
+            parser.error("--shadow-end is only used with --settlement-shadow")
+        if args.shadow_end >= date.today():
+            parser.error("--shadow-end must be before today (a bar still forming)")
+
     # Only THIS run's resolution may license a close-out (`_resolver_failures`).
     global _resolver_failures
     _resolver_failures = None
@@ -1451,6 +1638,12 @@ def main() -> int:
         symbols = _all_symbols()
 
     print(f"Resolved {len(symbols)} symbols to fetch.")
+    if args.settlement_shadow:
+        return run_settlement_shadow(
+            symbols,
+            args.shadow_end or date.today() - timedelta(days=1),
+            get_config().data_dir / "data" / "market" / "settlement_shadow",
+        )
     if args.dry_run:
         for s in symbols:
             print(f"  {s}")

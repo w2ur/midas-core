@@ -71,6 +71,7 @@ from engine.baseline_manager import (
 from engine.blog import build_oracle_prompt, save_daily_blog_draft
 from engine.fx import convert as fx_convert
 from engine.quotes import latest_price, ticker_currency
+from engine.stale_marks import find_stale_marks
 from engine.valuation import value_position
 from engine.orders import (
     DroppedTrade,
@@ -92,7 +93,7 @@ from engine.output_bundle import (
     refresh_session_costs,
     save_output_bundle,
 )
-from engine.paper_broker import fill_day
+from engine.paper_broker import fill_day, instrument_refusal_concerns
 from engine.portfolio import PortfolioManager
 from engine.restatement import MissingPriceError
 from engine.config import AgentSpec, AllocatorSpec, get_config
@@ -698,9 +699,29 @@ def step_build_baseline_manager(
     portfolio_dict = manager.load(strategy_id).to_dict()
 
     def _price_lookup(ticker: str, on: date) -> float | None:
+        # This book trades through apply_trade, not the broker, so the two
+        # Stage 1.3 rails are applied here: a suspended instrument or a close
+        # that trails its bucket has no price. `rebalance` then leaves a
+        # target out and cannot sell a holding, which is the broker's own
+        # answer (no BUY at a frozen close, a SELL trapped until adjudicated).
+        from engine import instrument_status
+        from engine.market_calendar import is_stale
         from engine.ohlcv_store import latest_close_on_or_before as _lcob
 
-        return _lcob(ticker, on, store=resolved_ohlcv_store)
+        status = instrument_status.status_of(ticker)
+        if status is not None:
+            print(f"  [WARN] {strategy_id}: {ticker} is {status}; no price")
+            return None
+        dated = _lcob(ticker, on, store=resolved_ohlcv_store)
+        if dated is None:
+            return None
+        if is_stale(ticker, dated.as_of, on, store=resolved_ohlcv_store):
+            print(
+                f"  [WARN] {strategy_id}: {ticker} close dated {dated.as_of} "
+                "trails its exchange; no price"
+            )
+            return None
+        return dated.close
 
     trades = rebalance(
         portfolio=portfolio_dict,
@@ -909,12 +930,16 @@ def step_build_manager_prompt(
     price_lookup: dict[str, tuple[float, str, str]] = {}
     for ticker in scope:
         if resolved_store is not None:
-            close = _lcob(ticker, trade_date, store=resolved_store)
+            dated = _lcob(ticker, trade_date, store=resolved_store)
         else:
-            close = _lcob(ticker, trade_date)
+            dated = _lcob(ticker, trade_date)
         ccy = ticker_currency(ticker)
-        if close is not None and ccy is not None:
-            price_lookup[ticker] = (close, trade_date.isoformat(), ccy)
+        if dated is not None and ccy is not None:
+            # The middle field is the session date, not `dated.as_of`, and
+            # that is a known gap rather than a choice: rendering the row's
+            # own date changes the Manager's prompt, which is Stage 1.3/1.4's
+            # disclosure decision, not this value-neutral read change.
+            price_lookup[ticker] = (dated.close, trade_date.isoformat(), ccy)
 
     active_triggers = list_pending(
         pending_dir=_trigger_channel_dir(alloc.channels_prefix, "pending")
@@ -1340,6 +1365,14 @@ def build_portfolio_summaries() -> dict[str, dict]:
     Summary shape: {cash, deployed, positions, currency}
     where `positions` is the Portfolio.to_dict() position list and
     `deployed` is `portfolio.cost_basis`.
+
+    When the book's newest snapshot row carries ``stale_marks``
+    (`engine.stale_marks`, written on every row since 2026-10-03), the
+    summary also carries ``marked_on`` (that row's date) and its
+    ``stale_marks``, so the bundle discloses which positions were valued at an
+    older close than their exchange's, next to the positions themselves. A
+    book whose newest row predates the field gets neither key: no check ran,
+    and an empty list would claim one had.
     """
     portfolios_dir = get_config().portfolios_dir
     manager = PortfolioManager(base_dir=portfolios_dir)
@@ -1350,13 +1383,35 @@ def build_portfolio_summaries() -> dict[str, dict]:
             continue
         portfolio = manager.load(agent_id)
         d = portfolio.to_dict()
-        summaries[agent_id] = {
+        summary = {
             "cash": d["cash"],
             "deployed": portfolio.cost_basis,
             "positions": d["positions"],
             "currency": d["currency"],
         }
+        newest = _newest_snapshot_row(portfolios_dir / agent_id / "snapshots.json")
+        if newest is not None and "stale_marks" in newest:
+            summary["marked_on"] = newest.get("date")
+            summary["stale_marks"] = newest["stale_marks"]
+        summaries[agent_id] = summary
     return summaries
+
+
+def _newest_snapshot_row(path: Path) -> dict | None:
+    """The latest-dated row of a snapshots.json, or None (absent, empty, unreadable).
+
+    Unreadable degrades to None rather than raising: the bundle is assembled
+    after the session's work is done, and losing it over a disclosure field is
+    worse than omitting the field (whose absence already means "not checked").
+    """
+    try:
+        rows = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    dated = [r for r in rows if isinstance(r, dict) and isinstance(r.get("date"), str)]
+    if not dated:
+        return None
+    return max(dated, key=lambda r: r["date"])
 
 
 @idempotent_step(skip_return={})
@@ -1430,13 +1485,29 @@ def _compute_positions_value(
     book's missing FX rate skips only that book's snapshot for the day
     rather than aborting the whole session.
     """
+    return _mark_positions(portfolio, on)[0]
+
+
+def _mark_positions(
+    portfolio: Portfolio, on: date
+) -> tuple[float, list[tuple[str, date]]]:
+    """`_compute_positions_value`, plus each position's ``(ticker, price_date)``.
+
+    ``price_date`` is the date of the close the position was marked at
+    (`PositionValuation.price_date`), which the snapshot writer turns into the
+    row's ``stale_marks`` disclosure (`engine.stale_marks`). Same refusal as
+    `_compute_positions_value`: a position that cannot be valued raises.
+    """
     total = 0.0
+    marks: list[tuple[str, date]] = []
     for p in portfolio.positions:
         valuation = value_position(p.ticker, p.shares, portfolio.currency, on)
         if not valuation.ok:
             raise MissingPriceError(p.ticker, on, what=valuation.reason)
         total += valuation.value
-    return total
+        if valuation.price_date is not None:
+            marks.append((p.ticker, valuation.price_date))
+    return total, marks
 
 
 @idempotent_step(skip_return=[])
@@ -1502,7 +1573,7 @@ def step_update_snapshots(market_payload: dict) -> list[str]:
             continue
 
         try:
-            positions_value = _compute_positions_value(portfolio, snapshot_date)
+            positions_value, marks = _mark_positions(portfolio, snapshot_date)
         except MissingPriceError as exc:
             fx_gaps.append(strategy_id)
             print(
@@ -1511,6 +1582,17 @@ def step_update_snapshots(market_payload: dict) -> list[str]:
             )
             continue
         portfolio_value = portfolio.cash + positions_value
+        # Every new row says which of its marks trail their exchange (an empty
+        # list is "checked, none"): the row is immutable once written, so the
+        # disclosure has to ride on it (plan 2026-10-03, 1.4).
+        stale = find_stale_marks(marks, snapshot_date)
+        if stale:
+            named = ", ".join(f"{m['ticker']}@{m['price_date']}" for m in stale)
+            print(
+                f"  [WARN] {strategy_id}: {len(stale)} position(s) marked at a close "
+                f"older than their exchange's {snapshot_date} row: {named}. "
+                f"Recorded on the row as stale_marks."
+            )
 
         written = manager.add_snapshot(
             strategy_id=strategy_id,
@@ -1520,6 +1602,7 @@ def step_update_snapshots(market_payload: dict) -> list[str]:
             positions_value=positions_value,
             benchmarks=benchmarks,
             session_date=session_date,
+            stale_marks=stale,
         )
 
         if not written:
@@ -1626,6 +1709,20 @@ def step_commit_session(
     # with a single string is the natural slip.
     if isinstance(concerns, str):
         concerns = [concerns]
+    # The broker's INSTRUMENT_SUSPENDED refusals are added here, not left to
+    # the model: a refused SELL traps a position, and the trailer is what puts
+    # it in front of a human the same night (plan 2026-10-03, review SHOULD 5).
+    # Deriving it must never cost the session its commit.
+    try:
+        derived = instrument_refusal_concerns(session_date)
+    except Exception as exc:  # noqa: BLE001 — the commit outranks the concern
+        derived = [
+            f"INSTRUMENT_SUSPENDED and STALE_PRICE holds could not be listed "
+            f"({exc!r}); read data/orders/*inbox/{session_date.isoformat()}.jsonl "
+            "and the data/orders/*pending/ orders against "
+            "data/market/instrument_status.json and the price store by hand."
+        ]
+    concerns = list(concerns or []) + [c for c in derived if c not in (concerns or [])]
     subprocess.run(["git", "add", "data/"], cwd=_PROJECT_ROOT, check=True)
     args = ["git", "commit", "-m", f"chore: weekday session {session_date.isoformat()}"]
     for text in concerns or []:

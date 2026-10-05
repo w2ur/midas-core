@@ -62,7 +62,9 @@ class TestReadPathsTakeRawClose:
     def test_ohlcv_store_latest_close_on_or_before(self, diverging_store: Path) -> None:
         from engine.ohlcv_store import latest_close_on_or_before
 
-        assert latest_close_on_or_before("PAYER", date(2026, 6, 10)) == RAW_CLOSE
+        dated = latest_close_on_or_before("PAYER", date(2026, 6, 10))
+        assert dated is not None
+        assert dated.close == RAW_CLOSE
 
     def test_quotes_latest_price(self, diverging_store: Path) -> None:
         """The broker's fill price and ``portfolio_mtm``'s point valuation."""

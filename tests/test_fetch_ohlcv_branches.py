@@ -64,7 +64,21 @@ def _fetch_end() -> date:
     window: a fixture row dated today is simply never requested, which turns a
     revision test into a silent no-op instead of a failure.
     """
-    return date.today() - timedelta(days=1)
+    return fo.date.today() - timedelta(days=1)
+
+
+class _SaturdayDate(date):
+    """`date` whose today() is a Saturday, so the run's `end` is a Friday.
+
+    The full nightly run fires Tue-Sat, so its `end` is always a weekday.
+    Run on a Sunday or Monday, a weekday-anchored fixture leaves `end` on a
+    weekend past the last stored day, and the 1-day revision window re-asks
+    that stored day and rewrites it.
+    """
+
+    @classmethod
+    def today(cls) -> date:
+        return date(2026, 10, 3)
 
 
 def _make_fake_fetch_symbol(frames: dict[str, dict[str, list]]):
@@ -1613,6 +1627,11 @@ class TestStoreGapsAreHeldUntilTheStoreHoldsThem:
     DE = [f"EU{i}.DE" for i in range(20)]
     US = ["SPY"] + [f"US{i}" for i in range(19)]
 
+    @pytest.fixture(autouse=True)
+    def _weekday_end(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Regression: 4 of these failed on Sunday 2026-10-04 (end = Saturday).
+        monkeypatch.setattr(fo, "date", _SaturdayDate)
+
     def _seed(self, holed: list[str], dates: list[str], missing: str) -> dict[str, bytes]:
         before: dict[str, bytes] = {}
         for sym in self.US + self.DE:
@@ -1645,8 +1664,14 @@ class TestStoreGapsAreHeldUntilTheStoreHoldsThem:
         for sym in self.DE:
             path = get_config().ohlcv_dir / f"{sym}.jsonl"
             assert missing in fo._existing_dates(path), f"{sym} still lacks {missing}"
-            # Insert-only: every stored line survives byte-for-byte, in order.
-            assert path.read_bytes().startswith(before[sym])
+            # Insert-only: every stored line survives byte-for-byte, and the
+            # healed date lands IN PLACE (canonical ascending order), not at
+            # the end of the file.
+            lines = path.read_bytes().splitlines(keepends=True)
+            assert [l for l in lines if json.loads(l)["date"] != missing] == (
+                before[sym].splitlines(keepends=True)
+            )
+            assert [json.loads(l)["date"] for l in lines] == sorted(dates)
         assert self._ledger() == {}
 
     def test_a_hole_the_vendor_still_cannot_fill_is_held_red(

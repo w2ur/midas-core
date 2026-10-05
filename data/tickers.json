@@ -1747,7 +1747,7 @@
     "currency": "USD"
   },
   "CTVA": {
-    "name": "Corteva, Inc.",
+    "name": "Vylor, Inc.",
     "type": "equity",
     "currency": "USD"
   },
@@ -6490,9 +6490,9 @@
     "currency": "PLN"
   },
   "TPEIR.AT": {
-    "name": null,
-    "type": "unknown",
-    "currency": null
+    "name": "Piraeus Bank S.A.",
+    "type": "equity",
+    "currency": "EUR"
   },
   "TPG.L": {
     "name": null,
@@ -6915,7 +6915,7 @@
     "currency": "USD"
   },
   "VMRK": {
-    "name": "AvalonBay Communities, Inc.",
+    "name": "Vivmark Residential",
     "type": "equity",
     "currency": "USD"
   },
@@ -7215,12 +7215,12 @@
     "currency": "USD"
   },
   "XLM-EUR": {
-    "name": "Stellar",
+    "name": "Stellar EUR",
     "type": "crypto",
     "currency": "EUR"
   },
   "XLM-USD": {
-    "name": "Stellar",
+    "name": "Stellar USD",
     "type": "crypto",
     "currency": "USD"
   },
@@ -7255,19 +7255,19 @@
     "currency": "USD"
   },
   "XRP-EUR": {
-    "name": "XRP",
+    "name": "XRP EUR",
     "type": "crypto",
     "currency": "EUR"
   },
   "XRP-USD": {
-    "name": "XRP",
+    "name": "XRP USD",
     "type": "crypto",
     "currency": "USD"
   },
   "XTB.WA": {
-    "name": null,
-    "type": "unknown",
-    "currency": null
+    "name": "XTB S.A.",
+    "type": "equity",
+    "currency": "PLN"
   },
   "XYL": {
     "name": "Xylem Inc.",

@@ -81,7 +81,7 @@ from engine.portfolio import PortfolioManager
 from engine.triggers import (
     delete_pending,
     evaluate_trigger,
-    get_current_price,
+    get_current_quote,
     is_expired,
     list_pending,
 )
@@ -208,6 +208,16 @@ REPORT_COMMIT_STRANDED = "stranded"
 # was written and nothing was staged. Distinct from "stranded", which means a
 # mutation exists on disk and reached nothing.
 REPORT_COMMIT_NONE = "not executed"
+
+# Broker refusals on a FIRED trigger that say "not now", not "never": the
+# price trails its exchange (the bar usually lands the next night) or the
+# instrument is held in the status registry until a human adjudicates it
+# (an unreadable registry answers the same for every ticker). Both checks run
+# before anything is mutated, so the watcher carries the order instead of
+# writing the rejection and deleting the pending file, exactly as it does when
+# no quote is available. Expiry still retires it. Every other refusal
+# (INSUFFICIENT_CASH, MAX_ORDER_NOTIONAL, ...) consumes the order as before.
+HELD_ON_FIRE = frozenset({"STALE_PRICE", "INSTRUMENT_SUSPENDED"})
 
 
 class _FallbackBranch:
@@ -642,7 +652,9 @@ def _report_entry(
     passed through as `fill=None` too, so `fill_price`/`notional` are simply
     absent rather than guessed from a record this run did not produce.
 
-    `kind` is "fired", "expired" or "error". The third was missing until the
+    `kind` is "fired", "expired", "error" or "held". "held" is a fired
+    trigger the broker refused with a reason in `HELD_ON_FIRE`: nothing was
+    written, the order stays armed, and `error` carries the reason. The third was missing until the
     round-2 review, 2026-09-05, and its absence inverted the one alert this
     report exists to serve: `execute_triggered_order` raising on a FIRED
     trigger appended no entry at all, so a run whose only event was that
@@ -671,9 +683,9 @@ def _report_entry(
         "observed_price": observed_price,
         "fill_price": fill.fill_price if fill is not None else None,
         "notional": fill.notional_base if fill is not None else None,
-        "kind": kind,  # "fired" | "expired" | "error"
+        "kind": kind,  # "fired" | "expired" | "error" | "held"
         "error": error,
-        "commit": REPORT_COMMIT_NONE if kind == "error" else None,
+        "commit": REPORT_COMMIT_NONE if kind in ("error", "held") else None,
     }
 
 
@@ -750,6 +762,18 @@ def _report_markdown_table(entries: list[dict]) -> str:
         lines.append("")
         for e in failed:
             lines.append(f"- `{e['order_id']}` [{e['agent_id']}]: {e.get('error')}")
+        lines.append("")
+    # A held fire wrote nothing and the run exits 0, so the reason is only
+    # here (and in the session's concern trailer, `instrument_refusal_concerns`).
+    held = [e for e in entries if e.get("kind") == "held"]
+    if held:
+        lines.append(
+            "**Fired, refused by the broker and kept armed — the order is "
+            "retried on the next run and protects nothing until it fills:**"
+        )
+        lines.append("")
+        for e in held:
+            lines.append(f"- `{e['order_id']}` [{e['agent_id']}] {e['ticker']}: {e.get('error')}")
         lines.append("")
     return "\n".join(lines)
 
@@ -848,7 +872,7 @@ def _process_channel(
     `execute_triggered_order` is never called: it is the broker, and it moves
     the book. The report is written to the log instead.
     """
-    # Late binding: tests monkeypatch `engine.triggers.get_current_price` so we
+    # Late binding: tests monkeypatch `engine.triggers.get_current_quote` so we
     # must call it through the module attribute, not the imported name.
     from engine import triggers as _triggers
 
@@ -877,10 +901,11 @@ def _process_channel(
             summary["report"].append(_report_entry(order, "expired", None, f))
             continue
 
-        price = _triggers.get_current_price(order.ticker, today=today)
-        if price is None:
+        observed = _triggers.get_current_quote(order.ticker, today=today)
+        if observed is None:
             summary["carried"] += 1
             continue
+        price = observed.close
         if not evaluate_trigger(price, order.trigger):
             summary["carried"] += 1
             continue
@@ -896,7 +921,12 @@ def _process_channel(
         # the idempotency scan is scoped to the correct channel.
         try:
             f = execute_triggered_order(
-                order, today, portfolio_manager, fire_price=price, inbox_dir=inbox_dir
+                order,
+                today,
+                portfolio_manager,
+                fire_price=price,
+                fire_as_of=observed.as_of,
+                inbox_dir=inbox_dir,
             )
         except Exception as exc:
             logger.exception(
@@ -914,6 +944,20 @@ def _process_channel(
                     None,
                     error=f"{type(exc).__name__}: {exc}",
                 )
+            )
+            continue
+
+        if f is not None and f.status == "rejected" and f.reason in HELD_ON_FIRE:
+            logger.warning(
+                "%s fired at %s but the broker refused it %s; the order stays "
+                "armed and is retried on the next run.",
+                order.order_id,
+                price,
+                f.reason,
+            )
+            summary["carried"] += 1
+            summary["report"].append(
+                _report_entry(order, "held", price, None, error=f.reason)
             )
             continue
 

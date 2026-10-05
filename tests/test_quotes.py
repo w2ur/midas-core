@@ -212,7 +212,7 @@ def test_latest_price_passes_the_store_quote_through(midas_data_root: Path) -> N
     _seed_registry({"LLOY.L": "GBp"})
     _seed_ohlcv("LLOY.L", 1.1660)
     assert latest_price("LLOY.L", date(2026, 6, 1)) == Quote(
-        pytest.approx(1.166), "GBP"
+        pytest.approx(1.166), "GBP", date(2026, 6, 1)
     )
 
 
@@ -442,3 +442,28 @@ def test_a_malformed_registry_currency_falls_back_to_the_heuristic(
     _seed_registry({"ENX.AS": "3.3", "HMB.ST": "9.2"})
     assert ticker_currency("ENX.AS") == "EUR"  # .AS heuristic
     assert ticker_currency("HMB.ST") == "SEK"  # .ST heuristic
+
+
+def test_latest_price_carries_the_store_rows_date(midas_data_root: Path) -> None:
+    """`Quote.as_of` is the row's date, not the date asked about (2026-10-03).
+
+    A CTVA order on 2026-10-02 would have filled at its 09-30 close (a
+    what-if; no CTVA order was placed): `latest_price` answered a price and
+    nothing else, so no rail could see the quote was two
+    sessions old. Asked for 06-03 against a store whose newest row is 06-01,
+    the quote must say 06-01.
+    """
+    _seed_registry({"LLOY.L": "GBp"})
+    _seed_ohlcv("LLOY.L", 1.1660, on="2026-06-01")
+    quote = latest_price("LLOY.L", date(2026, 6, 3))
+    assert quote is not None
+    assert quote.as_of == date(2026, 6, 1)
+    assert quote.price == pytest.approx(1.166)
+
+
+def test_store_quote_labels_the_date_it_is_handed(midas_data_root: Path) -> None:
+    """The fire path hands the broker a price observed elsewhere; the date
+    it was observed on travels with it, unscaled and unchanged."""
+    _seed_registry({"LLOY.L": "GBp"})
+    quote = store_quote("LLOY.L", 1.166, as_of=date(2026, 6, 2))
+    assert quote == Quote(1.166, "GBP", date(2026, 6, 2))

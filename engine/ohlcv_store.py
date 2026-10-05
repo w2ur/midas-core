@@ -29,21 +29,41 @@ from __future__ import annotations
 import json
 from datetime import date
 from pathlib import Path
+from typing import NamedTuple
 
 from engine.config import get_config
 
 
+class DatedClose(NamedTuple):
+    """A stored raw close together with the date of the row it came from.
+
+    `as_of` is the row's own market date, never the date the caller asked
+    about. The two differ whenever the store has no row for the requested
+    day (a weekend, a holiday, or a vendor that has not served the bar yet),
+    and until 2026-10-03 every read path dropped that difference on the
+    floor: a CTVA order on 2026-10-02 would have filled at its 09-30 close
+    with no way to see that the price was two sessions old (a what-if run
+    against the store at 0f981dd99; no CTVA order was ever placed). Carrying the date is
+    what lets a caller tell "today's close" from "the last close we have".
+    """
+
+    close: float
+    as_of: date
+
+
 def latest_close_on_or_before(
     ticker: str, on: date | None = None, store: Path | None = None
-) -> float | None:
-    """Return the most recent raw `close` for `ticker` with date <= `on`.
+) -> DatedClose | None:
+    """Return the most recent raw `close` for `ticker` with date <= `on`,
+    with the date of the row it was read from.
 
     Deliberately ignores `adj_close` — see the module docstring. Every stored
     row carries a `close` (`ohlcv_ingest.build_new_rows` drops rows without
     one), so there is no fallback: a row with no close yields None rather
     than silently switching basis.
 
-    Returns None if the ticker is not in the store or no row satisfies the date bound.
+    Returns None if the ticker is not in the store, no row satisfies the date
+    bound, or the newest such row carries no close.
     `store` defaults to ``get_config().ohlcv_dir`` (MIDAS_DATA_DIR-aware, resolved at
     call time); tests may pass a tmp path.
     """
@@ -70,7 +90,9 @@ def latest_close_on_or_before(
                 best_date = row_date
                 val = row.get("close")
                 best_price = float(val) if val is not None else None
-    return best_price
+    if best_date is None or best_price is None:
+        return None
+    return DatedClose(best_price, date.fromisoformat(best_date))
 
 
 def __getattr__(name: str) -> object:

@@ -83,7 +83,12 @@ from engine.disclosure import (
     UndisclosedRestatementError,
     require_changelog_entry,
 )
-from engine.restatement import MissingPriceError, replay_holdings, revalue_snapshot
+from engine.restatement import (
+    MissingPriceError,
+    replay_holdings,
+    revalue_snapshot_with_marks,
+)
+from engine.stale_marks import find_stale_marks
 from scripts.fetch_market_data import _BENCHMARK_SOURCES
 
 # A replayed cash figure within this many currency units of the recorded
@@ -111,9 +116,21 @@ class RestatementError(RuntimeError):
 
 @dataclass
 class RowChange:
+    """One published row the restatement rewrites.
+
+    A row counts when its value moves *or* its ``stale_marks`` disclosure
+    does: ``--apply`` writes both, so a dry run that listed only value moves
+    would let a published disclosure change with nothing naming it.
+    """
+
     row_date: str
     old_value: float
     new_value: float
+    stale_marks_changed: bool = False
+
+    @property
+    def value_changed(self) -> bool:
+        return abs(self.new_value - self.old_value) > 1e-6
 
     @property
     def pct(self) -> float:
@@ -147,9 +164,10 @@ class AgentResult:
 
     @property
     def largest_change(self) -> RowChange | None:
-        if not self.changes:
+        moves = [c for c in self.changes if c.value_changed]
+        if not moves:
             return None
-        return max(self.changes, key=lambda c: abs(c.new_value - c.old_value))
+        return max(moves, key=lambda c: abs(c.new_value - c.old_value))
 
     @property
     def headline_delta_pp(self) -> float:
@@ -217,10 +235,10 @@ def _benchmarks_as_of(market_date: date) -> dict[str, float]:
     benchmarks: dict[str, float] = {}
     for name, sources in _BENCHMARK_SOURCES.items():
         for ticker, multiplier, _label in sources:
-            price = latest_close_on_or_before(ticker, market_date)
-            if price is None:
+            dated = latest_close_on_or_before(ticker, market_date)
+            if dated is None:
                 continue
-            value = price * multiplier
+            value = dated.close * multiplier
             benchmarks[name] = round(value, 4 if name == "msci_world" else 2)
             break
         else:
@@ -332,7 +350,7 @@ def restate_agent(agent_id: str, manager: PortfolioManager) -> AgentResult:
             positions, _cash_delta = replay_holdings(trades, session_date)
             # Pricing stays anchored to the row's own market date — only the
             # holdings clock changed, not the pricing clock.
-            new_pv, new_positions_value = revalue_snapshot(
+            new_pv, new_positions_value, marks = revalue_snapshot_with_marks(
                 positions, recorded_cash, row_date, currency
             )
             new_benchmarks = _benchmarks_as_of(row_date)
@@ -347,13 +365,21 @@ def restate_agent(agent_id: str, manager: PortfolioManager) -> AgentResult:
         new_row["portfolio_value"] = new_pv
         new_row["positions_value"] = new_positions_value
         new_row["benchmarks"] = new_benchmarks
+        # The disclosure follows the prices the restated value used: a close
+        # that has landed since is no longer a stale mark, and one the store
+        # lost is. A row without the key predates the check and stays so.
+        if "stale_marks" in row:
+            new_row["stale_marks"] = find_stale_marks(marks, row_date)
         new_rows.append(new_row)
 
-        old_pv = row["portfolio_value"]
-        if abs(new_pv - old_pv) > 1e-6:
-            changes.append(
-                RowChange(row_date=row["date"], old_value=old_pv, new_value=new_pv)
-            )
+        change = RowChange(
+            row_date=row["date"],
+            old_value=row["portfolio_value"],
+            new_value=new_pv,
+            stale_marks_changed=new_row.get("stale_marks") != row.get("stale_marks"),
+        )
+        if change.value_changed or change.stale_marks_changed:
+            changes.append(change)
 
     result = AgentResult(
         agent_id=agent_id,
@@ -394,6 +420,17 @@ def _print_agent_table(result: AgentResult, will_write: bool) -> None:
         for row_date, msg in result.row_errors:
             print(f"    {row_date}: {msg}")
 
+    disclosure_dates = [c.row_date for c in result.changes if c.stale_marks_changed]
+    if disclosure_dates:
+        preview = ", ".join(disclosure_dates[:6])
+        more = (
+            f" (+{len(disclosure_dates) - 6} more)" if len(disclosure_dates) > 6 else ""
+        )
+        print(
+            f"  stale_marks disclosure changed on {len(disclosure_dates)} row(s): "
+            f"{preview}{more}"
+        )
+
     largest = result.largest_change
     if largest is not None:
         flag = (
@@ -405,6 +442,7 @@ def _print_agent_table(result: AgentResult, will_write: bool) -> None:
             f"  largest single move: {largest.row_date}  "
             f"{largest.old_value:.2f} -> {largest.new_value:.2f}  ({largest.pct:+.2f}%){flag}"
         )
+    if result.changes:
         first = result.changes[0]
         last = result.changes[-1]
         print(f"  first affected date: {first.row_date}")

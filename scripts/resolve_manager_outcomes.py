@@ -222,11 +222,12 @@ def _resolve_position(
     exit_price = exit_row[1]
 
     # Entry price: latest close on or before the decision date.
-    entry_price = latest_close_on_or_before(
+    entry = latest_close_on_or_before(
         ticker, date.fromisoformat(decision_date), store=store
     )
-    if entry_price is None or entry_price == 0.0:
+    if entry is None or entry.close == 0.0:
         return None
+    entry_price = entry.close
 
     fwd_return = (exit_price / entry_price - 1.0) * 100.0
 

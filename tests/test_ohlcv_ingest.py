@@ -577,28 +577,21 @@ def test_merge_rows_keeps_an_untouched_row_byte_identical_during_a_mixed_rewrite
     assert lines[0] == untouched_line
 
 
-def test_merge_rows_preserves_an_out_of_order_store(tmp_path: Path) -> None:
-    """The store is NOT in date order and must not be re-sorted by a cron.
+def test_merge_rows_rewrites_an_out_of_order_store_sorted(tmp_path: Path) -> None:
+    """A rewrite emits canonical form: ascending dates, one row per date.
 
-    529 of the 1,046 committed OHLCV files have an order break: a later
-    long-history backfill was appended behind the original window, so the file
-    reads recent-dates-then-an-older-block (`3EUS.L` breaks at line 513 of
-    2581, 2026-04-24 -> 2016-04-28). Now that the revision window is universal,
-    `appended >= 1` on every nightly run, so every symbol takes this rewrite
-    path — a `sorted()` here would make an unattended job emit a ~230 MB,
-    1.3-million-line reorder commit. Readers are order-insensitive;
-    canonicalising the store is a separate, deliberate decision.
-
-    Mirrors the real shape: recent block first, older block behind it, with the
-    revision landing in the middle of the file.
+    Until 2026-10-03 the writer preserved line order because 529 committed
+    files were out of order and sorting inside a cron would have emitted a
+    reorder commit. The store was normalised once, in its own data commit
+    (`scripts/normalise_store_order.py`), so that reason is gone: the writer now
+    keeps the file canonical. Untouched rows keep their exact bytes.
     """
     path = tmp_path / "3EUS.L.jsonl"
     recent = ["2026-04-23", "2026-04-24"]
     older = ["2016-04-28", "2016-04-29"]
-    original = [json.dumps(_rec(d, 100.0)) for d in recent + older]
-    path.write_text("\n".join(original) + "\n", encoding="utf-8")
+    original = {d: json.dumps(_rec(d, 100.0)) for d in recent + older}
+    path.write_text("\n".join(original.values()) + "\n", encoding="utf-8")
 
-    # Revises 2026-04-24 (row 2 of 4 — mid-file) and appends a new trailing day.
     df = _yf_frame(
         {
             "2026-04-24": [1, 2, 0.5, 111.11, 111.11, 100],
@@ -609,29 +602,115 @@ def test_merge_rows_preserves_an_out_of_order_store(tmp_path: Path) -> None:
     appended, revised, _quarantined, *_ = merge_rows(path, df, revise_from="2026-04-24")
 
     assert (appended, revised) == (1, 1)
-    dates = [json.loads(line)["date"] for line in path.read_text().splitlines()]
-    # Original order, break and all — NOT sorted. New row at the end.
-    assert dates == [
-        "2026-04-23",
-        "2026-04-24",
-        "2016-04-28",
-        "2016-04-29",
-        "2026-04-25",
-    ]
-    assert dates != sorted(dates)
     lines = path.read_text().splitlines()
-    assert lines[0] == original[0]  # untouched rows keep their exact bytes
-    assert lines[2] == original[2]
-    assert lines[3] == original[3]
-    assert json.loads(lines[1])["close"] == 111.11  # revised in place
+    dates = [json.loads(line)["date"] for line in lines]
+    assert dates == ["2016-04-28", "2016-04-29", "2026-04-23", "2026-04-24", "2026-04-25"]
+    assert lines[0] == original["2016-04-28"]  # untouched rows keep their exact bytes
+    assert lines[2] == original["2026-04-23"]
+    assert json.loads(lines[3])["close"] == 111.11  # revised in place
+
+
+def test_an_interior_row_lands_in_place(tmp_path: Path) -> None:
+    """A date inserted inside the series (the store-gap heal) is placed by date,
+    through both writers, and every other line is byte-identical."""
+    for revise_from in (None, "2099-01-01"):
+        path = tmp_path / f"X{revise_from}.jsonl"
+        original = [json.dumps(_rec(d, 100.0)) for d in ("2026-04-20", "2026-04-22", "2026-04-23")]
+        path.write_text("\n".join(original) + "\n", encoding="utf-8")
+        df = _yf_frame({"2026-04-21": [1, 2, 0.5, 100.5, 100.5, 100]})
+
+        appended = merge_rows(path, df, revise_from=revise_from).appended
+
+        assert appended == 1
+        lines = path.read_text().splitlines()
+        assert [json.loads(line)["date"] for line in lines] == [
+            "2026-04-20", "2026-04-21", "2026-04-22", "2026-04-23",
+        ]
+        assert [lines[0], lines[2], lines[3]] == original
+
+
+def test_append_to_a_file_with_a_broken_line_never_drops_it(tmp_path: Path) -> None:
+    """An interior insert would normally rewrite sorted; with an unparseable
+    line present it must append instead, because a rewrite would drop that line."""
+    path = tmp_path / "X.jsonl"
+    path.write_text(
+        json.dumps(_rec("2026-04-20", 1.0)) + "\n{broken\n" + json.dumps(_rec("2026-04-23", 1.0)) + "\n"
+    )
+    df = _yf_frame({"2026-04-21": [1, 2, 0.5, 1.0, 1.0, 100]})
+    assert append_new_rows(path, df) == 1
+    text = path.read_text()
+    assert "{broken" in text and "2026-04-21" in text
+
+
+def test_interior_insert_never_drops_a_conflicting_duplicate(tmp_path: Path) -> None:
+    """Regression (review 2026-10-03): the sorted rewrite kept the LAST of two
+    byte-different rows for one date and dropped the other silently, while
+    normalise_store_order.py refuses that case. The writer must append instead."""
+    path = tmp_path / "X.jsonl"
+    path.write_text(
+        "\n".join(json.dumps(_rec(d, c)) for d, c in
+                  (("2026-04-20", 1.0), ("2026-04-20", 2.0), ("2026-04-23", 1.0))) + "\n"
+    )
+    df = _yf_frame({"2026-04-21": [1, 2, 0.5, 1.0, 1.0, 100]})
+    assert append_new_rows(path, df) == 1
+    closes = [(json.loads(x)["date"], json.loads(x)["close"]) for x in path.read_text().splitlines()]
+    assert ("2026-04-20", 1.0) in closes and ("2026-04-20", 2.0) in closes
+    assert ("2026-04-21", 1.0) in closes
+
+
+def test_merge_rows_revision_never_drops_a_conflicting_duplicate(tmp_path: Path) -> None:
+    """Regression (review 2026-10-03): merge_rows with revise_from (the nightly
+    path) read lines into a dict, last row winning, and rewrote the file,
+    silently dropping the earlier of two different rows for one date."""
+    path = tmp_path / "X.jsonl"
+    path.write_text(
+        "\n".join(json.dumps(_rec(d, c)) for d, c in
+                  (("2026-04-20", 1.0), ("2026-04-20", 2.0), ("2026-04-23", 1.0))) + "\n"
+    )
+    df = _yf_frame({"2026-04-23": [1.05, 1.05, 1.05, 1.05, 1.05, 100]})
+    merge_rows(path, df, revise_from="2026-04-23")
+    closes = [(json.loads(x)["date"], json.loads(x)["close"]) for x in path.read_text().splitlines()]
+    assert ("2026-04-20", 1.0) in closes and ("2026-04-20", 2.0) in closes
+
+
+def test_interior_insert_collapses_a_byte_identical_duplicate(tmp_path: Path) -> None:
+    path = tmp_path / "X.jsonl"
+    dup = json.dumps(_rec("2026-04-20", 1.0))
+    path.write_text(dup + "\n" + dup + "\n" + json.dumps(_rec("2026-04-23", 1.0)) + "\n")
+    df = _yf_frame({"2026-04-21": [1, 2, 0.5, 1.0, 1.0, 100]})
+    assert append_new_rows(path, df) == 1
+    assert [json.loads(x)["date"] for x in path.read_text().splitlines()] == [
+        "2026-04-20", "2026-04-21", "2026-04-23",
+    ]
+
+
+@given(
+    st.lists(st.integers(0, 40), min_size=1, max_size=15, unique=True),
+    st.lists(st.integers(0, 40), min_size=1, max_size=15, unique=True),
+)
+def test_writers_keep_the_file_canonical(stored_days: list[int], new_days: list[int]) -> None:
+    """Whatever the interleaving of stored and new dates, the file ends sorted
+    with no duplicate date."""
+    import tempfile
+
+    base = date(2026, 1, 1)
+    iso = lambda n: (base + timedelta(days=n)).isoformat()  # noqa: E731
+    with tempfile.TemporaryDirectory() as tmp:
+        for revise_from in (None, "1999-01-01"):
+            path = Path(tmp) / f"P{revise_from}.jsonl"
+            path.write_text("".join(json.dumps(_rec(iso(n), 1.0)) + "\n" for n in sorted(stored_days)))
+            df = _yf_frame({iso(n): [1, 2, 0.5, 1.0, 1.0, 1] for n in sorted(new_days)})
+            merge_rows(path, df, revise_from=revise_from)
+            dates = [json.loads(line)["date"] for line in path.read_text().splitlines()]
+            assert len(dates) == len(set(dates))
+            assert dates == sorted(dates)
 
 
 def test_merge_rows_appends_multiple_new_dates_in_ascending_order(
     tmp_path: Path,
 ) -> None:
-    """New dates are the one thing that IS sorted — among themselves, so a
-    multi-day catch-up lands chronologically at the end rather than in whatever
-    order the frame happens to iterate."""
+    """A multi-day catch-up lands chronologically, not in whatever order the
+    frame happens to iterate."""
     path = tmp_path / "3EUS.L.jsonl"
     path.write_text(
         json.dumps(_rec("2026-04-24", 100.0))
@@ -651,8 +730,8 @@ def test_merge_rows_appends_multiple_new_dates_in_ascending_order(
     assert merge_rows(path, df, revise_from="2026-04-24")[:3] == (3, 0, 0)
     dates = [json.loads(line)["date"] for line in path.read_text().splitlines()]
     assert dates == [
+        "2016-04-28",
         "2026-04-24",
-        "2016-04-28",  # pre-existing break survives
         "2026-04-25",
         "2026-04-26",
         "2026-04-27",

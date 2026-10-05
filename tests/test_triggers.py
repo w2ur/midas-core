@@ -164,7 +164,8 @@ class TestIsExpired:
 
 from unittest.mock import MagicMock
 
-from engine.triggers import get_current_price, is_crypto_ticker
+from engine.ohlcv_store import DatedClose
+from engine.triggers import get_current_quote, is_crypto_ticker
 
 
 class TestIsCryptoTicker:
@@ -240,7 +241,7 @@ class TestChannelScopedPending:
         assert global_back == []
 
 
-class TestGetCurrentPrice:
+class TestGetCurrentQuote:
     def test_equity_falls_through_to_ohlcv(self, monkeypatch) -> None:
         from engine import triggers
 
@@ -248,18 +249,20 @@ class TestGetCurrentPrice:
 
         def fake_latest(ticker, on, store=None):
             called["args"] = (ticker, on)
-            return 420.42
+            return DatedClose(420.42, date(2026, 5, 15))
 
         monkeypatch.setattr(triggers, "latest_close_on_or_before", fake_latest)
-        price = get_current_price("MSFT", today=date(2026, 5, 17))
-        assert price == 420.42
+        price = get_current_quote("MSFT", today=date(2026, 5, 17))
+        # The store row's own date, not the evaluation day: a Friday close
+        # read on a Sunday is two days old, and the quote must say so.
+        assert price == DatedClose(420.42, date(2026, 5, 15))
         assert called["args"] == ("MSFT", date(2026, 5, 17))
 
     def test_equity_missing_returns_none(self, monkeypatch) -> None:
         from engine import triggers
 
         monkeypatch.setattr(triggers, "latest_close_on_or_before", lambda *a, **k: None)
-        assert get_current_price("MSFT", today=date(2026, 5, 17)) is None
+        assert get_current_quote("MSFT", today=date(2026, 5, 17)) is None
 
     def test_crypto_uses_ccxt(self, monkeypatch) -> None:
         from engine import triggers
@@ -267,8 +270,9 @@ class TestGetCurrentPrice:
         fake_exchange = MagicMock()
         fake_exchange.fetch_ticker.return_value = {"last": 85123.45}
         monkeypatch.setattr(triggers, "_get_crypto_exchange", lambda: fake_exchange)
-        price = get_current_price("BTC-EUR", today=date(2026, 5, 17))
-        assert price == 85123.45
+        price = get_current_quote("BTC-EUR", today=date(2026, 5, 17))
+        # A live ccxt quote is an observation made now: dated the evaluation day.
+        assert price == DatedClose(85123.45, date(2026, 5, 17))
         fake_exchange.fetch_ticker.assert_called_once_with("BTC/EUR")
 
     def test_crypto_exchange_exception_returns_none(self, monkeypatch) -> None:
@@ -277,7 +281,7 @@ class TestGetCurrentPrice:
         fake_exchange = MagicMock()
         fake_exchange.fetch_ticker.side_effect = Exception("network down")
         monkeypatch.setattr(triggers, "_get_crypto_exchange", lambda: fake_exchange)
-        assert get_current_price("BTC-EUR", today=date(2026, 5, 17)) is None
+        assert get_current_quote("BTC-EUR", today=date(2026, 5, 17)) is None
 
     def test_crypto_missing_last_returns_none(self, monkeypatch) -> None:
         from engine import triggers
@@ -285,4 +289,4 @@ class TestGetCurrentPrice:
         fake_exchange = MagicMock()
         fake_exchange.fetch_ticker.return_value = {}  # no 'last' key
         monkeypatch.setattr(triggers, "_get_crypto_exchange", lambda: fake_exchange)
-        assert get_current_price("BTC-EUR", today=date(2026, 5, 17)) is None
+        assert get_current_quote("BTC-EUR", today=date(2026, 5, 17)) is None
