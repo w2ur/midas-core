@@ -11,25 +11,57 @@ store nor needed for portfolio-level reporting.
 
 from __future__ import annotations
 
+import bisect
 import json
+import math
+from contextlib import contextmanager
 from datetime import date
-from typing import Iterable
+from pathlib import Path
+from typing import Iterable, Iterator
 
 from engine.config import get_config
 
-# Direct pairs available in the forex-majors universe.
-# Each entry: (from, to) → yfinance ticker, inverted (True = stored rate is to/from, use 1/rate)
-_DIRECT: dict[tuple[str, str], tuple[str, bool]] = {
-    ("USD", "EUR"): (
-        "EURUSD=X",
-        True,
-    ),  # Stored rate is EUR→USD, so EUR per USD = 1/rate
-    ("GBP", "EUR"): ("EURGBP=X", True),
-    ("JPY", "EUR"): ("EURJPY=X", True),
-    ("EUR", "USD"): ("EURUSD=X", False),
-    ("EUR", "GBP"): ("EURGBP=X", False),
-    ("EUR", "JPY"): ("EURJPY=X", False),
-}
+#: Every currency pair the store holds a rate for, as its vendor ticker.
+#: ``ABCDEF=X`` stores how many ``DEF`` one ``ABC`` buys. **The one table**:
+#: both directions of every pair are routed from it (``_ROUTES``), and
+#: ``tests/test_fx.py`` fails when the store holds a ``*=X`` file this table
+#: does not list. It used to be two hand-written maps, one keyed on EUR and
+#: one on USD, and the USD one omitted ``GBPUSD=X`` and ``USDJPY=X``: the store
+#: held both rates while GBP->USD and JPY->USD answered None (round-3 review,
+#: 2026-10-06).
+STORE_PAIRS: tuple[str, ...] = (
+    "AUDUSD=X",
+    "EURGBP=X",
+    "EURJPY=X",
+    "EURUSD=X",
+    "GBPJPY=X",
+    "GBPUSD=X",
+    "NZDUSD=X",
+    "USDCAD=X",
+    "USDCHF=X",
+    "USDJPY=X",
+)
+
+
+def _routes(pairs: Iterable[str]) -> dict[tuple[str, str], tuple[str, bool]]:
+    """``(from, to) -> (ticker, inverted)`` for both directions of each pair.
+
+    ``inverted`` is True when the stored rate is to-per-from the wrong way
+    round, i.e. ``1 / close`` is the rate asked for.
+    """
+    routes: dict[tuple[str, str], tuple[str, bool]] = {}
+    for ticker in pairs:
+        base, quote = ticker[:3], ticker[3:6]
+        routes[(base, quote)] = (ticker, False)
+        routes[(quote, base)] = (ticker, True)
+    return routes
+
+
+_ROUTES = _routes(STORE_PAIRS)
+
+#: The currency every pair not stored directly is composed through. Every
+#: currency in ``STORE_PAIRS`` has a stored pair against it.
+_PIVOT = "USD"
 
 
 def _load_store_series(ticker: str) -> dict[str, float]:
@@ -60,13 +92,71 @@ def _load_store_series(ticker: str) -> dict[str, float]:
     return series
 
 
+#: ``{file path: (sorted dates, values)}`` while a ``store_cache()`` block is
+#: open, else None: every lookup then reads the file afresh, as it always did.
+_SERIES_CACHE: dict[Path, tuple[list[str], list[float]]] | None = None
+
+
+@contextmanager
+def store_cache() -> Iterator[None]:
+    """Read each pair's file at most once inside the block.
+
+    **Opt-in and scoped** (round-4 review, 2026-10-06). The coin flip asks a
+    rate for every currency and every date of a run, and each ask re-read and
+    re-parsed the whole pair file, then scanned every date. A build or a
+    replay opens this block around a run in which the store is not rewritten;
+    nothing outside a block is cached, so the broker, which reads a rate a
+    few times per session and may run after a store write in the same
+    process, behaves exactly as before. Re-entrant: an inner block reuses the
+    outer one's cache, and only the outermost exit drops it.
+    """
+    global _SERIES_CACHE
+    if _SERIES_CACHE is not None:
+        yield
+        return
+    _SERIES_CACHE = {}
+    try:
+        yield
+    finally:
+        _SERIES_CACHE = None
+
+
+def _sorted(series: dict[str, float]) -> tuple[list[str], list[float]]:
+    dates = sorted(series)
+    return dates, [series[d] for d in dates]
+
+
+def _latest_in(dates: list[str], values: list[float], target: date) -> float | None:
+    """The value of the newest date ≤ ``target`` in sorted ``dates``, by
+    bisection: the cached path, where one sort serves every ask of a run."""
+    i = bisect.bisect_right(dates, target.isoformat())
+    return values[i - 1] if i else None
+
+
 def _latest_on_or_before(series: dict[str, float], target: date) -> float | None:
-    """Return the latest value with date ≤ target, or None if none."""
+    """The latest value with date ≤ ``target``, or None: one O(n) pass, no
+    sort. The uncached path (outside ``store_cache()``), where the series is
+    read afresh for one ask and sorting it would cost more than the scan."""
     target_iso = target.isoformat()
-    eligible = [d for d in series if d <= target_iso]
-    if not eligible:
-        return None
-    return series[max(eligible)]
+    best: str | None = None
+    for d in series:
+        if d <= target_iso and (best is None or d > best):
+            best = d
+    return None if best is None else series[best]
+
+
+def _store_value(ticker: str, on: date) -> float | None:
+    """The stored close of ``ticker`` on or before ``on``: memoised and
+    bisected inside a ``store_cache()`` block, a linear scan of a fresh read
+    outside one."""
+    if _SERIES_CACHE is None:
+        return _latest_on_or_before(_load_store_series(ticker), on)
+    # Keyed on the resolved file, not the ticker: a block that outlives a
+    # ``MIDAS_DATA_DIR`` switch reads the new store's file, never the old one's.
+    path = get_config().ohlcv_dir / f"{ticker}.jsonl"
+    if path not in _SERIES_CACHE:
+        _SERIES_CACHE[path] = _sorted(_load_store_series(ticker))
+    return _latest_in(*_SERIES_CACHE[path], on)
 
 
 def get_rate(
@@ -76,50 +166,65 @@ def get_rate(
 
     Returns None if the rate cannot be computed from the available data.
     Uses the most recent available close on or before `on` (defaults to today).
+
+    A pair in ``STORE_PAIRS`` is read directly, in either direction; any
+    other pair is composed through USD, which every stored currency has a
+    pair against. A currency with no stored pair (SEK, DKK, NOK, PLN today)
+    has no rate to or from anything.
     """
     if from_currency == to_currency:
         return 1.0
     if on is None:
         on = date.today()
 
-    key = (from_currency, to_currency)
-    if key in _DIRECT:
-        ticker, inverted = _DIRECT[key]
-        series = _load_store_series(ticker)
-        val = _latest_on_or_before(series, on)
-        if val is None or val == 0:
-            return None
-        return 1.0 / val if inverted else val
+    direct = _ROUTES.get((from_currency, to_currency))
+    if direct is not None:
+        return _stored_rate(*direct, on)
 
-    # Indirect via USD — e.g., CHF→EUR = (USD per CHF) / (USD per EUR) = 1/USDCHF × 1/(1/EURUSD)
-    # Compose: from→USD then USD→to.
-    if from_currency != "USD" and to_currency != "USD":
-        to_usd = get_rate(from_currency, "USD", on)
-        from_usd = get_rate("USD", to_currency, on)
-        if to_usd is None or from_usd is None:
-            return None
-        return to_usd * from_usd
+    # Not stored directly: compose through the pivot, e.g. CHF->EUR =
+    # (USD per CHF) x (EUR per USD). Both legs must be stored pairs.
+    if _PIVOT in (from_currency, to_currency):
+        return None
+    leg_in = _ROUTES.get((from_currency, _PIVOT))
+    leg_out = _ROUTES.get((_PIVOT, to_currency))
+    if leg_in is None or leg_out is None:
+        return None
+    to_pivot = _stored_rate(*leg_in, on)
+    from_pivot = _stored_rate(*leg_out, on)
+    if to_pivot is None or from_pivot is None:
+        return None
+    return to_pivot * from_pivot
 
-    # Fallback pairs quoted against USD.
-    usd_pair_map = {
-        ("CHF", "USD"): ("USDCHF=X", True),
-        ("USD", "CHF"): ("USDCHF=X", False),
-        ("CAD", "USD"): ("USDCAD=X", True),
-        ("USD", "CAD"): ("USDCAD=X", False),
-        ("AUD", "USD"): ("AUDUSD=X", False),
-        ("USD", "AUD"): ("AUDUSD=X", True),
-        ("NZD", "USD"): ("NZDUSD=X", False),
-        ("USD", "NZD"): ("NZDUSD=X", True),
-    }
-    if key in usd_pair_map:
-        ticker, inverted = usd_pair_map[key]
-        series = _load_store_series(ticker)
-        val = _latest_on_or_before(series, on)
-        if val is None or val == 0:
-            return None
-        return 1.0 / val if inverted else val
 
-    return None
+def rate_tickers(from_currency: str, to_currency: str) -> tuple[str, ...]:
+    """The stored pair(s) ``get_rate`` reads for this conversion: one ticker
+    for a stored pair, the two legs for one composed through USD, and ``()``
+    when no route exists or the currencies are equal. Reads no file; it names
+    the store row a missing rate is waiting for."""
+    if from_currency == to_currency:
+        return ()
+    direct = _ROUTES.get((from_currency, to_currency))
+    if direct is not None:
+        return (direct[0],)
+    if _PIVOT in (from_currency, to_currency):
+        return ()
+    leg_in = _ROUTES.get((from_currency, _PIVOT))
+    leg_out = _ROUTES.get((_PIVOT, to_currency))
+    if leg_in is None or leg_out is None:
+        return ()
+    return (leg_in[0], leg_out[0])
+
+
+def _stored_rate(ticker: str, inverted: bool, on: date) -> float | None:
+    """One stored pair's rate on or before ``on``, or None.
+
+    A close that is not a positive finite number is no rate: zero used to be
+    the only one refused, while a negative or NaN close would have priced.
+    """
+    val = _store_value(ticker, on)
+    if val is None or not math.isfinite(val) or val <= 0:
+        return None
+    return 1.0 / val if inverted else val
 
 
 def convert(

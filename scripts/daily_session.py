@@ -23,7 +23,7 @@ Two modes:
      - step_save_content()                 → data/posts/, data/blog/, data/output/
      - step_build_memory_update_prompts()  → Ring 2 session-end rewrite prompts
      - step_save_memories()                → data/agent_memory/
-     - step_build_baselines()              → data/baselines/ (idempotent recompute)
+     - step_build_baselines()              → data/baselines/ (append-only; coin flips advance from state)
      - step_build_tax_shadow()            → data/tax_shadow/ (reporting only, after baselines)
 
 Usage (snapshot-only):
@@ -1639,10 +1639,18 @@ def step_update_snapshots(market_payload: dict) -> list[str]:
 def step_build_baselines() -> None:
     """Step 9a — Baselines.
 
-    Recomputes data/baselines/ for Day 1 → today, append-or-refuse per date
-    (engine.baselines.merge_baseline_series) — the same mutability contract
-    as PortfolioManager.add_snapshot on the agent curve it shares a chart
-    with. Runs AFTER portfolio mutations so the benchmark window matches the
+    Recomputes the passive benchmarks and the global reference for Day 1 →
+    today, append-or-keep per date (engine.baselines.merge_baseline_series) —
+    the same mutability contract as PortfolioManager.add_snapshot on the
+    agent curve it shares a chart with — and advances each coin flip from its
+    persisted state over new dates only (engine.baselines.advance_coin_flip).
+    A published benchmark point the recomputation disagrees with is kept and
+    classified; only a concern prints as ``[WARN]`` (a recorded benchmark
+    close the store has since revised, a marks sidecar that cannot classify,
+    a cash-flat point that changed, or a coin flip that refused, carried its
+    book through a date with nothing to draw, or froze a holding; ``engine.baselines.MergeCounts`` counts each cause), so
+    only those reach the session's ``Concerns:`` trailer. The expected classes print one ``[INFO] … not a
+    concern`` line each. Runs AFTER portfolio mutations so the benchmark window matches the
     freshly-appended agent snapshots. Uses backfill_baselines constants as
     the single source of truth for universes + max_positions.
     """

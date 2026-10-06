@@ -1,15 +1,21 @@
 """Seeded variant of the ``random`` selector.
 
 Unlike bt.algos.SelectRandomly which reads numpy's global RNG, this
-selector accepts an explicit seed and produces reproducible picks.
+selector accepts an explicit seed and produces reproducible picks. Its user is
+the ``random`` selector of ``engine.adapter`` (factor research); the coin flip
+stopped using it with plan 1.6 and draws with ``make_seed`` (now in the
+bt-free ``engine.selectors.seeding``, re-exported here) without bt.
 """
 
 from __future__ import annotations
 
-import hashlib
 import random as _pyrandom
 
 import bt
+
+from engine.selectors.seeding import make_seed
+
+__all__ = ["SelectRandomlySeeded", "make_seed"]
 
 
 class SelectRandomlySeeded(bt.Algo):
@@ -28,8 +34,3 @@ class SelectRandomlySeeded(bt.Algo):
         target.temp["selected"] = picks
         return True
 
-
-def make_seed(agent_id: str, from_date_iso: str) -> int:
-    """Deterministic 32-bit seed from (agent_id, start_date)."""
-    h = hashlib.sha256(f"{agent_id}|{from_date_iso}".encode()).digest()
-    return int.from_bytes(h[:4], "big")

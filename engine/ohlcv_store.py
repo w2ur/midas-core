@@ -15,7 +15,7 @@ the raw close. Two reasons, and they are not stylistic:
   Price return on ``close`` is the internally consistent basis.
 - Yahoo re-bases ``adj_close`` across a symbol's entire history after every
   payout. A value that the vendor rewrites retroactively cannot sit under
-  ``add_snapshot``/``merge_baseline_series``' append-or-refuse contract: the
+  ``add_snapshot``/``merge_baseline_series``' keep-what-is-published contract: the
   same date would price differently on two different days for no reason
   anyone recorded.
 

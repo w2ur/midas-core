@@ -134,6 +134,10 @@ class TestNoReaderReferencesAdjClose:
         "engine/ohlcv_ingest.py",
         "engine/corporate_actions.py",
         "scripts/normalise_store_units.py",
+        # Read-only history audit (plan 1.6): to reproduce a coin-flip row a
+        # pre-2026-08-07 session published, it must read that session's own
+        # `adj_close or close` basis. It prices nothing that is published.
+        "scripts/audit_coinflip_seams.py",
     }
 
     def test_only_writers_read_adj_close(self) -> None:

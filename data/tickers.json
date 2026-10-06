@@ -1747,7 +1747,7 @@
     "currency": "USD"
   },
   "CTVA": {
-    "name": "Vylor, Inc.",
+    "name": "Corteva, Inc.",
     "type": "equity",
     "currency": "USD"
   },
@@ -3248,6 +3248,11 @@
     "name": "The Hershey Company",
     "type": "equity",
     "currency": "USD"
+  },
+  "HTO.AT": {
+    "name": "Hellenic Telecommunications Organization S.A.",
+    "type": "equity",
+    "currency": "EUR"
   },
   "HUBB": {
     "name": "Hubbell Incorporated",
@@ -6915,7 +6920,7 @@
     "currency": "USD"
   },
   "VMRK": {
-    "name": "Vivmark Residential",
+    "name": "AvalonBay Communities, Inc.",
     "type": "equity",
     "currency": "USD"
   },
@@ -6943,6 +6948,11 @@
     "name": "AB Volvo (publ)",
     "type": "equity",
     "currency": "SEK"
+  },
+  "VONN.SW": {
+    "name": "Vontobel Holding AG",
+    "type": "equity",
+    "currency": "CHF"
   },
   "VOO": {
     "name": "Vanguard S&P 500 ETF",

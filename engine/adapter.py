@@ -114,8 +114,8 @@ def _selector_random(spec: StrategySpec, price_data: pd.DataFrame) -> list[bt.Al
 
     bt.algos.SelectRandomly reads numpy's global RNG, so factor-research runs
     were not reproducible run-to-run. Seed deterministically from
-    (strategy id, window start) via the same SelectRandomlySeeded the coin-flip
-    baselines already use.
+    (strategy id, window start) with SelectRandomlySeeded, the selector the
+    coin-flip baselines used until plan 1.6 (2026-10-05) moved them off bt.
     """
     from engine.selectors.random_seeded import SelectRandomlySeeded, make_seed
 

@@ -335,3 +335,37 @@ def test_all_three_valuation_paths_refuse_the_same_fixture(midas_data_root):
 
     assert snapshot_exc.value.reason == "NO_PRICE_DATA"
     assert restate_exc.value.reason == "NO_PRICE_DATA"
+
+
+# ---------------------------------------------------------------------------
+# book_rate: the conversion half of value_position, shared with the coin flip
+# ---------------------------------------------------------------------------
+
+
+def test_book_rate_names_each_reason(midas_data_root) -> None:
+    from engine.valuation import book_rate
+
+    on = date(2026, 6, 1)
+    assert book_rate(None, "EUR", on) == (None, "CURRENCY_UNRESOLVED")
+    assert book_rate("EUR", "EUR", on) == (1.0, None)
+    assert book_rate("SEK", "EUR", on) == (None, "NO_FX_RATE")
+    _seed_ohlcv("EURUSD=X", 1.25, on="2026-05-29")
+    rate, reason = book_rate("USD", "EUR", on)
+    assert reason is None and rate == pytest.approx(0.8)
+
+
+def test_value_position_converts_at_the_valuation_date_not_the_close_date(
+    midas_data_root,
+) -> None:
+    """The rule the coin flip now shares: a close from 05-29 valued on 06-01
+    converts at the 06-01 rate."""
+    from engine.valuation import value_position
+
+    _seed_ohlcv("AAPL", 100.0, on="2026-05-29")
+    (get_config().ohlcv_dir / "EURUSD=X.jsonl").write_text(
+        json.dumps({"date": "2026-05-29", "close": 1.25}) + "\n"
+        + json.dumps({"date": "2026-06-01", "close": 2.0}) + "\n"
+    )
+    v = value_position("AAPL", 3.0, "EUR", date(2026, 6, 1))
+    assert v.ok and v.value == pytest.approx(150.0)
+    assert v.price_date == date(2026, 5, 29)

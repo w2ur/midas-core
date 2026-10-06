@@ -170,20 +170,20 @@ class TestBaselineRestatementIsGated:
             midas_data_root, '- <a id="real-anchor"></a>**Something moved.**\n'
         )
         with pytest.raises(UndisclosedRestatementError):
-            self._build(restate_series={"coinflip"})
+            self._build(restate_series={"benchmark"})
 
     def test_restating_with_an_unresolvable_anchor_is_refused(self, midas_data_root):
         _write_methodology(
             midas_data_root, '- <a id="real-anchor"></a>**Something moved.**\n'
         )
         with pytest.raises(UndisclosedRestatementError):
-            self._build(restate_series={"coinflip"}, changelog_entry="not-an-anchor")
+            self._build(restate_series={"benchmark"}, changelog_entry="not-an-anchor")
 
     def test_restating_with_a_resolving_anchor_is_allowed(self, midas_data_root):
         _write_methodology(
             midas_data_root, '- <a id="real-anchor"></a>**Something moved.**\n'
         )
-        self._build(restate_series={"coinflip"}, changelog_entry="real-anchor")
+        self._build(restate_series={"benchmark"}, changelog_entry="real-anchor")
 
     def test_the_routine_session_call_is_not_gated(self, midas_data_root):
         """No scope means no restatement, so nothing to disclose.

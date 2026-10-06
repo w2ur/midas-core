@@ -11,6 +11,8 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from engine import fx
 
@@ -193,7 +195,7 @@ class TestGetRate:
 
 
 # ---------------------------------------------------------------------------
-# get_rate — indirect (via USD) and via fallback usd_pair_map
+# get_rate — composed through USD, and the USD-quoted pairs
 # ---------------------------------------------------------------------------
 
 
@@ -237,6 +239,78 @@ class TestGetRateIndirect:
         assert fx.get_rate("AUD", "USD", date(2025, 1, 2)) == pytest.approx(0.65)
 
 
+class TestEveryStoredPairIsRouted:
+    """Regression: round-3 review, 2026-10-06. The store held GBPUSD=X and
+    USDJPY=X, yet GBP->USD and JPY->USD answered None: the routes were two
+    hand-written maps and the USD one omitted both pairs. Routes now come
+    from one table, and the table must name every pair the store holds."""
+
+    _DAY = date(2025, 1, 2)
+
+    # Reads the live committed OHLCV store, which core does not ship.
+    @pytest.mark.live_cast
+    def test_the_table_lists_every_pair_in_the_committed_store(self):
+        from engine.config import get_config
+
+        stored = sorted(p.stem for p in get_config().ohlcv_dir.glob("*=X.jsonl"))
+        assert stored, "the probe must see the committed store's pairs"
+        assert sorted(fx.STORE_PAIRS) == stored
+
+    @pytest.mark.parametrize("pair", fx.STORE_PAIRS)
+    def test_both_directions_of_every_stored_pair_resolve(self, fake_ohlcv, pair):
+        _write_jsonl(fake_ohlcv / f"{pair}.jsonl", [{"date": "2025-01-02", "close": 1.25}])
+        base, quote = pair[:3], pair[3:6]
+        assert fx.get_rate(base, quote, self._DAY) == pytest.approx(1.25)
+        assert fx.get_rate(quote, base, self._DAY) == pytest.approx(0.8)
+
+    @pytest.mark.parametrize(
+        ("frm", "to", "expected"),
+        [
+            ("GBP", "USD", 1.27),
+            ("USD", "GBP", 1 / 1.27),
+            ("JPY", "USD", 1 / 150.0),
+            ("USD", "JPY", 150.0),
+        ],
+    )
+    def test_gbp_and_jpy_reach_usd(self, fake_ohlcv, frm, to, expected):
+        _write_jsonl(fake_ohlcv / "GBPUSD=X.jsonl", [{"date": "2025-01-02", "close": 1.27}])
+        _write_jsonl(fake_ohlcv / "USDJPY=X.jsonl", [{"date": "2025-01-02", "close": 150.0}])
+        assert fx.get_rate(frm, to, self._DAY) == pytest.approx(expected)
+
+    @pytest.mark.parametrize(
+        ("to", "pair", "close", "expected"),
+        [
+            ("CHF", "USDCHF=X", 0.90, 1.10 * 0.90),
+            ("CAD", "USDCAD=X", 1.35, 1.10 * 1.35),
+            ("AUD", "AUDUSD=X", 0.65, 1.10 / 0.65),
+            ("NZD", "NZDUSD=X", 0.60, 1.10 / 0.60),
+        ],
+    )
+    def test_eur_still_composes_through_usd(self, fake_ohlcv, to, pair, close, expected):
+        _write_jsonl(fake_ohlcv / "EURUSD=X.jsonl", [{"date": "2025-01-02", "close": 1.10}])
+        _write_jsonl(fake_ohlcv / f"{pair}.jsonl", [{"date": "2025-01-02", "close": close}])
+        assert fx.get_rate("EUR", to, self._DAY) == pytest.approx(expected)
+        assert fx.get_rate(to, "EUR", self._DAY) == pytest.approx(1 / expected)
+
+    def test_gbp_composes_to_chf_through_usd(self, fake_ohlcv):
+        _write_jsonl(fake_ohlcv / "GBPUSD=X.jsonl", [{"date": "2025-01-02", "close": 1.27}])
+        _write_jsonl(fake_ohlcv / "USDCHF=X.jsonl", [{"date": "2025-01-02", "close": 0.90}])
+        assert fx.get_rate("GBP", "CHF", self._DAY) == pytest.approx(1.27 * 0.90)
+
+    def test_an_unstored_currency_still_has_no_route(self, fake_ohlcv):
+        for pair in fx.STORE_PAIRS:
+            _write_jsonl(fake_ohlcv / f"{pair}.jsonl", [{"date": "2025-01-02", "close": 1.1}])
+        assert fx.get_rate("SEK", "EUR", self._DAY) is None
+        assert fx.get_rate("USD", "SEK", self._DAY) is None
+
+    @pytest.mark.parametrize("bad", [-1.1, float("nan"), float("inf")])
+    def test_a_close_that_is_not_a_positive_finite_number_is_no_rate(self, fake_ohlcv, bad):
+        path = fake_ohlcv / "EURUSD=X.jsonl"
+        path.write_text(json.dumps({"date": "2025-01-02", "close": bad}) + "\n")
+        assert fx.get_rate("EUR", "USD", self._DAY) is None
+        assert fx.get_rate("CHF", "EUR", self._DAY) is None
+
+
 # ---------------------------------------------------------------------------
 # convert + to_eur
 # ---------------------------------------------------------------------------
@@ -271,3 +345,166 @@ class TestToEur:
 
     def test_returns_none_when_rate_unavailable(self, fake_ohlcv):
         assert fx.to_eur(100, "USD", date(2025, 1, 2)) is None
+
+
+class TestRateTickers:
+    """`rate_tickers` names the store row(s) a missing rate is waiting for
+    (round-4 review, 2026-10-06: the coin flip's empty-draw concern names
+    them). It must name exactly the pairs `get_rate` reads."""
+
+    def test_a_stored_pair_in_either_direction(self):
+        assert fx.rate_tickers("USD", "EUR") == ("EURUSD=X",)
+        assert fx.rate_tickers("GBP", "USD") == ("GBPUSD=X",)
+
+    def test_a_pair_composed_through_usd_names_both_legs(self):
+        assert fx.rate_tickers("CHF", "EUR") == ("USDCHF=X", "EURUSD=X")
+
+    def test_no_route_and_no_conversion_name_nothing(self):
+        assert fx.rate_tickers("SEK", "EUR") == ()
+        assert fx.rate_tickers("EUR", "EUR") == ()
+
+
+# ---------------------------------------------------------------------------
+# store_cache and the bisected lookup (round-4 review, 2026-10-06)
+# ---------------------------------------------------------------------------
+
+
+class TestStoreCache:
+    def _count_loads(self, monkeypatch) -> list[str]:
+        loads: list[str] = []
+        real = fx._load_store_series
+
+        def counting(ticker):
+            loads.append(ticker)
+            return real(ticker)
+
+        monkeypatch.setattr(fx, "_load_store_series", counting)
+        return loads
+
+    def test_inside_a_block_each_pair_file_is_read_once(self, fake_ohlcv, monkeypatch):
+        _write_jsonl(fake_ohlcv / "EURUSD=X.jsonl", [{"date": "2025-01-02", "close": 1.25}])
+        loads = self._count_loads(monkeypatch)
+        with fx.store_cache():
+            for day in range(2, 30):
+                assert fx.get_rate("USD", "EUR", date(2025, 1, day)) == pytest.approx(0.8)
+        assert loads == ["EURUSD=X"]
+
+    def test_outside_a_block_every_ask_reads_the_file_afresh(self, fake_ohlcv, monkeypatch):
+        """The broker's behaviour is unchanged: a rewrite between two asks is seen."""
+        path = fake_ohlcv / "EURUSD=X.jsonl"
+        _write_jsonl(path, [{"date": "2025-01-02", "close": 1.25}])
+        loads = self._count_loads(monkeypatch)
+        assert fx.get_rate("EUR", "USD", date(2025, 1, 3)) == 1.25
+        _write_jsonl(path, [{"date": "2025-01-02", "close": 1.5}])
+        assert fx.get_rate("EUR", "USD", date(2025, 1, 3)) == 1.5
+        assert loads == ["EURUSD=X", "EURUSD=X"]
+
+    def test_the_cache_ends_with_the_outermost_block(self, fake_ohlcv):
+        path = fake_ohlcv / "EURUSD=X.jsonl"
+        _write_jsonl(path, [{"date": "2025-01-02", "close": 1.25}])
+        with fx.store_cache():
+            assert fx.get_rate("EUR", "USD", date(2025, 1, 3)) == 1.25
+            with fx.store_cache():
+                pass
+            _write_jsonl(path, [{"date": "2025-01-02", "close": 1.5}])
+            assert fx.get_rate("EUR", "USD", date(2025, 1, 3)) == 1.25, "still cached"
+        assert fx._SERIES_CACHE is None
+        assert fx.get_rate("EUR", "USD", date(2025, 1, 3)) == 1.5
+
+    def test_a_coin_flip_advance_reads_its_rate_file_once(self, fake_ohlcv, monkeypatch):
+        """The consumer: a multi-day converted advance used to re-read
+        EURUSD=X for every day it valued."""
+        from datetime import timedelta
+
+        from engine.baselines import advance_coin_flip
+        from engine.config import get_config
+
+        days = [(date(2026, 1, 1) + timedelta(days=i)).isoformat() for i in range(8)]
+        for t, c in (("U", 30.0), ("V", 40.0)):
+            _write_jsonl(fake_ohlcv / f"{t}.jsonl", [{"date": d, "close": c} for d in days])
+        _write_jsonl(fake_ohlcv / "EURUSD=X.jsonl", [{"date": d, "close": 1.25} for d in days])
+        loads = self._count_loads(monkeypatch)
+        advance_coin_flip(
+            agent_id="probe", tickers=["U", "V"], currency="EUR", max_positions=2,
+            series_path=get_config().baselines_dir / "probe" / "coinflip.json",
+            from_date=date(2026, 1, 1), to_date=date(2026, 1, 8),
+        )
+        assert loads == ["EURUSD=X"]
+
+
+_ISO_DAYS = st.dates(min_value=date(2024, 1, 1), max_value=date(2027, 12, 31))
+
+
+@given(
+    series=st.dictionaries(
+        _ISO_DAYS.map(date.isoformat),
+        st.floats(min_value=1e-6, max_value=1e6, allow_nan=False, allow_infinity=False),
+        max_size=40,
+    ),
+    target=_ISO_DAYS,
+)
+def test_the_bisected_lookup_equals_the_linear_scan(series, target):
+    """The cached path bisects sorted dates (`_latest_in`), the uncached one
+    scans (`_latest_on_or_before`); both give the answer the linear `max`
+    over every date gave, for any series and any target."""
+    eligible = [d for d in series if d <= target.isoformat()]
+    expected = series[max(eligible)] if eligible else None
+    assert fx._latest_on_or_before(series, target) == expected
+    assert fx._latest_in(*fx._sorted(series), target) == expected
+
+
+class TestUncachedPath:
+    """Round-5 review, 2026-10-06. The bisection added for the cached path
+    also ran outside a `store_cache()` block, where each ask reads the file
+    afresh: it sorted the whole series for one lookup, slower than the old
+    O(n) filter-and-max, and left `_latest_on_or_before` with no production
+    caller."""
+
+    def test_an_uncached_ask_never_sorts(self, fake_ohlcv, monkeypatch):
+        _write_jsonl(
+            fake_ohlcv / "EURUSD=X.jsonl",
+            [{"date": "2025-01-03", "close": 1.5}, {"date": "2025-01-02", "close": 1.25}],
+        )
+
+        def no_sort(series):
+            raise AssertionError("the uncached path sorted the series")
+
+        monkeypatch.setattr(fx, "_sorted", no_sort)
+        assert fx.get_rate("EUR", "USD", date(2025, 1, 2)) == 1.25
+        assert fx.get_rate("EUR", "USD", date(2025, 1, 9)) == 1.5
+
+    def test_an_uncached_ask_is_the_linear_scan(self, fake_ohlcv, monkeypatch):
+        _write_jsonl(fake_ohlcv / "EURUSD=X.jsonl", [{"date": "2025-01-02", "close": 1.25}])
+        calls: list[date] = []
+        real = fx._latest_on_or_before
+
+        def counting(series, target):
+            calls.append(target)
+            return real(series, target)
+
+        monkeypatch.setattr(fx, "_latest_on_or_before", counting)
+        assert fx.get_rate("EUR", "USD", date(2025, 1, 3)) == 1.25
+        assert calls == [date(2025, 1, 3)]
+
+
+def test_a_config_reset_inside_a_block_serves_the_new_stores_rates(
+    fake_ohlcv, tmp_path, monkeypatch
+):
+    """Regression: round-5 review, 2026-10-06. `_SERIES_CACHE` was keyed on
+    the ticker alone and survived `reset_config_cache()`, so a block open
+    across a `MIDAS_DATA_DIR` switch kept serving the old store's rates."""
+    import shutil
+
+    from engine.config import _LEGACY_ROOT, get_config, reset_config_cache
+
+    _write_jsonl(fake_ohlcv / "EURUSD=X.jsonl", [{"date": "2025-01-02", "close": 1.25}])
+    other = (tmp_path / "other").resolve()
+    other.mkdir()
+    shutil.copy(_LEGACY_ROOT / "roster.yaml", other / "roster.yaml")
+    with fx.store_cache():
+        assert fx.get_rate("EUR", "USD", date(2025, 1, 3)) == 1.25
+        monkeypatch.setenv("MIDAS_DATA_DIR", str(other))
+        reset_config_cache()
+        _write_jsonl(get_config().ohlcv_dir / "EURUSD=X.jsonl", [{"date": "2025-01-02", "close": 2.0}])
+        assert fx.get_rate("EUR", "USD", date(2025, 1, 3)) == 2.0
+        assert fx._SERIES_CACHE is not None, "the block is still open"

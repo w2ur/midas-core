@@ -7,13 +7,49 @@ and by the orchestrator for budget verification.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import date
 
-from engine.fx import convert as _fx_convert
+from engine import fx as _fx
 from engine.fx import to_eur
 from engine.quotes import latest_price as _latest_price
 from engine.quotes import ticker_currency as _ticker_currency
+
+
+#: Why a position has no value, in the broker's own vocabulary. The one
+#: definition: the coin flip (``engine.baselines``) reports with these too.
+NO_PRICE_DATA = "NO_PRICE_DATA"
+NO_FX_RATE = "NO_FX_RATE"
+CURRENCY_UNRESOLVED = "CURRENCY_UNRESOLVED"
+
+
+def book_rate(
+    currency: str | None, book_currency: str, on: date | None
+) -> tuple[float | None, str | None]:
+    """``(rate, None)`` — book currency per unit of ``currency`` on ``on`` —
+    or ``(None, reason)``: the conversion half of ``value_position``.
+
+    **The FX date is the valuation date**, never the date of the close being
+    converted: a position is valued at its newest close on or before ``on``
+    times the rate on or before ``on``. Split out (round-3 review,
+    2026-10-06) so that the coin flip, which reads its closes as ratios of
+    its own recorded marks, converts by the same rule and reports the same
+    reasons instead of re-implementing them; it had been converting each
+    close at the close's own date.
+
+    ``CURRENCY_UNRESOLVED`` when ``currency`` is None; ``1.0`` when it is the
+    book's; ``NO_FX_RATE`` when ``engine.fx.get_rate`` has no rate, or one
+    that is not a positive finite number.
+    """
+    if currency is None:
+        return None, CURRENCY_UNRESOLVED
+    if currency == book_currency:
+        return 1.0, None
+    rate = _fx.get_rate(currency, book_currency, on)
+    if rate is None or not math.isfinite(rate) or rate <= 0:
+        return None, NO_FX_RATE
+    return rate, None
 
 
 @dataclass(frozen=True)
@@ -63,17 +99,15 @@ def value_position(
         # them so the diagnostic points at the right thing. A registry gap is
         # not a data gap and is fixed somewhere else entirely.
         if _ticker_currency(ticker) is None:
-            return PositionValuation(None, "CURRENCY_UNRESOLVED")
-        return PositionValuation(None, "NO_PRICE_DATA")
+            return PositionValuation(None, CURRENCY_UNRESOLVED)
+        return PositionValuation(None, NO_PRICE_DATA)
 
-    native_value = shares * quote.price
-    if quote.currency == book_currency:
-        return PositionValuation(native_value, price_date=quote.as_of)
-
-    converted = _fx_convert(native_value, quote.currency, book_currency, on)
-    if converted is None:
-        return PositionValuation(None, "NO_FX_RATE")
-    return PositionValuation(converted, price_date=quote.as_of)
+    rate, reason = book_rate(quote.currency, book_currency, on)
+    if rate is None:
+        return PositionValuation(None, reason)
+    # `native * 1.0` is `native` exactly, and `engine.fx.convert` is
+    # `amount * rate`: the same numbers as before `book_rate` was split out.
+    return PositionValuation(shares * quote.price * rate, price_date=quote.as_of)
 
 
 def portfolio_mtm(portfolio_summary: dict, on: date | None = None) -> float | None:

@@ -192,6 +192,35 @@ def status_of(symbol: str, path: Path | None = None) -> str | None:
     return entry.status if entry is not None else None
 
 
+def statuses(
+    symbols: Iterable[str], path: Path | None = None
+) -> tuple[dict[str, str], str | None]:
+    """``{symbol: status}`` for each of ``symbols`` that has one, reading the
+    registry once, and why it failed closed (``None`` when it was readable).
+
+    The batch form of ``status_of`` for a caller asking about a whole
+    universe (the coin flip): same fail-closed rule, every symbol
+    ``suspended``, but one log line rather than one per symbol, and the reason
+    is returned so the caller can surface it as a concern.
+    """
+    path = path if path is not None else registry_path()
+    wanted = list(symbols)
+    if _lost(path):
+        reason = (
+            f"instrument status registry {path} is missing although "
+            f"{path.parent / 'quarantine'} holds refused rows"
+        )
+    else:
+        try:
+            entries = load(path)
+        except RegistryUnreadable as exc:
+            reason = f"instrument status registry unreadable ({exc})"
+        else:
+            return {s: entries[s].status for s in wanted if s in entries}, None
+    logger.error("%s; treating every symbol asked about as suspended", reason)
+    return {s: SUSPENDED for s in wanted}, reason
+
+
 def _save(entries: dict[str, Entry], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render(entries), encoding="utf-8")

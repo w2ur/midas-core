@@ -21,11 +21,23 @@ import yaml
 _LEGACY_ROOT = Path(__file__).resolve().parents[1]
 
 
+#: The benchmark "ticker" that reads no price: the initial capital held flat
+#: in cash. The one place the literal lives; read it through
+#: ``BenchmarkSpec.is_cash_flat``.
+CASH_FLAT_TICKER = "EUR_CASH_FLAT"
+
+
 @dataclass(frozen=True)
 class BenchmarkSpec:
     label: str
     ticker: str
     currency: str
+
+    @property
+    def is_cash_flat(self) -> bool:
+        """A benchmark that reads no price and records no marks
+        (``CASH_FLAT_TICKER``)."""
+        return self.ticker == CASH_FLAT_TICKER
 
 
 @dataclass(frozen=True)
