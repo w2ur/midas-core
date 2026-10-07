@@ -51,6 +51,24 @@ class BlogDraft:
         return cls(title=title, body_md=body_md, slug=slug)
 
 
+def _order_label(trade: dict) -> str:
+    """One authored order as the narrator sees it.
+
+    A conditional order (one carrying ``trigger``) is labelled ARMED with its
+    condition (#73): rendered like a market order, a protective stop read as
+    an executed sale, and the Oracle narrated stops and rails that had not
+    fired as exits, which six agents then corrected in their own posts.
+    """
+    head = f"{trade.get('action', '?')} {trade.get('shares', '')} {trade.get('ticker', '?')}"
+    trigger = trade.get("trigger")
+    if not isinstance(trigger, dict):
+        return head
+    condition = f"if price {trigger.get('op', '?')} {trigger.get('level', '?')}"
+    expires = trade.get("expires")
+    until = f", until {expires}" if expires else ""
+    return f"ARMED (not executed) {head} {condition}{until}"
+
+
 def build_oracle_prompt(
     day_number: int,
     market_data: dict,
@@ -83,7 +101,7 @@ def build_oracle_prompt(
         agents_s += f"\n  {name}:\n    Commentary: {commentary}\n"
         for t in res.get("trades", []):
             reasoning = _truncate(t.get("reasoning", ""), _ORACLE_TRADE_REASONING_CAP)
-            agents_s += f"    - {t['action']} {t.get('shares', '')} {t['ticker']}: {reasoning}\n"
+            agents_s += f"    - {_order_label(t)}: {reasoning}\n"
 
     posts_s = ""
     for aid, posts in agent_posts.items():
@@ -123,6 +141,10 @@ MARKET DATA TODAY:
 {market}
 
 AGENT ACTIVITY TODAY:{agents_s}{posts_block}
+
+Orders marked ARMED are conditional: they execute only if the price condition
+is hit later, and none has executed today. Never describe an ARMED order as a
+sale, exit, purchase or fill that happened.
 
 CURRENT LEADERBOARD (EUR-normalized):
 {lb_s}{journal_section}

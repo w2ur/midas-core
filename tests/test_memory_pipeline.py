@@ -65,7 +65,7 @@ class TestStepBuildMemoryUpdatePrompts:
             },
             agent_posts={"satoshi": [{"text": "Holding."}]},
             portfolio_summaries={
-                "satoshi": {"portfolio_value_base": 10_000.0, "currency": "EUR"}
+                "satoshi": {"portfolio_value": 10_000.0, "currency": "EUR"}
             },
             day_number=1,
         )
@@ -85,6 +85,44 @@ class TestStepBuildMemoryUpdatePrompts:
             day_number=2,
         )
         assert "BTC cycle theory" in prompts["satoshi"]
+
+
+    def test_trader_prompt_shows_the_published_value_not_cash(
+        self, tmp_journals: Path
+    ) -> None:
+        """Regression (#94): world's 2026-10-05 prompt showed its cash, 4,231.84,
+        as portfolio value for a book of about 9,980."""
+        from datetime import date
+
+        from engine.config import get_config
+        from engine.portfolio import PortfolioManager
+
+        pm = PortfolioManager(base_dir=get_config().portfolios_dir)
+        pm.initialize("world", 10000.0, currency="EUR")
+        for day, value in ((date(2026, 10, 2), 9950.0), (date(2026, 10, 4), 9980.12)):
+            pm.add_snapshot(
+                strategy_id="world",
+                snapshot_date=day,
+                portfolio_value=value,
+                cash=4231.84,
+                positions_value=value - 4231.84,
+                benchmarks={},
+            )
+        prompts = step_build_memory_update_prompts(
+            agent_results={"world": {"trades": []}, "satoshi": {"trades": []}},
+            agent_posts={},
+            portfolio_summaries={
+                "world": {"cash": 4231.84, "currency": "EUR"},
+                "satoshi": {"cash": 812.5, "currency": "EUR"},
+            },
+            day_number=172,
+        )
+        assert "PORTFOLIO VALUE TODAY: 9,980.12 EUR" in prompts["world"]
+        assert "2026-10-04" in prompts["world"]
+        assert "4,231.84" not in prompts["world"]
+        # A book with no published row says so rather than showing its cash.
+        assert "PORTFOLIO VALUE TODAY: not available" in prompts["satoshi"]
+        assert "812.50" not in prompts["satoshi"]
 
 
 class TestStepSaveMemories:
@@ -144,7 +182,7 @@ class TestNarratorPrompt:
                 "goldfinger": {"trades": [], "commentary": "Waiting on yields."},
             },
             agent_posts={"satoshi": [{"text": "See you at 68k."}]},
-            portfolio_summaries={"satoshi": {"portfolio_value_base": 10_000.0}},
+            portfolio_summaries={"satoshi": {"portfolio_value": 10_000.0}},
             day_number=85,
             leaderboard=[
                 {"rank": 1, "agent": "satoshi", "return_pct": -9.73},

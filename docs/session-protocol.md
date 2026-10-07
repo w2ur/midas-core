@@ -449,9 +449,11 @@ All three run unconditionally, every cadence, whether or not anything traded.
 
 ### Baselines — `step_build_baselines`
 
-Recomputes each book's passive-benchmark and coin-flip series from day one to
-today. **Reads:** the price store, the universes, the roster. **Writes:** the
-baseline series, **append-or-refuse per date** — the same mutability contract as
+Recomputes each book's passive benchmark from day one to today — or, from the
+valuation-only refresh, to the market date its snapshots were keyed on (#89) —
+and advances each coin flip from its saved state over new dates only.
+**Reads:** the price store, the universes, the roster. **Writes:** the
+baseline series, **append-or-keep per date** — the same mutability contract as
 the agent snapshot it shares a chart with, so a revised close cannot move a
 benchmark curve retroactively under a frozen agent curve. Restating a published
 date is a separate, deliberate, disclosed operation.

@@ -80,3 +80,27 @@ class TestBuildPortfolioSummaries:
         summaries = build_portfolio_summaries()
         assert "satoshi" in summaries
         assert "retired-agent-from-2025" not in summaries
+
+
+
+def test_summary_publishes_no_copy_of_the_rows_value(tmp_portfolios: Path) -> None:
+    """The summary is published in the bundle; the journal's value (#94) is
+    read from the snapshot row by the journal step instead, so a valuation
+    restatement has one copy to move, not two."""
+    from datetime import date
+
+    from scripts.daily_session import build_portfolio_summaries
+
+    pm = PortfolioManager(base_dir=tmp_portfolios)
+    pm.initialize("world", 10000.0, currency="EUR")
+    pm.add_snapshot(
+        strategy_id="world",
+        snapshot_date=date(2026, 10, 4),
+        portfolio_value=9980.12,
+        cash=4231.84,
+        positions_value=9980.12 - 4231.84,
+        benchmarks={},
+    )
+    summary = build_portfolio_summaries()["world"]
+    assert "portfolio_value" not in summary
+    assert "valued_on" not in summary

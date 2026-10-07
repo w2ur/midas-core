@@ -139,7 +139,7 @@ class TestMemoryUpdatePrompt:
                 }
             ],
             posts_today=[{"text": "Bye ETH."}],
-            portfolio_summary={"portfolio_value_base": 9876.54, "currency": "EUR"},
+            portfolio_summary={"portfolio_value": 9876.54, "valued_on": "2026-10-05", "currency": "EUR"},
         )
         assert "Day 42" in prompt
         assert "satoshi" in prompt
@@ -148,6 +148,38 @@ class TestMemoryUpdatePrompt:
         assert "Bye ETH." in prompt
         assert "9,876.54 EUR" in prompt
         assert "first person" in prompt
+
+    def test_shows_the_published_value_not_cash(self) -> None:
+        """Regression (#94): world's 2026-10-05 prompt showed 4,231.84 (its
+        cash) as portfolio value against a book of about 9,980."""
+        prompt = build_memory_update_prompt(
+            agent_id="world",
+            day_number=172,
+            current_journal="",
+            trades_today=[],
+            posts_today=[],
+            portfolio_summary={
+                "cash": 4231.84,
+                "portfolio_value": 9980.12,
+                "valued_on": "2026-10-04",
+                "currency": "EUR",
+            },
+        )
+        assert "PORTFOLIO VALUE TODAY: 9,980.12 EUR" in prompt
+        assert "2026-10-04" in prompt
+        assert "4,231.84" not in prompt
+
+    def test_unvalued_book_says_so_instead_of_showing_cash(self) -> None:
+        prompt = build_memory_update_prompt(
+            agent_id="x",
+            day_number=1,
+            current_journal="",
+            trades_today=[],
+            posts_today=[],
+            portfolio_summary={"cash": 4231.84, "currency": "EUR"},
+        )
+        assert "PORTFOLIO VALUE TODAY: not available" in prompt
+        assert "4,231.84" not in prompt
 
     def test_handles_empty_trades_and_posts(self) -> None:
         prompt = build_memory_update_prompt(

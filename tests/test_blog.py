@@ -312,3 +312,41 @@ class TestOraclePromptVsBenchmark:
             leaderboard=[{"agent": "world", "return_pct": 2.6, "rank": 1}],
         )
         assert "+2.6% (EUR)" in prompt
+
+
+class TestOraclePromptArmedOrders:
+    """Regression (#73): the 2026-09-25 Oracle narrated pending stops and rails
+    (goldfinger's gold -12% rails, YOLO Sapiens USD's META/AMD stops, …) as
+    executed exits, because a conditional order rendered exactly like a
+    market order."""
+
+    def _prompt(self, trades: list[dict]) -> str:
+        return build_oracle_prompt(
+            day_number=161,
+            market_data={},
+            agent_results={"goldfinger": {"commentary": "Rails set.", "trades": trades}},
+        )
+
+    def test_conditional_order_is_labelled_armed_with_its_condition(self) -> None:
+        prompt = self._prompt(
+            [
+                {
+                    "action": "SELL",
+                    "shares": 10,
+                    "ticker": "4GLD.DE",
+                    "trigger": {"op": "<=", "level": 104.5},
+                    "expires": "2026-10-09",
+                    "reasoning": "Rail at -12%.",
+                }
+            ]
+        )
+        assert "ARMED (not executed) SELL 10 4GLD.DE if price <= 104.5, until 2026-10-09" in prompt
+        assert "Never describe an ARMED order" in prompt
+
+    def test_market_order_is_not_labelled_armed(self) -> None:
+        """Control: the label keys on the trigger, not on every SELL."""
+        prompt = self._prompt(
+            [{"action": "SELL", "shares": 10, "ticker": "4GLD.DE", "reasoning": "Out."}]
+        )
+        assert "- SELL 10 4GLD.DE: Out." in prompt
+        assert "ARMED (not executed) SELL" not in prompt

@@ -164,10 +164,17 @@ def build_memory_update_prompt(
     posts_s = (
         "\n".join(f'- "{post_text(p)}"' for p in posts_today) or "(no posts today)"
     )
-    pv = portfolio_summary.get("portfolio_value_base") or portfolio_summary.get(
-        "cash", 0.0
-    )
+    # The book's published value, never its cash (#94): this slot read a
+    # `portfolio_value_base` key nothing ever set and fell back to cash, so
+    # every journal reasoned from cash as "portfolio value" from Ring 2 on.
     currency = portfolio_summary.get("currency", "EUR")
+    pv = portfolio_summary.get("portfolio_value")
+    valued_on = portfolio_summary.get("valued_on")
+    value_line = (
+        f"{pv:,.2f} {currency} (cash plus positions, as published for {valued_on})"
+        if pv is not None
+        else "not available (no published valuation)"
+    )
 
     journal_section = (
         current_journal.rstrip()
@@ -186,7 +193,7 @@ TODAY'S TRADES:
 TODAY'S POSTS:
 {posts_s}
 
-PORTFOLIO VALUE TODAY: {pv:,.2f} {currency}
+PORTFOLIO VALUE TODAY: {value_line}
 
 INSTRUCTIONS: Rewrite your journal in first person, in character, biased.
 Hard ceiling: 250 tokens. Aim shorter. Prune ruthlessly — drop anything
