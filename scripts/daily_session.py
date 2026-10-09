@@ -39,7 +39,7 @@ import json
 import math
 import subprocess
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, TypeVar
 
@@ -441,6 +441,117 @@ def render_active_triggers_for_agent(agent_id: str) -> str:
             f"— reasoning: {o.reasoning}"
         )
     return "\n".join(lines)
+
+
+#: The trading round's task body (Step 2), which ``wrap_persona_prompt``
+#: wraps with the persona. Its placeholders are filled by
+#: ``render_trading_prompt`` and never by ``str.format``: the JSON schema
+#: below is literal text whose braces ``format`` would read as fields. It
+#: lived only inside the trigger prompt until 2026-10-09, so each session
+#: rebuilt it by hand (#77, #78, #99).
+TRADING_PROMPT = """\
+It is session day {today}. You are trading independently — you do NOT
+see what other agents are doing today. React to the market and your own
+prior history.
+
+Read your context from disk:
+- data/portfolios/{agent_id}/portfolio.json    (cash + positions, in your base currency)
+- data/portfolios/{agent_id}/trades.json       (your trade history; tail the last 50 lines)
+- data/agent_memory/{agent_id}.md              (your prior-self journal — your beliefs, lessons, biases)
+- data/market/today.json                       (today's market snapshot + benchmarks)
+- data/blog/{yesterday}.md                     (yesterday's overall session, narrated by The Oracle — read for continuity, optional if missing)
+- data/market/ohlcv/{TICKER}.jsonl             (daily closes, if you want price history beyond today's snapshot)
+
+Prices in the OHLCV store are in each ticker's own ISO currency — the same
+units your portfolio records cost basis in, and the same units the broker
+fills and prices trigger levels in. A London line reads in POUNDS, not pence
+(`LLOY.L` at 1.16, not 116). Size positions and set trigger levels in those
+units directly; do not scale anything.
+
+Stay in your persona, mandate, universe, and base currency. Long-only;
+use bearish ETFs to express short views. Respect your position limits
+and safety rails — the broker will reject violations anyway.
+
+{conditional_instructions}
+
+{active_triggers}
+
+Output JSON only, no other text:
+{
+  "commentary": "your day's reasoning, in your voice (3-8 sentences)",
+  "trades": [
+    {"action": "buy"|"sell", "ticker": "TICKER", "shares": int, "reasoning": "...",
+     "trigger": {"op": ">="|"<=", "level": <number>}, "expires": "YYYY-MM-DD"}
+    // trigger + expires are OPTIONAL; omit for an immediate market order.
+  ],
+  "cancels": [
+    {"target_order_id": "ord_...", "reasoning": "..."}
+    // OPTIONAL; only include if you want to remove a pending conditional from a prior session.
+  ],
+  "research_note": {
+    "thesis": "1-2 sentence actionable view (<=280 chars)",
+    "conviction": 0,            // integer 0-10
+    "tickers": ["TICKER", ...], // instruments the thesis is about
+    "action_bias": "strong_buy"|"buy"|"hold"|"reduce"|"exit",
+    "horizon": "days"|"weeks"|"months",
+    "catalysts": "what would confirm/break the thesis (<=200 chars)",
+    "currency": "EUR"|"USD"     // the instruments' denomination
+  }
+  // research_note carries your VIEW (not sizing) for the Manager desk.
+  // ALWAYS include it. See your persona file for details.
+}
+"""
+
+_TRADING_PROMPT_FIELDS = (
+    "agent_id",
+    "today",
+    "yesterday",
+    "conditional_instructions",
+    "active_triggers",
+)
+
+
+def _previous_blog_date(today: date, blog_dir: Path) -> date:
+    """The newest session narrated before ``today``, or the calendar day
+    before it when no earlier post exists.
+
+    ``{yesterday}`` names the post the agents read for continuity, so on a
+    Monday it is Friday's, not Sunday's, which has none.
+    """
+    earlier = []
+    for path in blog_dir.glob("*.md"):
+        try:
+            day = date.fromisoformat(path.stem)
+        except ValueError:
+            continue
+        if day < today:
+            earlier.append(day)
+    return max(earlier) if earlier else today - timedelta(days=1)
+
+
+def render_trading_prompt(
+    agent_id: str, today: date, yesterday: date | None = None
+) -> str:
+    """The Step 2 task body for one agent, every placeholder filled.
+
+    Replaces exactly the fields in ``_TRADING_PROMPT_FIELDS`` and leaves every
+    other brace alone, so the JSON schema reaches the agent as written.
+    ``yesterday`` defaults to the previous narrated session
+    (``_previous_blog_date``); the trigger prompt never defined it.
+    """
+    if yesterday is None:
+        yesterday = _previous_blog_date(today, get_config().blog_dir)
+    values = {
+        "agent_id": agent_id,
+        "today": today.isoformat(),
+        "yesterday": yesterday.isoformat(),
+        "conditional_instructions": CONDITIONAL_ORDER_INSTRUCTIONS,
+        "active_triggers": render_active_triggers_for_agent(agent_id),
+    }
+    text = TRADING_PROMPT
+    for field in _TRADING_PROMPT_FIELDS:
+        text = text.replace("{" + field + "}", values[field])
+    return text
 
 
 def step_author_cancels(
@@ -1667,13 +1778,14 @@ def step_build_baselines(to_date: date | None = None) -> None:
     caller published (#89). The valuation-only refresh passes it: run on a
     weekday before the US close it used to write today-dated control rows at
     the previous close, immutable, leaving the evening session's Step 9
-    nothing to append (the aborted 2026-10-05 session). The session calls this
-    with no argument and keeps the wall-clock day ON PURPOSE: on a weekday
-    whose market date did not advance (missed close runs, a US-only holiday)
-    its snapshot rows are refused, and today's control row is then the only
-    change under ``data/baselines/`` that keeps the prompt's Step 9 self-check
-    from aborting the whole session. Capping it too needs that self-check to
-    assert today's rows instead, which is a trigger-prompt change.
+    nothing to append (the aborted 2026-10-05 session). The session passes
+    its market date too since the 2026-10-09 trigger prompt, whose Step 9
+    self-check runs ``scripts/check_session_freshness.py`` (every series level
+    with its book) instead of requiring a change under ``data/baselines/``:
+    on a weekday whose market date did not advance, the rows already exist
+    and appending nothing is correct (#99). A prompt older than that calls
+    this with no argument, which still dates the controls through the
+    wall-clock day.
     """
     print("\n=== Step 9a: Build baselines ===")
     from engine.baselines import build_all_baselines
