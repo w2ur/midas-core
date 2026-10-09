@@ -306,6 +306,7 @@ class PortfolioManager:
         benchmarks: dict,
         session_date: date | None = None,
         stale_marks: list[dict] | None = None,
+        writer: str | None = None,
     ) -> bool:
         """Append a daily snapshot to snapshots.json. History is immutable.
 
@@ -351,6 +352,15 @@ class PortfolioManager:
             row when given, an empty list included ("checked, none"); omitted
             when ``None``, so a caller that never checked never claims to have.
             Rows written before 2026-10-03 carry no key and are never touched.
+        writer:
+            Which job wrote the row, when it is not the session: the
+            valuation-only refresh passes ``"refresh"`` and the row records it.
+            The session passes nothing and its rows carry no key. A row is
+            replaced only by the same writer on the same ``session_date``: a
+            Monday refresh stamps its Sunday row with Monday's session date,
+            and a Monday session whose market date stayed at Sunday carries the
+            same date, so the session date alone let it rewrite the published
+            row (#89).
 
         Returns
         -------
@@ -370,6 +380,8 @@ class PortfolioManager:
         }
         if stale_marks is not None:
             snapshot["stale_marks"] = list(stale_marks)
+        if writer is not None:
+            snapshot["writer"] = writer
         path = self._snapshots_path(strategy_id)
         records: list[dict] = self._read_json(path)  # type: ignore[assignment]
         date_key = snapshot["date"]
@@ -379,6 +391,8 @@ class PortfolioManager:
             # Same session correcting itself is the one legitimate overwrite.
             # A missing session_date is a legacy row: never equal, so refused.
             if existing.get("session_date") != snapshot["session_date"]:
+                return False
+            if existing.get("writer") != snapshot.get("writer"):
                 return False
             records[i] = snapshot
             self._write_json(path, records)
