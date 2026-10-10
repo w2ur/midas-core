@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import hashlib
 import json
 import math
 import subprocess
@@ -68,7 +69,7 @@ from engine.baseline_manager import (
     is_rebalance_day,
     rebalance,
 )
-from engine.blog import build_oracle_prompt, save_daily_blog_draft
+from engine.blog import build_oracle_prompt, oracle_sources, save_daily_blog_draft
 from engine.fx import convert as fx_convert
 from engine.quotes import latest_price, ticker_currency
 from engine.stale_marks import find_stale_marks
@@ -79,6 +80,18 @@ from engine.orders import (
     append_dropped,
     append_order,
     make_order_id,
+)
+from engine.dispatch_guard import (
+    assert_data_tree_unchanged,
+    guard_concerns,
+    snapshot_data_tree,
+)
+from engine.research import (
+    MANAGER_MAX_SEARCHES,
+    ORACLE_MAX_SEARCHES,
+    TRADER_MAX_SEARCHES,
+    record_research,
+    render_research_instructions,
 )
 from engine.research_note import parse_research_note
 from engine.triggers import (
@@ -476,6 +489,8 @@ and safety rails — the broker will reject violations anyway.
 
 {active_triggers}
 
+{research_instructions}
+
 Output JSON only, no other text:
 {
   "commentary": "your day's reasoning, in your voice (3-8 sentences)",
@@ -496,9 +511,11 @@ Output JSON only, no other text:
     "horizon": "days"|"weeks"|"months",
     "catalysts": "what would confirm/break the thesis (<=200 chars)",
     "currency": "EUR"|"USD"     // the instruments' denomination
-  }
+  },
   // research_note carries your VIEW (not sizing) for the Manager desk.
   // ALWAYS include it. See your persona file for details.
+  "sources": [{"query": "...", "url": "...", "used_for": "..."}]
+  // OPTIONAL; one entry per WebSearch you ran, even an unused one. Omit if you did not search.
 }
 """
 
@@ -508,6 +525,7 @@ _TRADING_PROMPT_FIELDS = (
     "yesterday",
     "conditional_instructions",
     "active_triggers",
+    "research_instructions",
 )
 
 
@@ -547,6 +565,9 @@ def render_trading_prompt(
         "yesterday": yesterday.isoformat(),
         "conditional_instructions": CONDITIONAL_ORDER_INSTRUCTIONS,
         "active_triggers": render_active_triggers_for_agent(agent_id),
+        "research_instructions": render_research_instructions(
+            TRADER_MAX_SEARCHES, today
+        ),
     }
     text = TRADING_PROMPT
     for field in _TRADING_PROMPT_FIELDS:
@@ -646,8 +667,26 @@ def step_author_all(
             trade_date,
         )
         summary[agent_id] = {"orders": len(authored), "cancels": n_cancels}
+    _record_trader_research(agent_results, trade_date)
+    # Research is recorded on the authoring path only: on a resume the committed
+    # orders are the first dispatch's, so a re-dispatch's sources would mix
+    # provenance.
     _mark_done("step_author_all")
     return summary
+
+
+def _record_trader_research(agent_results: dict[str, dict], trade_date: date) -> None:
+    """Persist each trader's self-reported searches, once per session.
+
+    Every agent is recorded with ``replace``: a reused sandbox VM keeps the
+    untracked file of an earlier failed fire, which an agent reporting nothing
+    this time must not inherit.
+    """
+    for agent_id, result in agent_results.items():
+        sources = result.get("sources") if isinstance(result, dict) else None
+        record_research(
+            agent_id, sources, trade_date, TRADER_MAX_SEARCHES, replace=True
+        )
 
 
 def _filter_narration_trades(agent_results: dict[str, dict], trade_date: date) -> None:
@@ -1079,7 +1118,11 @@ def step_build_manager_prompt(
         },
         active_triggers=active_triggers,
     )
-    rendered = render_manager_context(ctx)
+    rendered = (
+        render_manager_context(ctx)
+        + "\n\n"
+        + render_research_instructions(MANAGER_MAX_SEARCHES, trade_date)
+    )
     wrapped, _model = wrap_persona_prompt(aid, rendered)
     print(
         f"  Built Manager prompt ({len(notes)} notes, {len(price_lookup)} priced,"
@@ -1137,6 +1180,15 @@ def step_apply_manager_decision(
         print(
             f"  Initialized {aid} book ({spec.home_currency} {spec.initial_capital:.0f})"
         )
+
+    # replace: a reused sandbox VM keeps an earlier failed fire's untracked file.
+    record_research(
+        aid,
+        raw_decision.get("sources") if isinstance(raw_decision, dict) else None,
+        trade_date,
+        MANAGER_MAX_SEARCHES,
+        replace=True,
+    )
 
     decision = parse_manager_decision(
         raw_decision, min_conviction=alloc.risk_budget.min_conviction
@@ -1299,6 +1351,7 @@ def step_build_oracle_prompt(
     agent_posts: dict[str, list[dict]] | None = None,
     leaderboard: list[dict] | None = None,
     agent_memories: dict[str, str] | None = None,
+    session_date: date | None = None,
 ) -> str:
     """Step 5b — build The Oracle's daily narration prompt.
 
@@ -1312,6 +1365,13 @@ def step_build_oracle_prompt(
     journal is digested into the prompt so The Oracle can quote specific entries.
     """
     print("\n=== Step 5b: Build Oracle prompt ===")
+    if session_date is None:
+        anchor = load_anchor()
+        session_date = (
+            anchor.session_date
+            if anchor is not None
+            else datetime.now(timezone.utc).date()
+        )
     day_number = get_day_number()
     prompt = build_oracle_prompt(
         day_number=day_number,
@@ -1320,9 +1380,73 @@ def step_build_oracle_prompt(
         agent_posts=agent_posts,
         leaderboard=leaderboard,
         agent_memories=agent_memories,
+        session_date=session_date,
     )
     print(f"  Built Oracle prompt (day {day_number})")
     return prompt
+
+
+def _dispatch_guard_anchor() -> str | None:
+    """This run's key for the dispatch guard, or None with no anchor.
+
+    Date plus a digest of the whole anchor, ``started_at`` included: Step 0c
+    anchors every run from the top, so each run is a new guard key and a
+    snapshot from an earlier run is never compared against (that run's writes
+    were reverted by Step 0's reset, and comparing would false-abort). The
+    begin-time comparison therefore applies to a round re-begun within the
+    same run.
+    """
+    anchor = load_anchor()
+    if anchor is None:
+        return None
+    digest = hashlib.sha256(
+        json.dumps(anchor.to_dict(), sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    return f"{anchor.session_date.isoformat()}-{digest[:12]}"
+
+
+def step_guard_dispatch_begin(round_name: str) -> None:
+    """Snapshot before a persona dispatch round. See engine.dispatch_guard."""
+    snapshot_data_tree(round_name, anchor=_dispatch_guard_anchor())
+
+
+def step_guard_dispatch_end(round_name: str) -> None:
+    """Refuse the session if the round changed an abort signal.
+
+    Changes to the ignored inputs are recorded instead, and the session commit
+    carries them as ``Concerns:`` trailers.
+    """
+    assert_data_tree_unchanged(round_name, anchor=_dispatch_guard_anchor())
+
+
+def step_record_oracle_research(response_text: str, session_date: date) -> None:
+    """Step 5b-bis — persist the Oracle's self-reported searches.
+
+    Reads the ``sources`` key from the raw narrator response (never raises on a
+    loose response) and records it under the roster's narrator id. Once
+    ``step_save_content`` is done the published blog is fixed, so an existing
+    file is kept: a re-dispatch's sources would mix provenance. Before that the
+    blog is not fixed yet, so the file mirrors this response: it is overwritten,
+    or deleted when the response reports nothing (a stale file from an earlier
+    failed fire on a reused sandbox VM).
+    """
+    config = get_config()
+    narrator_id = config.narrators[0] if config.narrators else "the-oracle"
+    existing = config.research_dir / session_date.isoformat() / f"{narrator_id}.json"
+    if _is_done("step_save_content"):
+        if existing.is_file():
+            print(f"  Oracle research: kept {existing} (published blog is fixed)")
+        else:
+            print("  Oracle research: kept (published blog is fixed), no file")
+        return
+    path = record_research(
+        narrator_id,
+        oracle_sources(response_text),
+        session_date,
+        ORACLE_MAX_SEARCHES,
+        replace=True,
+    )
+    print(f"  Oracle research: {path if path else 'no searches reported'}")
 
 
 def step_load_memories(agent_ids: list[str]) -> dict[str, str]:
@@ -1869,6 +1993,15 @@ def step_commit_session(
             "and the data/orders/*pending/ orders against "
             "data/market/instrument_status.json and the price store by hand."
         ]
+    # What the dispatch guard reported (never aborted on) is added the same
+    # way, one concern per round, and must never cost the commit either.
+    try:
+        derived = [*derived, *guard_concerns(_dispatch_guard_anchor(), _PROJECT_ROOT)]
+    except Exception as exc:  # noqa: BLE001 — the commit outranks the concern
+        derived.append(
+            f"dispatch guard reports could not be read ({exc!r}); read "
+            "data/session_state/dispatch_guard_concerns.jsonl by hand."
+        )
     concerns = list(concerns or []) + [c for c in derived if c not in (concerns or [])]
     subprocess.run(["git", "add", "data/"], cwd=_PROJECT_ROOT, check=True)
     args = ["git", "commit", "-m", f"chore: weekday session {session_date.isoformat()}"]

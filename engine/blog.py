@@ -6,11 +6,12 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from engine.agent_memory import format_oracle_digest, truncate as _truncate
 from engine.config import get_config
+from engine.research import ORACLE_MAX_SEARCHES, render_research_instructions
 from engine.posts import display_name as _display_name, PostPayload
 
 logger = logging.getLogger(__name__)
@@ -76,6 +77,7 @@ def build_oracle_prompt(
     agent_posts: dict[str, list[dict]] | None = None,
     leaderboard: list[dict] | None = None,
     agent_memories: dict[str, str] | None = None,
+    session_date: date | None = None,
 ) -> str:
     """Build The Oracle's daily prompt — blog draft + narrator posts.
 
@@ -85,7 +87,12 @@ def build_oracle_prompt(
     `agent_posts` is optional: when the Oracle runs BEFORE the post round
     (current pipeline ordering), pass `None` or an empty dict and the
     "AGENT POSTS TODAY" section is suppressed.
+
+    `session_date` is the as-of date of the research block (defaults to today in UTC).
     """
+    research = render_research_instructions(
+        ORACLE_MAX_SEARCHES, session_date or datetime.now(timezone.utc).date(), places_orders=False
+    )
     agent_posts = agent_posts or {}
     leaderboard = leaderboard or []
     market = "\n".join(
@@ -151,12 +158,41 @@ CURRENT LEADERBOARD (EUR-normalized):
 
 INSTRUCTIONS: produce a daily blog draft and 1-3 narrator posts following your agent definition.
 
+{research}
+
 OUTPUT FORMAT — JSON object, no other text:
 {{
   "blog_draft": {{"title": "Day {day_number}: ...", "body_md": "...", "slug": "day-{day_number}-..."}},
-  "posts": [{{"text": "...", "mentions": ["agent-id"], "kind": "scoreboard|recap|highlight"}}]
+  "posts": [{{"text": "...", "mentions": ["agent-id"], "kind": "scoreboard|recap|highlight"}}],
+  "sources": [{{"query": "...", "url": "...", "used_for": "..."}}]
 }}
+("sources" is OPTIONAL: one entry per WebSearch you ran; omit it if you did not search.)
 """
+
+
+def _load_response_json(response: str) -> dict:
+    """Strip a code fence and parse the narrator's JSON; ``{}`` for any loose shape.
+
+    Degrades every loose Oracle shape rather than crash the unattended session
+    (2026-07-17): truncated/non-JSON output (the Oracle repeatedly trips the
+    cloud streaming idle timeout) and a non-dict payload both resolve to ``{}``.
+    """
+    text = response.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        start = 1
+        end = len(lines) - 1 if lines[-1].strip().startswith("```") else len(lines)
+        text = "\n".join(lines[start:end]).strip()
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def oracle_sources(response: str) -> object:
+    """The raw ``sources`` value of a narrator response, or ``None``. Never raises."""
+    return _load_response_json(response).get("sources")
 
 
 def parse_oracle_response(
@@ -173,23 +209,7 @@ def parse_oracle_response(
     never be reached on — a warning, not a raise, because the module's whole
     policy is to degrade rather than kill an unattended session.
     """
-    text = response.strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        start = 1
-        end = len(lines) - 1 if lines[-1].strip().startswith("```") else len(lines)
-        text = "\n".join(lines[start:end]).strip()
-    # Degrade every loose Oracle shape rather than crash the unattended session
-    # (2026-07-17): truncated/non-JSON output (the Oracle repeatedly trips the
-    # cloud streaming idle timeout), a non-dict payload or blog_draft, and a
-    # null/absent/non-list posts — plus any malformed post element — all resolve
-    # to safe empties instead of raising.
-    try:
-        data = json.loads(text)
-    except (json.JSONDecodeError, ValueError):
-        data = {}
-    if not isinstance(data, dict):
-        data = {}
+    data = _load_response_json(response)
     blog_draft = data.get("blog_draft")
     draft = BlogDraft.from_dict(blog_draft if isinstance(blog_draft, dict) else {})
     raw_posts = data.get("posts")

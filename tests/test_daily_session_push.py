@@ -281,3 +281,38 @@ class TestSessionCommitSanitisesConcerns:
         daily_session.step_commit_session(date(2026, 10, 2))
         (trailer,) = self._trailers(repo)
         assert trailer.startswith("INSTRUMENT_SUSPENDED and STALE_PRICE holds could not be listed")
+
+    def test_dispatch_guard_reports_become_one_trailer_per_round(self, tmp_path, monkeypatch):
+        """A reported (not aborting) dispatch-guard change reaches a human through
+        the commit, like a refusal does; another session's lines do not."""
+        import json
+        from datetime import date
+
+        repo = self._repo(tmp_path, monkeypatch)
+        (repo / ".gitignore").write_text("data/session_state/\n")
+        monkeypatch.setattr(daily_session, "instrument_refusal_concerns", lambda d: [])
+        concerns = repo / "data" / "session_state" / "dispatch_guard_concerns.jsonl"
+        concerns.parent.mkdir(parents=True)
+        lines = [
+            {"anchor": None, "round": "step2-trading", "path": "data/market/today.json", "kind": "changed"},
+            {"anchor": "2026-10-08-0123456789ab", "round": "step6-posts", "path": "x", "kind": "appeared"},
+        ]
+        concerns.write_text("".join(json.dumps(line) + "\n" for line in lines))
+        daily_session.step_commit_session(date(2026, 10, 9))
+        assert self._trailers(repo) == [
+            "dispatch guard [step2-trading] reported changes to ignored inputs: "
+            "data/market/today.json (changed)"
+        ]
+
+    def test_an_unreadable_guard_report_still_commits(self, tmp_path, monkeypatch):
+        from datetime import date
+
+        repo = self._repo(tmp_path, monkeypatch)
+        (repo / ".gitignore").write_text("data/session_state/\n")
+        monkeypatch.setattr(daily_session, "instrument_refusal_concerns", lambda d: [])
+        concerns = repo / "data" / "session_state" / "dispatch_guard_concerns.jsonl"
+        concerns.parent.mkdir(parents=True)
+        concerns.write_text("not json\n")
+        daily_session.step_commit_session(date(2026, 10, 9))
+        (trailer,) = self._trailers(repo)
+        assert trailer.startswith("dispatch guard reports could not be read")

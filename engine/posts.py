@@ -143,6 +143,8 @@ INSTRUCTIONS:
 - Stay in character: {voice}
 - Be specific — real numbers, real tickers, real reasoning. No vague platitudes.
 - Your posts appear in the feed around {schedule}.
+- Do not create, edit or delete any file — return the text in your response; the session writes it.
+- Do not search the web in this task.
 
 OUTPUT — JSON array, no other text:
 [{{"text": "...", "mentions": ["agent-id-if-mentioned"], "kind": "trade|roast|market-take"}}]

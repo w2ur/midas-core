@@ -158,26 +158,36 @@ class TestTreatmentRosterParity:
     def _agents_dir() -> Path:
         return Path(get_config().data_dir) / ".claude" / "agents"
 
-    def test_roster_arm_matches_the_personas_that_read_the_feed(self) -> None:
-        agents_dir = self._agents_dir()
-        if not agents_dir.exists():  # demo desk / core mirror
-            pytest.skip("no live persona directory at this data root")
-
-        reads_feed = {
+    @staticmethod
+    def _reads_feed(agents_dir: Path) -> set[str]:
+        return {
             path.stem
             for path in sorted(agents_dir.glob("*.md"))
             if "data/market/news/" in path.read_text(encoding="utf-8")
         }
-        assert reads_feed == set(get_config().sentiment_treatment)
 
-    def test_the_probe_can_fail(self) -> None:
-        """Control for the test above: the grep it relies on must actually
-        distinguish personas, not match every file in the directory."""
+    def test_roster_arm_matches_the_personas_that_read_the_feed(self) -> None:
+        """Since the A/B ended (2026-10-09) both sides are empty on the live
+        desk; the test still goes red if a persona starts reading the feed
+        without the roster declaring it, or the reverse."""
         agents_dir = self._agents_dir()
-        if not agents_dir.exists():
+        if not agents_dir.exists():  # demo desk / core mirror
             pytest.skip("no live persona directory at this data root")
-        all_personas = {p.stem for p in agents_dir.glob("*.md")}
-        assert len(all_personas) > len(get_config().sentiment_treatment) > 0
+
+        assert self._reads_feed(agents_dir) == set(get_config().sentiment_treatment)
+
+    def test_the_probe_can_fail(self, tmp_path: Path) -> None:
+        """Control for the test above: the grep it relies on must actually
+        distinguish personas, not match every file in the directory or none.
+
+        Runs on a fixture directory, not the live cast: the live desk declares
+        no treatment arm since 2026-10-09, so it has nothing left to tell the
+        two cases apart with."""
+        (tmp_path / "reader.md").write_text(
+            "read data/market/news/{TICKER}.jsonl", encoding="utf-8"
+        )
+        (tmp_path / "other.md").write_text("read your journal", encoding="utf-8")
+        assert self._reads_feed(tmp_path) == {"reader"}
 
 
 class TestNoTreatmentDesk:

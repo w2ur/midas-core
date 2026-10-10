@@ -150,19 +150,11 @@ yourself — the session has no outbound HTTP by design.
 **Ordering:** first step after the session is anchored; everything that values a
 position depends on it.
 
-### Sentiment arm — `step_check_sentiment_freshness`
+### Retired — `step_check_sentiment_freshness`
 
-Records which arm of a pre-registered sentiment experiment this session actually
-ran. **Reads:** the committed news-digest directory, and the roster's
-`sentiment_arm` declarations. **Writes:** one row per session date to the
-committed sentiment-arm log. **On failure: never fatal.** A missing news feed is
-not a reason to lose a trading session, and a desk whose roster declares no
-treatment arm records `not-running` and moves on.
-**Ordering:** immediately after market data, before any agent reads anything.
-The point is that the *record* answers the question rather than the schedule: if
-the collector has not landed today's digests by the time the session realigns,
-the treatment agents read yesterday's headlines and the arm is confounded — a
-condition with no symptom at all unless something writes it down.
+Not part of the sequence any more: the sentiment A/B it recorded has ended and
+nothing calls it. The helper remains only because the previous live prompt still
+calls it, and it goes with the sentiment cleanup after the owner re-pastes.
 
 ## Phase 2 — The trading round
 
@@ -211,6 +203,10 @@ filter runs on **both** paths, including the skip path, so the trades handed
 onward are always trimmed to the authorable ones. Folding the filter into the
 guarded body would lose it on a resume and let a dropped trade resurface as a
 phantom fill.
+Trader research files (`data/research/<date>/<agent>.json`) are recorded on the
+authoring path only, for every agent in the results: one that reports no valid
+search has any file already present for the day deleted, since a reused sandbox
+VM keeps the untracked file of an earlier failed fire. The skip path touches none.
 **Ordering:** after every agent result is in hand, before fills.
 
 ### Fill — `step_fill_orders`
@@ -394,6 +390,76 @@ the other builders.
 **Ordering:** after the leaderboard, before the post round — the narrator runs
 first so it frames the day, and the agents then react to that framing. Pass no
 posts here; they have not happened yet.
+
+### Record narrator research — `step_record_oracle_research`
+
+Persists the searches the narrator says it ran, from the `sources` key of its raw
+response. **Reads:** the response text. **Writes:** `data/research/<date>/<narrator>.json`
+when the narrator reported a search. **On failure: degrades** — a loose or
+absent `sources` never raises. The file is self-reported provenance for a human,
+not an audit trail and not a decision input. **Re-runs:** once `step_save_content`
+is done the published blog is fixed, so an existing file is kept (a re-dispatch's
+sources would mix provenance). Before that, the file mirrors the response: it is
+overwritten, and deleted when the response reports nothing, because a reused
+sandbox VM keeps the untracked file of an earlier failed fire.
+**Ordering:** after the narrator responds; safe to repeat.
+
+### Guard a dispatch round — `step_guard_dispatch_begin` / `step_guard_dispatch_end`
+
+Fences the repository checkout around a persona dispatch round whose agents hold
+web tools, or whose prompts carry text those tools returned. The dispatch rounds
+guarded are trading, the Manager, the Oracle, the posts and the journals. It is a
+tripwire, not containment: the broker's rails, not the guard, bound every order.
+
+`step_guard_dispatch_begin(round_name)` records a snapshot under the git dir,
+keyed by the round and the run's anchor (each run from Step 0c is a new key, so
+an earlier run's snapshot is never compared against); `step_guard_dispatch_end(round_name)`
+compares against it. Each may run in its own process. Two classes of signal:
+
+- **Abort** — what the session never produces while a round runs: `HEAD`, refs
+  under `refs/heads/` and `refs/tags/` (not `refs/remotes/`: a fetch is
+  harmless), every non-ignored path git lists as modified, added or untracked
+  (content and status code), skip-worktree/assume-unchanged index flags, and the
+  repository's hooks, config, `info/exclude` and `info/attributes`. Any change
+  raises `DispatchWroteDataError` naming it.
+- **Report** — gitignored inputs read after a round: the files under
+  `data/session_state/` other than the dispatch ledger, the concerns file and the
+  `prompts/` directory (orchestrator-written),
+  `data/market/today.json`, and the interpreter's site-packages startup files
+  (compared only when begin and end ran under the same `sys.prefix`). A change is
+  printed and appended to `data/session_state/dispatch_guard_concerns.jsonl`;
+  `step_commit_session` turns this session's lines into one `Concerns:` trailer
+  per round.
+
+A dispatch result the orchestrator must keep across processes goes under
+`data/session_state/results/`, never elsewhere in the checkout, and only after
+the round's end has run: `results/` is in the report class, not exempt.
+**Writes:** the snapshot (atomically, temp file then replace; once an end passes,
+it carries `"passed": true` when anchored; an anchorless pass deletes it) and the concerns file. Begin takes a
+fresh baseline over any snapshot under its key, which also clears its pass state:
+begin exactly once per dispatch, immediately before it. The one exception is a
+round re-begun within the same run: when an anchored snapshot exists that has not passed (a round
+interrupted mid-dispatch), begin first runs the comparison end would run and
+raises `DispatchWroteDataError` if an abort signal changed, so the interrupted
+dispatch's write is not absorbed into the new baseline (the abort comparison
+reads the snapshot's `abort` alone; a malformed `report` only skips the report
+diff); a missing, passed or unreadable snapshot, and any anchorless begin,
+re-baselines without comparing. A deliberate resume must not re-run Step 0:
+`reset --hard` reverts tracked writes while the ignored step markers survive
+(pre-existing, not fixed here).
+An end that fails leaves the snapshot unmarked, so a repeated end evaluates
+again; an end after a pass prints "already verified this session" and returns
+without comparing, because the session's own later writes (outbox, research
+files, manager book) would otherwise trip it. **Remaining limit:** a re-dispatch
+after a passing end MUST be preceded by a new begin; a forgotten begin leaves
+that re-dispatch unfenced, and nothing can detect it. **On failure: fatal** — a
+dispatch that wrote the checkout is not a session to continue, and an end with no
+snapshot for its round and session raises too, as does an end that cannot
+evaluate, because an unevaluated guard is not a passed guard.
+**Ordering:** begin immediately before the dispatch; when the round's Task calls
+return, end FIRST, before writing any result to disk, and only then persist
+results under `data/session_state/results/`. Re-dispatching one failed Task after
+the end is a new begin/dispatch/end bracket.
 
 ### Post prompts — `step_build_post_prompts`
 

@@ -135,6 +135,16 @@ def post_text(post: object) -> str:
     return str(getattr(post, "text", "") or "")
 
 
+# Both journal rounds run as subagents that hold file tools, inside a fenced
+# dispatch round (engine.dispatch_guard): a journal written to disk by the agent
+# instead of returned would abort the session.
+_RETURN_ONLY = (
+    "Do not create, edit or delete any file — return the text in your response; "
+    "the session writes it.\n"
+    "Do not search the web in this task."
+)
+
+
 def build_memory_update_prompt(
     agent_id: str,
     day_number: int,
@@ -195,7 +205,8 @@ TODAY'S POSTS:
 
 PORTFOLIO VALUE TODAY: {value_line}
 
-INSTRUCTIONS: Rewrite your journal in first person, in character, biased.
+INSTRUCTIONS: Rewrite your journal in first person, in character, biased,
+and return the new version in your response; you do not save it.
 Hard ceiling: 250 tokens. Aim shorter. Prune ruthlessly — drop anything
 older than ~3 sessions unless it still drives a decision. Suggested shape:
 1-2 short opening lines on stance, then 4-6 terse bullets (rules of thumb,
@@ -205,10 +216,13 @@ cut it.
 
 Respond with the full rewritten journal as plain markdown. No JSON, no code
 fences, no preamble. Just the journal body.
+
+{_RETURN_ONLY}
 """
 
 
-_JOURNAL_INSTRUCTIONS = """INSTRUCTIONS: Rewrite your journal in first person, in character, biased.
+_JOURNAL_INSTRUCTIONS = """INSTRUCTIONS: Rewrite your journal in first person, in character, biased,
+and return the new version in your response; you do not save it.
 Hard ceiling: 250 tokens. Aim shorter. Prune ruthlessly — drop anything
 older than ~3 sessions unless it still drives a decision. Suggested shape:
 1-2 short opening lines on stance, then 4-6 terse bullets (threads you are
@@ -221,7 +235,8 @@ the leaderboard below supersedes them.
 
 Respond with the full rewritten journal as plain markdown. No JSON, no code
 fences, no preamble. Just the journal body.
-"""
+
+""" + _RETURN_ONLY + "\n"
 
 
 def build_narrator_memory_update_prompt(

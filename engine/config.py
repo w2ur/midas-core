@@ -246,6 +246,10 @@ class MidasConfig:
         return self._data / "tax_shadow"
 
     @property
+    def research_dir(self) -> Path:
+        return self._data / "research"
+
+    @property
     def session_state_dir(self) -> Path:
         return self._data / "session_state"
 

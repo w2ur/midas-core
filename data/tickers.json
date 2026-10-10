@@ -898,7 +898,7 @@
     "currency": "EUR"
   },
   "BBOX.L": {
-    "name": "Tritax Big Box Ord",
+    "name": "Tritax Big Box REIT plc",
     "type": "equity",
     "currency": "GBp"
   },
@@ -4865,7 +4865,7 @@
     "currency": "USD"
   },
   "PCT.L": {
-    "name": "Polar Capital Technology Ord",
+    "name": "Polar Capital Technology Trust plc",
     "type": "equity",
     "currency": "GBp"
   },
@@ -5892,7 +5892,7 @@
     "currency": "GBp"
   },
   "SMT.L": {
-    "name": "Scottish Mortgage Ord",
+    "name": "Scottish Mortgage Investment Trust PLC",
     "type": "equity",
     "currency": "GBp"
   },
@@ -6920,7 +6920,7 @@
     "currency": "USD"
   },
   "VMRK": {
-    "name": "AvalonBay Communities, Inc.",
+    "name": "Vivmark Residential",
     "type": "equity",
     "currency": "USD"
   },
