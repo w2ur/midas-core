@@ -59,6 +59,12 @@ class Order:
     expires: str | None = None
 
     def __post_init__(self) -> None:
+        # Identifier-like fields are read from a file an agent writes. A list or
+        # number here used to reach ``.strip()`` in the deny-list pass and crash the
+        # batch for every agent; refused at construction it becomes a row.
+        for name in ("ticker", "currency"):
+            if not isinstance(getattr(self, name), str):
+                raise ValueError(f"Order.{name} must be a string")
         if not (self.shares > 0):
             raise ValueError(f"Order.shares must be > 0, got {self.shares}")
         if self.action not in ("BUY", "SELL"):
@@ -268,6 +274,21 @@ def is_valid_agent_id(agent_id: object) -> bool:
 def is_valid_request_id(request_id: object) -> bool:
     """True if ``request_id`` is a ``cnl_*`` id in the minted alphabet."""
     return is_valid_id(request_id) and request_id.startswith(REQUEST_ID_PREFIX)  # type: ignore[union-attr]
+
+
+def is_minted_request_id(request_id: object, trade_date: date, agent_id: object) -> bool:
+    """True if ``request_id`` is exactly what the driver mints for this cancel.
+
+    The driver mints ``cnl_{trade_date}_{agent_id}_{seq:03d}``. Request ids are
+    predictable, and a row filed under one blocks the cancel that owns it, so a
+    cancel is only accepted under the identity its own agent and day would have
+    been given. The sequence must be digits alone: a bare prefix test would let
+    agent ``a`` file under ``cnl_{date}_a_b_001``, which belongs to agent ``a_b``.
+    """
+    if not (is_valid_request_id(request_id) and is_valid_agent_id(agent_id)):
+        return False
+    prefix = f"{REQUEST_ID_PREFIX}{trade_date.isoformat()}_{agent_id}_"
+    return request_id.startswith(prefix) and request_id[len(prefix) :].isdigit()  # type: ignore[union-attr]
 
 
 def make_order_id(d: date, agent_id: str, seq: int) -> str:

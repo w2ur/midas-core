@@ -112,7 +112,9 @@ def list_pending(pending_dir: Path | None = None) -> list[Order]:
     for path in sorted(base.glob("*.json")):
         try:
             out.append(Order.from_dict(json.loads(path.read_text(encoding="utf-8"))))
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        except (
+                json.JSONDecodeError, KeyError, TypeError, ValueError, AttributeError
+            ) as exc:
             logger.warning("Skipping malformed pending file %s: %s", path.name, exc)
             continue
     return out
@@ -140,7 +142,9 @@ def load_pending(order_id: str, pending_dir: Path | None = None) -> Order | None
         return None
     try:
         return Order.from_dict(json.loads(path.read_text(encoding="utf-8")))
-    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+    except (
+                json.JSONDecodeError, KeyError, TypeError, ValueError, AttributeError
+            ) as exc:
         logger.warning("Unreadable pending file %s: %s", path.name, exc)
         return None
 
@@ -177,7 +181,9 @@ def read_cancels(d: date, cancels_dir: Path | None = None) -> list[CancelRequest
                 continue
             try:
                 out.append(CancelRequest.from_dict(json.loads(line)))
-            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            except (
+                json.JSONDecodeError, KeyError, TypeError, ValueError, AttributeError
+            ) as exc:
                 logger.warning(
                     "Skipping malformed cancel line %d in %s: %s", idx, path.name, exc
                 )

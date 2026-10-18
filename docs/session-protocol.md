@@ -186,9 +186,12 @@ bundled as a phantom fill.
 ### Author cancels — `step_author_cancels`
 
 Converts one agent's cancels into cancel requests on their own channel. **Reads:**
-nothing. **Writes:** the day's cancel channel. **On failure: raises** on a
-malformed request — a cancel names a specific order id and there is no safe
-guess. Returns the number appended.
+nothing. **Writes:** the day's cancel channel. **On failure: never raises** —
+an entry that is not a dict, or whose target is missing or not a string, is
+still written with an empty target, and the broker refuses it with a
+`CANCEL_TARGET_NOT_FOUND` row filed under the request id, so the ledger keeps
+the trace. The driver mints each request id as `cnl_{date}_{agent_id}_{seq:03d}`
+and the broker accepts no other. Returns the number appended.
 **Ordering:** an inner helper, same as above.
 
 ### The authoring batch — `step_author_all`

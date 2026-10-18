@@ -18,6 +18,7 @@ from engine.orders import (
     append_order,
     inbox_order_ids,
     is_valid_agent_id,
+    is_valid_id,
     is_valid_order_id,
     is_valid_request_id,
     read_inbox,
@@ -235,18 +236,21 @@ def test_a_cancel_whose_request_id_is_the_victims_order_id_does_not_disarm_it(de
 
 
 @pytest.mark.parametrize("agent_id", ["../x", "", "a b", None, 7, "x" * 200])
-def test_a_cancel_with_a_bad_agent_id_is_refused_under_its_request_id(desk, agent_id):
-    # Regression: 269dcab68
+def test_a_cancel_with_a_bad_agent_id_is_refused_under_a_derived_id(desk, agent_id):
+    # Regression: 269dcab68 (refused, not crashed); filed under a derived id since
+    # the identity-trust follow-up, so the README's claim holds for this code too.
     victim_id = "ord_2026-05-10_satoshi_003"
     save_pending(_conditional(victim_id), pending_dir=desk["pending"])
     append_cancel(TRADE_DATE, _cancel("cnl_2026-05-17_x_001", agent_id, victim_id))
 
     fills = fill_day(TRADE_DATE, desk["pm"])
 
-    assert [(f.order_id, f.reason) for f in fills] == [
-        ("cnl_2026-05-17_x_001", "INVALID_AGENT_ID")
-    ]
+    (row,) = fills
+    assert row.reason == "INVALID_AGENT_ID"
+    assert row.order_id != "cnl_2026-05-17_x_001"
+    assert is_valid_request_id(row.order_id)
     assert [o.order_id for o in list_pending(pending_dir=desk["pending"])] == [victim_id]
+    assert fill_day(TRADE_DATE, desk["pm"]) == []  # derived id keeps resume idempotent
 
 
 def test_request_ids_and_order_ids_live_in_disjoint_namespaces():
@@ -308,3 +312,179 @@ def test_a_cancel_with_a_bad_request_id_is_refused_without_crashing_the_batch(
     assert "ord_2026-05-17_satoshi_002" in reasons
     assert [o.order_id for o in list_pending(pending_dir=desk["pending"])] == [victim_id]
     assert fill_day(TRADE_DATE, desk["pm"]) == []
+
+
+# ---- round 2: one malformed line must not crash the batch ----
+
+
+def _raw_cancel(raw: dict) -> None:
+    from engine.config import get_config
+
+    path = get_config().orders_dir / "cancels" / f"{TRADE_DATE.isoformat()}.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(raw) + "\n")
+
+
+@pytest.mark.parametrize("ts", [7, ["2026-05-17"], {"a": 1}, None])
+def test_a_cancel_with_a_non_string_ts_does_not_crash_fill_day(desk, ts):
+    # Regression: 2751bff7b — CancelRequest.from_dict raised AttributeError on
+    # ``ts.replace``, which read_cancels did not catch, so one line crashed fill_day.
+    _raw_cancel(
+        {
+            "request_id": "cnl_2026-05-17_other_001",
+            "ts": ts,
+            "agent_id": "other",
+            "target_order_id": "ord_x",
+        }
+    )
+    append_order(TRADE_DATE, _market("ord_2026-05-17_satoshi_002"))
+
+    fills = fill_day(TRADE_DATE, desk["pm"])
+
+    assert "ord_2026-05-17_satoshi_002" in {f.order_id for f in fills}
+    assert fill_day(TRADE_DATE, desk["pm"]) == []
+
+
+@pytest.mark.parametrize("field", ["ts", "ticker", "currency"])
+@pytest.mark.parametrize("value", [7, ["BTC-EUR"], {"a": 1}, None])
+def test_an_outbox_line_with_a_non_string_field_is_refused_not_fatal(desk, field, value):
+    # Regression: 2751bff7b — a non-string ts raised AttributeError past the outbox
+    # reader's except clause; a list ticker reached ``.strip()`` in pass 3.
+    from engine.config import get_config
+
+    ohlcv = get_config().ohlcv_dir
+    ohlcv.mkdir(parents=True, exist_ok=True)
+    (ohlcv / "BTC-EUR.jsonl").write_text(
+        json.dumps({"date": "2026-05-17", "close": 80000.0, "adj_close": 80000.0}) + "\n"
+    )
+    victim_id = "ord_2026-05-17_other_001"
+    raw = _market(victim_id, agent_id="other").to_dict()
+    raw[field] = value
+    append_raw_outbox(raw)
+    append_order(TRADE_DATE, _market("ord_2026-05-17_satoshi_002"))
+
+    fills = fill_day(TRADE_DATE, desk["pm"])
+
+    by_id = {f.order_id: f for f in fills}
+    assert by_id["ord_2026-05-17_satoshi_002"].status == "filled"
+    assert victim_id not in by_id
+    assert [f.reason for f in fills if f.order_id != "ord_2026-05-17_satoshi_002"] == [
+        "INVALID_SHARES"
+    ]
+    assert fill_day(TRADE_DATE, desk["pm"]) == []
+
+
+@pytest.mark.parametrize("field", ["ticker", "currency"])
+def test_order_refuses_a_non_string_identifier_field(field):
+    # Regression: 2751bff7b
+    kwargs = {"ticker": "BTC-EUR", "currency": "EUR", field: ["x"]}
+    with pytest.raises(ValueError, match=field):
+        Order(
+            order_id="ord_x",
+            ts=datetime(2026, 5, 17, 20, tzinfo=timezone.utc),
+            agent_id="satoshi",
+            action="BUY",
+            shares=1,
+            reasoning="r",
+            **kwargs,
+        )
+
+
+# Regression: 3c96128d1 — a request id is predictable, and any row filed under it
+# blocks the cancel that owns it. Agent "other" used satoshi's future id with a
+# junk target, ahead of satoshi's real cancel in the file, and satoshi's was then
+# skipped as already processed.
+def test_one_agent_cannot_preempt_another_agents_cancel_by_request_id(desk):
+    victim = "ord_2026-05-10_satoshi_003"
+    save_pending(_conditional(victim), pending_dir=desk["pending"])
+    append_cancel(TRADE_DATE, _cancel("cnl_2026-05-17_satoshi_001", "other", "ord_nothing"))
+    append_cancel(TRADE_DATE, _cancel("cnl_2026-05-17_satoshi_001", "satoshi", victim))
+
+    fills = fill_day(TRADE_DATE, desk["pm"])
+
+    assert sorted(f.reason for f in fills) == ["CANCELLED_BY_AGENT", "INVALID_REQUEST_ID"]
+    assert list_pending(pending_dir=desk["pending"]) == []
+    assert "cnl_2026-05-17_satoshi_001" not in inbox_order_ids(TRADE_DATE)
+
+
+@pytest.mark.parametrize(
+    "request_id",
+    [
+        "cnl_2026-05-18_satoshi_001",  # another day's id
+        "cnl_2026-05-17_other_001",  # another agent's id
+        "cnl_2026-05-17_satoshi_",  # no sequence
+        "cnl_2026-05-17_satoshi_x1",  # sequence is not digits
+        "cnl_2026-05-17_satoshi_1_001",  # extra segment
+        "cnl_1",
+    ],
+)
+def test_a_cancel_is_only_accepted_under_the_id_the_driver_mints_for_it(desk, request_id):
+    # Regression: 3c96128d1
+    victim = "ord_2026-05-10_satoshi_003"
+    save_pending(_conditional(victim), pending_dir=desk["pending"])
+    append_cancel(TRADE_DATE, _cancel(request_id, "satoshi", victim))
+
+    (row,) = fill_day(TRADE_DATE, desk["pm"])
+
+    assert row.reason == "INVALID_REQUEST_ID"
+    assert row.order_id != request_id
+    assert [o.order_id for o in list_pending(pending_dir=desk["pending"])] == [victim]
+
+
+def test_a_prefix_agent_cannot_claim_a_longer_agents_request_id():
+    # Regression: 3c96128d1 — a bare startswith would accept this.
+    from engine.orders import is_minted_request_id
+
+    assert is_minted_request_id("cnl_2026-05-17_a_001", TRADE_DATE, "a")
+    assert not is_minted_request_id("cnl_2026-05-17_a_b_001", TRADE_DATE, "a")
+    assert is_minted_request_id("cnl_2026-05-17_a_b_001", TRADE_DATE, "a_b")
+
+
+def test_the_driver_mints_ids_the_broker_accepts(desk):
+    # The consumer of the rule: step_author_cancels must produce ids it accepts.
+    victim = "ord_2026-05-10_satoshi_003"
+    save_pending(_conditional(victim), pending_dir=desk["pending"])
+    step_author_cancels("satoshi", [{"target_order_id": victim}], TRADE_DATE)
+
+    fills = fill_day(TRADE_DATE, desk["pm"])
+
+    assert [(f.order_id, f.reason) for f in fills] == [(victim, "CANCELLED_BY_AGENT")]
+
+
+# Regression: b5dea41da — a fired order with a bad agent id was filed under its own
+# order id, contradicting "a refused row is filed under a derived id".
+def test_a_fired_order_with_a_bad_agent_id_is_filed_under_a_derived_id(desk):
+    order = _conditional("ord_2026-05-10_satoshi_003", agent_id="../elsewhere")
+
+    fill = _fires(order, desk)
+
+    assert fill.reason == "INVALID_AGENT_ID"
+    assert fill.order_id != order.order_id
+    assert is_valid_id(fill.order_id)
+
+
+# Regression: 56bc16008 — delete_pending raises ValueError for a planted symlink;
+# on the expiry path that happened after the inbox row was written and killed the
+# watcher for every later order.
+def test_the_watcher_survives_a_planted_symlink_on_an_expired_order(desk):
+    from scripts.check_triggers import _process_channel
+
+    (desk["pending"] / "ord_link.json").symlink_to(desk["portfolio_file"])
+    link = _conditional("ord_link")
+    second = _conditional("ord_2026-05-10_satoshi_004")
+    save_pending(second, pending_dir=desk["pending"])
+    summary = {"expired": 0, "carried": 0, "fired": 0, "errors": 0, "report": []}
+
+    _process_channel(
+        [link, second],
+        datetime(2026, 7, 1, 13, tzinfo=timezone.utc),
+        date(2026, 7, 1),
+        None,
+        summary,
+        pending_dir=desk["pending"],
+    )
+
+    assert summary["expired"] == 2
+    assert desk["portfolio_file"].is_file()
+    assert not (desk["pending"] / "ord_2026-05-10_satoshi_004.json").exists()

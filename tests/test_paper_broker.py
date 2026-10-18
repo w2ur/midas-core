@@ -899,7 +899,7 @@ class TestCancelRequestProcessing:
         append_cancel(
             d,
             CancelRequest(
-                request_id="cnl_x",
+                request_id="cnl_2026-05-17_satoshi_007",
                 ts=datetime(2026, 5, 17, 20, 5, tzinfo=timezone.utc),
                 agent_id="satoshi",
                 target_order_id="ord_does_not_exist",
@@ -912,7 +912,7 @@ class TestCancelRequestProcessing:
         # Filed under the request id: a target that never existed must not enter
         # the ledger, where it would pre-empt a future order of that id.
         assert [f for f in fills if f.order_id == "ord_does_not_exist"] == []
-        no_op = [f for f in fills if f.order_id == "cnl_x"]
+        no_op = [f for f in fills if f.order_id == "cnl_2026-05-17_satoshi_007"]
         assert len(no_op) == 1
         assert no_op[0].status == "rejected"
         assert no_op[0].reason == "CANCEL_TARGET_NOT_FOUND"

@@ -38,8 +38,9 @@ Rejection reason codes:
 - INVALID_ORDER_ID: outbox order whose order_id is not shaped like an id the broker mints
   (filed under an id derived from the line, never under the junk id)
 - INVALID_AGENT_ID: order or cancel whose agent_id is not shaped like an id the broker mints
-  (it becomes a folder name under portfolios/)
-- INVALID_REQUEST_ID: cancel whose request_id is not a cnl_* id in the minted alphabet
+  (it becomes a folder name under portfolios/); filed under a derived id
+- INVALID_REQUEST_ID: cancel whose request_id is not exactly the cnl_{date}_{agent}_{seq}
+  the driver mints for that agent and day; filed under a derived id
 """
 
 from __future__ import annotations
@@ -61,6 +62,7 @@ from engine.orders import (
     Order,
     append_fill,
     inbox_order_ids,
+    is_minted_request_id,
     is_valid_agent_id,
     is_valid_order_id,
     is_valid_request_id,
@@ -746,7 +748,7 @@ def _read_outbox_lines(
             # fall back to the raw order_id if available.
             try:
                 orders.append(Order.from_dict(raw))
-            except (ValueError, KeyError, TypeError) as exc:
+            except (ValueError, KeyError, TypeError, AttributeError) as exc:
                 logger.warning("Invalid outbox order on line %d: %s", idx, exc)
                 # Never the line's own order_id: it is agent-authored, so a bad
                 # line claiming another agent's future id would file a row under
@@ -969,7 +971,19 @@ def fill_day(
     for cancel in read_cancels(trade_date, cancels_dir=cancels_dir):
         # Every identity in a cancel comes from a file the agent can write, so
         # its shape is checked before it is hashed, joined to a path or filed.
-        if is_valid_request_id(cancel.request_id):
+        # A refusal for an identity is never filed under that identity: request
+        # ids are predictable (``cnl_{date}_{agent}_{seq}``), so a row filed
+        # under one would pre-empt the real cancel that carries it. The refusal
+        # goes under an id derived from the whole line instead.
+        if not is_valid_request_id(cancel.request_id):
+            reason = "INVALID_REQUEST_ID"
+        elif not is_valid_agent_id(cancel.agent_id):
+            reason = "INVALID_AGENT_ID"
+        elif not is_minted_request_id(cancel.request_id, trade_date, cancel.agent_id):
+            reason = "INVALID_REQUEST_ID"
+        else:
+            reason = None
+        if reason is None:
             filed_under = cancel.request_id
         else:
             filed_under = _derived_id(
@@ -982,11 +996,7 @@ def fill_day(
             )
         if filed_under in already_processed:
             continue
-        if not is_valid_request_id(cancel.request_id):
-            reason = "INVALID_REQUEST_ID"
-        elif not is_valid_agent_id(cancel.agent_id):
-            reason = "INVALID_AGENT_ID"
-        else:
+        if reason is None:
             # Shape first, membership second: a dict or list target is
             # unhashable, so testing it against the set raised TypeError and one
             # malformed cancel crashed fill_day for every agent, on every resume.
@@ -1197,7 +1207,12 @@ def _execute_triggered_order(
         return None
 
     if not is_valid_agent_id(order.agent_id):
-        f = _reject(order.order_id, "INVALID_AGENT_ID")
+        # Filed under an id derived from the order, like the same refusal in
+        # fill_day: the agent id is untrusted, and so is the order id beside it.
+        f = _reject(
+            _derived_id("invalid_agent", order.order_id, order.agent_id),
+            "INVALID_AGENT_ID",
+        )
         f.trigger_fired = True
         return f
 

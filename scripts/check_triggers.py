@@ -894,7 +894,17 @@ def _process_channel(
                 trigger_fired=True,
             )
             append_fill(today, f, inbox_dir=inbox_dir)
-            delete_pending(order.order_id, pending_dir=pending_dir)
+            try:
+                delete_pending(order.order_id, pending_dir=pending_dir)
+            except ValueError as exc:
+                # The pending path resolved outside its folder (a planted
+                # symlink): the expiry row is already written, so the watcher
+                # carries on with the other orders instead of dying on this one.
+                logger.error(
+                    "Could not delete pending file for expired %s: %s",
+                    order.order_id,
+                    exc,
+                )
             summary["expired"] += 1
             # `commit` is resolved once, in main(), after the batched tail
             # commit that ALL of a run's expiries share — see `_report_entry`.

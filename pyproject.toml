@@ -159,4 +159,13 @@ filterwarnings = [
     # bt's own chained assignment inside Backtest.get_transactions. Ours is the
     # calling code, not the assignment; bt would have to fix it upstream.
     "ignore:A value is being set on a copy of a DataFrame or Series through chained assignment:",
+    # yfinance's timezone cache (yfinance/cache.py -> peewee) opens a sqlite3
+    # connection per thread and never closes it; the interpreter reports it as
+    # unclosed when the garbage collector reaches it. Python 3.13 raises that as
+    # an unraisable exception during whichever later test is running, so the
+    # yfinance/bt network tests fail at random. Confirmed with tracemalloc: the
+    # allocation is peewee.connect <- yfinance cache, and no engine or script
+    # code opens sqlite. Scoped to the sqlite3 connection message only.
+    "ignore:unclosed database in <sqlite3:ResourceWarning",
+    "ignore:(?s).*unclosed database in <sqlite3:pytest.PytestUnraisableExceptionWarning",
 ]

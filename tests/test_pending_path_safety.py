@@ -144,7 +144,7 @@ def test_fill_day_rejects_a_traversal_cancel_and_leaves_the_portfolio(desk):
 
 def test_fill_day_rejects_a_cancel_whose_target_is_a_planted_symlink(desk):
     (desk["pending"] / "ord_link.json").symlink_to(desk["portfolio_file"])
-    append_cancel(TRADE_DATE, _cancel("cnl_1", "satoshi", "ord_link"))
+    append_cancel(TRADE_DATE, _cancel("cnl_2026-05-17_satoshi_001", "satoshi", "ord_link"))
 
     fills = fill_day(TRADE_DATE, desk["pm"])
 
@@ -164,7 +164,7 @@ def test_an_outbox_order_with_a_traversal_id_is_refused_and_never_armed(desk):
 
 def test_cancel_by_another_agent_is_rejected_not_owner(desk):
     save_pending(_conditional("ord_2026-05-10_satoshi_003"), pending_dir=desk["pending"])
-    append_cancel(TRADE_DATE, _cancel("cnl_other_1", "other", "ord_2026-05-10_satoshi_003"))
+    append_cancel(TRADE_DATE, _cancel("cnl_2026-05-17_other_001", "other", "ord_2026-05-10_satoshi_003"))
 
     fills = fill_day(TRADE_DATE, desk["pm"])
 
@@ -175,12 +175,12 @@ def test_cancel_by_another_agent_is_rejected_not_owner(desk):
     # The refusal must not mark the TARGET as processed: the watcher skips any
     # order id already in the inbox, so filing it there would disarm the order.
     assert "ord_2026-05-10_satoshi_003" not in inbox_order_ids(None)
-    assert read_inbox(TRADE_DATE)[0].order_id == "cnl_other_1"
+    assert read_inbox(TRADE_DATE)[0].order_id == "cnl_2026-05-17_other_001"
 
 
 def test_the_owner_can_still_cancel_its_own_order(desk):
     save_pending(_conditional("ord_2026-05-10_satoshi_003"), pending_dir=desk["pending"])
-    append_cancel(TRADE_DATE, _cancel("cnl_own_1", "satoshi", "ord_2026-05-10_satoshi_003"))
+    append_cancel(TRADE_DATE, _cancel("cnl_2026-05-17_satoshi_001", "satoshi", "ord_2026-05-10_satoshi_003"))
 
     fills = fill_day(TRADE_DATE, desk["pm"])
 
@@ -190,7 +190,7 @@ def test_the_owner_can_still_cancel_its_own_order(desk):
 
 def test_a_refused_cancel_is_not_replayed_on_a_second_run(desk):
     save_pending(_conditional("ord_2026-05-10_satoshi_003"), pending_dir=desk["pending"])
-    append_cancel(TRADE_DATE, _cancel("cnl_other_1", "other", "ord_2026-05-10_satoshi_003"))
+    append_cancel(TRADE_DATE, _cancel("cnl_2026-05-17_other_001", "other", "ord_2026-05-10_satoshi_003"))
 
     fill_day(TRADE_DATE, desk["pm"])
     fill_day(TRADE_DATE, desk["pm"])
