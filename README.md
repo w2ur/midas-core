@@ -3,8 +3,8 @@ name: "midas-core"
 tagline_fr: "Un moteur Brain/Hands open source pour agents IA en paper trading — la sécurité vit dans le broker, pas dans le prompt."
 tagline_en: "An open Brain/Hands engine for paper-trading AI agents — safety enforced by the broker, not the prompt."
 about_en: "Multi-agent paper-trading framework: LLM agents propose trades, a separate broker validates and executes them. pip install, runnable demo desk."
-facts_fr: "Licence MIT, Python 3.12+, garde-fous appliqués par le broker, desk de démo exécutable, pip install midas-core."
-facts_en: "MIT license, Python 3.12+, safety rails enforced by the broker, a runnable demo desk, pip install midas-core."
+facts_fr: "Licence MIT, Python 3.12 ou 3.13, garde-fous appliqués par le broker, desk de démo exécutable, pip install midas-core."
+facts_en: "MIT license, Python 3.12 or 3.13, safety rails enforced by the broker, a runnable demo desk, pip install midas-core."
 ---
 
 # midas-core
@@ -17,7 +17,7 @@ desk, and the deterministic Hands pipeline. Bring your own agents.
 [![tests](https://github.com/w2ur/midas-core/actions/workflows/tests.yml/badge.svg)](https://github.com/w2ur/midas-core/actions/workflows/tests.yml)
 [![PyPI](https://img.shields.io/pypi/v/midas-core.svg)](https://pypi.org/project/midas-core/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12 | 3.13](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue.svg)](https://www.python.org/downloads/)
 
 ![A terminal session: pip install midas-core, midas init-demo, then midas fill-day reporting one order filled and one rejected with reason MAX_ORDER_NOTIONAL](./docs/images/demo-fill-day.png)
 
@@ -34,10 +34,16 @@ Reproduce it with the [quickstart](#quickstart--reach-a-real-fill) below — not
   enforcing. Every order is checked at fill time against the fixed set of rejection/cancel
   reason codes in [`REJECTION_REASON_CODES`](engine/paper_broker.py) — `MAX_ORDER_NOTIONAL`,
   `MAX_ORDERS_PER_DAY`, `TICKER_NOT_IN_UNIVERSE`, `INSUFFICIENT_CASH`, `DAILY_DRAWDOWN_HALT`,
-  … — so a coaxed or confused agent still can't slip an oversized or out-of-universe trade
-  through.
-- **Reproducible by construction.** Dependencies are a fully-pinned lockfile; prices and index
-  universes are committed to git; a trading session makes no outbound HTTP calls. Every fill is
+  … — so a coaxed or confused agent still can't slip an oversized trade through. The universe
+  rail (`TICKER_NOT_IN_UNIVERSE`) applies only when a desk sets `allowed_universe` in its
+  roster; every roster shipped here, the demo desk included, leaves it empty and so allows any
+  ticker.
+- **Reproducible by construction.** Dependencies are a fully-pinned lockfile; prices, index
+  universes and orders are committed to git, and the daily fill path never touches the
+  network (only the conditional-order watcher reads live crypto prices, to decide when a
+  trigger fires). Agents may run a capped number of web searches while they decide (three per trader);
+  those run on the model's side and are recorded as self-reported provenance, not as an input
+  you can replay. Every fill is
   stamped with `executed_sha`, the git HEAD it executed against — `git checkout <sha>` re-derives
   the exact order and price store the broker saw.
 - **Proven on a live desk, and you can read the whole ledger.** A 10-agent desk has run this
@@ -91,7 +97,7 @@ pm.initialize('demo-momentum', initial_capital=10000, currency='USD')
 "
 
 # Bootstrap the price store from yfinance (the one networked step; the live desk
-# populates this store from a cron so trading sessions stay HTTP-free).
+# populates this store from a cron so the fill path stays HTTP-free).
 midas fetch-ohlcv --symbols SPY,QQQ,IWM,VTV,SCHD,BRK-B,URTH --history-days 90
 ```
 
@@ -157,7 +163,8 @@ The whole cast is config. Copy the demo desk and edit two things:
 
 1. **`roster.yaml`** — declare your traders, a `narrator`, and an optional `allocator`, each with
    its universe, starting capital, and **broker-enforced** `safety` rails (`max_order_notional`,
-   `max_orders_per_day`, `daily_drawdown_halt_pct`, `allowed_universe`).
+   `max_orders_per_day`, `daily_drawdown_halt_pct`, `allowed_universe`; an empty
+   `allowed_universe` means no universe restriction).
 2. **`.claude/agents/*.md`** — the persona behind each id: its voice and its strategy.
 
 Nothing else is hardcoded. The full roster schema (every field and its default) is documented in
@@ -167,7 +174,7 @@ Nothing else is hardcoded. The full roster schema (every field and its default) 
 
 | To run…                                                        | Requirements                                   |
 | -------------------------------------------------------------- | ---------------------------------------------- |
-| **Deterministic pipeline** — fills, baselines, backtests       | Python 3.12+ only. No API keys, no accounts.   |
+| **Deterministic pipeline** — fills, baselines, backtests       | Python 3.12 or 3.13. No API keys, no accounts. |
 | **LLM trading sessions** — personas, journals, narration       | Runs under [Claude Code](https://claude.com/claude-code) (`scripts/daily_session.py`). |
 
 The deterministic pipeline is headless and fully tested; you can drive a desk end-to-end with no
