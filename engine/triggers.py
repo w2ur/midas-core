@@ -60,7 +60,12 @@ class CancelRequest:
             request_id=d["request_id"],
             ts=datetime.fromisoformat(d["ts"].replace("Z", "+00:00")),
             agent_id=d["agent_id"],
-            target_order_id=d["target_order_id"],
+            # A non-string target (a JSON object, a list, a number) becomes "",
+            # which no id validator accepts, so the broker refuses it with a row
+            # instead of the line being dropped or the batch crashing on it.
+            target_order_id=(
+                d["target_order_id"] if isinstance(d["target_order_id"], str) else ""
+            ),
             reasoning=d.get("reasoning", ""),
         )
 

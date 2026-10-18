@@ -909,7 +909,10 @@ class TestCancelRequestProcessing:
         fill_day(d, pm)
 
         fills = read_inbox(d)
-        no_op = [f for f in fills if f.order_id == "ord_does_not_exist"]
+        # Filed under the request id: a target that never existed must not enter
+        # the ledger, where it would pre-empt a future order of that id.
+        assert [f for f in fills if f.order_id == "ord_does_not_exist"] == []
+        no_op = [f for f in fills if f.order_id == "cnl_x"]
         assert len(no_op) == 1
         assert no_op[0].status == "rejected"
         assert no_op[0].reason == "CANCEL_TARGET_NOT_FOUND"
@@ -918,8 +921,9 @@ class TestCancelRequestProcessing:
         self, broker_env, monkeypatch, tmp_path
     ) -> None:
         """Two cancels for the same target_order_id in one session: first wins as
-        CANCELLED_BY_AGENT, second sees the pending already gone and becomes
-        CANCEL_TARGET_NOT_FOUND. Same target_order_id, two distinct rejection records."""
+        CANCELLED_BY_AGENT (filed under the target), second sees the pending
+        already gone and becomes CANCEL_TARGET_NOT_FOUND (filed under its own
+        request id)."""
         pending_dir = get_config().orders_dir / "pending"
         cancels_dir = get_config().orders_dir / "cancels"
 
@@ -970,8 +974,10 @@ class TestCancelRequestProcessing:
         assert list_pending() == []
         fills = read_inbox(d)
         targeting = [f for f in fills if f.order_id == "ord_2026-05-10_satoshi_003"]
-        reasons = sorted(f.reason for f in targeting)
-        assert reasons == ["CANCELLED_BY_AGENT", "CANCEL_TARGET_NOT_FOUND"]
+        assert [f.reason for f in targeting] == ["CANCELLED_BY_AGENT"]
+        # The second attempt found nothing, so it is filed under its request id.
+        second = [f for f in fills if f.order_id == "cnl_2026-05-17_satoshi_002"]
+        assert [f.reason for f in second] == ["CANCEL_TARGET_NOT_FOUND"]
 
 
 # ---------------------------------------------------------------------------

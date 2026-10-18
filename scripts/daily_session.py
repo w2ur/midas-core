@@ -586,6 +586,10 @@ def step_author_cancels(
     step_author_all; step-name would collide across agents.
 
     Each cancel dict requires `target_order_id` and optionally `reasoning`.
+    The list is agent output, so an entry that is not a dict, or whose target is
+    missing or not a string, is still written, with an empty target: the broker
+    refuses it with a CANCEL_TARGET_NOT_FOUND row filed under the request id, so
+    the ledger keeps the trace and nothing here raises.
     Returns the number of cancels appended to data/orders/cancels/.
     """
     if not cancels:
@@ -594,6 +598,10 @@ def step_author_cancels(
         f"\n=== Step 3a-bis: Author cancels for {agent_id} ({len(cancels)} cancels) ==="
     )
     for seq, c in enumerate(cancels, start=1):
+        if not isinstance(c, dict):
+            c = {}
+        target = c.get("target_order_id")
+        reasoning = c.get("reasoning", "")
         request_id = f"cnl_{trade_date.isoformat()}_{agent_id}_{seq:03d}"
         append_cancel(
             trade_date,
@@ -601,8 +609,8 @@ def step_author_cancels(
                 request_id=request_id,
                 ts=datetime.now(timezone.utc),
                 agent_id=agent_id,
-                target_order_id=c["target_order_id"],
-                reasoning=c.get("reasoning", ""),
+                target_order_id=target if isinstance(target, str) else "",
+                reasoning=reasoning if isinstance(reasoning, str) else "",
             ),
         )
     return len(cancels)

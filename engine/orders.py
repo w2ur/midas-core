@@ -231,22 +231,43 @@ class DroppedTrade:
         )
 
 
-#: The alphabet every order id the system mints lives in: letters, digits, ``_``
-#: and ``-`` (``make_order_id`` gives ``ord_{date}_{agent}_{seq}``). No ``/``,
-#: ``\\`` or ``.``, so an id can never name a path outside the folder a pending
-#: order lives in. Deliberately the alphabet, not the full minted shape: the
-#: committed ledger holds two legacy ids without an agent segment, and the
-#: suite's fixtures use short ids such as ``o1``.
-_ORDER_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
+#: The alphabet every id the system mints lives in: letters, digits, ``_`` and
+#: ``-`` (``make_order_id`` gives ``ord_{date}_{agent}_{seq}``). No ``/``, ``\\``
+#: or ``.``, so an id can never name a path outside the folder it becomes a
+#: file in. Deliberately the alphabet, not the full minted shape: the committed
+#: ledger holds two legacy ids without an agent segment, and the suite's
+#: fixtures use short ids such as ``o1``.
+_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
+
+#: Cancel request ids (``cnl_{date}_{agent}_{seq}``) and order ids share one
+#: inbox, so they live in disjoint namespaces: a request id is always ``cnl_*``
+#: and an order id never is. Without that a row filed under a request id could
+#: be made to name an order.
+REQUEST_ID_PREFIX = "cnl_"
+
+
+def is_valid_id(value: object) -> bool:
+    """True if ``value`` is a ``str`` in the minted alphabet (see ``_ID_RE``).
+
+    ``fullmatch`` on a ``str`` only: ``$`` would accept a trailing newline and
+    a non-string must not reach a path join, or a set membership test, at all.
+    """
+    return isinstance(value, str) and _ID_RE.fullmatch(value) is not None
 
 
 def is_valid_order_id(order_id: object) -> bool:
-    """True if ``order_id`` has the shape the broker mints (see ``_ORDER_ID_RE``).
+    """True if ``order_id`` has the shape the broker mints and is not a request id."""
+    return is_valid_id(order_id) and not order_id.startswith(REQUEST_ID_PREFIX)  # type: ignore[union-attr]
 
-    ``fullmatch`` on a ``str`` only: ``$`` would accept a trailing newline and
-    a non-string must not reach a path join at all.
-    """
-    return isinstance(order_id, str) and _ORDER_ID_RE.fullmatch(order_id) is not None
+
+def is_valid_agent_id(agent_id: object) -> bool:
+    """True if ``agent_id`` may become a path component (``portfolios/<id>/``)."""
+    return is_valid_id(agent_id)
+
+
+def is_valid_request_id(request_id: object) -> bool:
+    """True if ``request_id`` is a ``cnl_*`` id in the minted alphabet."""
+    return is_valid_id(request_id) and request_id.startswith(REQUEST_ID_PREFIX)  # type: ignore[union-attr]
 
 
 def make_order_id(d: date, agent_id: str, seq: int) -> str:
