@@ -170,6 +170,22 @@ The whole cast is config. Copy the demo desk and edit two things:
 Nothing else is hardcoded. The full roster schema (every field and its default) is documented in
 [`./examples/demo-desk/README.md`](./examples/demo-desk/README.md).
 
+### The driver mints the identities
+
+The paper broker reads orders and cancels from files an agent can write, and it trusts three
+identities in them only as far as a shape check: `agent_id`, `order_id` and a cancel's
+`request_id`. It requires the minted alphabet (letters, digits, `_` and `-`, so none can name a
+path), keeps `cnl_*` request ids and order ids in disjoint namespaces, and refuses anything else
+with `INVALID_AGENT_ID`, `INVALID_ORDER_ID` or `INVALID_REQUEST_ID`. A refused row is filed under
+an id derived from the line, never under the id it claimed.
+
+It does **not** prove that an `agent_id` belongs to the agent that wrote the line, nor that an
+`order_id` was minted for that agent: an `agent_id` outside the roster still gets the default
+safety rails, and a line can still carry another agent's well-formed id. Your driver must mint
+all three itself (`scripts/daily_session.py` does: `agent_id` from the roster, ids from
+`make_order_id` and `cnl_{date}_{agent}_{seq}`) and must never copy one out of agent output.
+A driver that lets an agent choose its own ids hands it the ability to act as another agent.
+
 ## What you need
 
 | To run…                                                        | Requirements                                   |
