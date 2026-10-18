@@ -30,9 +30,11 @@ jobs:
         # A PyPI version number can never be reused, so a tag/metadata mismatch
         # burns it permanently. Fail before building rather than after uploading.
         # Runs on EVERY trigger: a manual dispatch from a branch has no tag to
-        # compare, so it is refused outright rather than skipped.
+        # compare, so it is refused outright rather than skipped, and so is a
+        # tag without the leading v (the `on.push.tags` filter does not cover
+        # a manual dispatch from a tag named 0.1.2).
         run: |
-          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+          if [ "$GITHUB_REF_TYPE" != "tag" ] || [ "${GITHUB_REF_NAME#v}" = "$GITHUB_REF_NAME" ]; then
             echo "::error::publish runs from a v* tag only (ref: $GITHUB_REF)"
             exit 1
           fi
