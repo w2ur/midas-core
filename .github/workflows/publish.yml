@@ -1,4 +1,5 @@
-# Publishes midas-core to PyPI on a version tag (v*) or manual dispatch.
+# Publishes midas-core to PyPI on a version tag (v*). A manual dispatch is accepted
+# only when run from a v* tag (to re-run a publish), never from a branch.
 #
 # One-time owner setup this depends on: a PyPI "pending publisher" configured
 # at https://pypi.org/manage/account/publishing/ for owner `w2ur`, repo
@@ -28,8 +29,13 @@ jobs:
       - name: Tag must match the version in pyproject.toml
         # A PyPI version number can never be reused, so a tag/metadata mismatch
         # burns it permanently. Fail before building rather than after uploading.
-        if: startsWith(github.ref, 'refs/tags/')
+        # Runs on EVERY trigger: a manual dispatch from a branch has no tag to
+        # compare, so it is refused outright rather than skipped.
         run: |
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            echo "::error::publish runs from a v* tag only (ref: $GITHUB_REF)"
+            exit 1
+          fi
           declared=$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
           tagged="${GITHUB_REF_NAME#v}"
           echo "pyproject: $declared / tag: $tagged"
