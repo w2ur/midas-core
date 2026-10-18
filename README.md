@@ -176,8 +176,10 @@ The paper broker reads orders and cancels from files an agent can write, and it 
 identities in them only as far as a shape check: `agent_id`, `order_id` and a cancel's
 `request_id`. It requires the minted alphabet (letters, digits, `_` and `-`, so none can name a
 path), keeps `cnl_*` request ids and order ids in disjoint namespaces, and refuses anything else
-with `INVALID_AGENT_ID`, `INVALID_ORDER_ID` or `INVALID_REQUEST_ID`. A refused row is filed under
-an id derived from the line, never under the id it claimed.
+with `INVALID_AGENT_ID`, `INVALID_ORDER_ID` or `INVALID_REQUEST_ID`. A cancel is accepted only
+under the exact request id the driver mints for its agent and day,
+`cnl_{date}_{agent_id}_{seq:03d}`, so one agent cannot take another's id. A refused row is filed
+under an id derived from the line, never under the id it claimed.
 
 It does **not** prove that an `agent_id` belongs to the agent that wrote the line, nor that an
 `order_id` was minted for that agent: an `agent_id` outside the roster still gets the default
