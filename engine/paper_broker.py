@@ -30,6 +30,10 @@ Rejection reason codes:
 - TRIGGER_NO_EXPIRY: conditional order without an expires date (agent error)
 - CANCELLED_BY_AGENT: cancel request matched a pending order; pending file removed
 - CANCEL_TARGET_NOT_FOUND: cancel request targeted an order_id not in pending
+  (or one that is not shaped like an id the broker mints)
+- CANCEL_NOT_OWNER: cancel request targeted a pending order another agent authored;
+  pending file left in place
+- INVALID_ORDER_ID: outbox order whose order_id is not shaped like an id the broker mints
 """
 
 from __future__ import annotations
@@ -45,7 +49,13 @@ from engine import instrument_status
 from engine.config import get_config
 from engine.fees import fee_for
 from engine.fx import convert as fx_convert
-from engine.orders import Fill, Order, append_fill, inbox_order_ids
+from engine.orders import (
+    Fill,
+    Order,
+    append_fill,
+    inbox_order_ids,
+    is_valid_order_id,
+)
 from engine.quotes import (
     _load_ticker_currency_overrides,  # noqa: F401 — re-exported, see below
     latest_price,
@@ -53,9 +63,11 @@ from engine.quotes import (
     ticker_currency,
 )
 from engine.triggers import (
+    CancelRequest,
     delete_pending,
     is_crypto_ticker,
     list_pending,
+    load_pending,
     read_cancels,
     save_pending,
 )
@@ -102,6 +114,8 @@ REJECTION_REASON_CODES = frozenset(
         "TRIGGER_NO_EXPIRY",
         "CANCELLED_BY_AGENT",
         "CANCEL_TARGET_NOT_FOUND",
+        "CANCEL_NOT_OWNER",
+        "INVALID_ORDER_ID",
     }
 )
 
@@ -843,6 +857,28 @@ def _process_one(
     )
 
 
+def _cancel_outcome(cancel: CancelRequest, pending_dir: Path | None) -> str:
+    """Resolve one cancel request to its reason code, removing the file on success.
+
+    The target id is agent-authored, so it is shape-checked before it is used as
+    a filename, and the pending order must belong to the agent asking: without
+    the second check any agent could cancel another's armed order by id.
+    """
+    if not is_valid_order_id(cancel.target_order_id):
+        return "CANCEL_TARGET_NOT_FOUND"
+    try:
+        pending = load_pending(cancel.target_order_id, pending_dir=pending_dir)
+        if pending is None:
+            return "CANCEL_TARGET_NOT_FOUND"
+        if pending.agent_id != cancel.agent_id:
+            return "CANCEL_NOT_OWNER"
+        removed = delete_pending(cancel.target_order_id, pending_dir=pending_dir)
+    except ValueError:
+        # The pending path resolved outside its folder (a planted symlink).
+        return "CANCEL_TARGET_NOT_FOUND"
+    return "CANCELLED_BY_AGENT" if removed else "CANCEL_TARGET_NOT_FOUND"
+
+
 def fill_day(
     trade_date: date,
     portfolio_manager: PortfolioManager,
@@ -908,11 +944,20 @@ def fill_day(
     # on the second run, the target_order_id will already be in the inbox and the
     # cancel entries are skipped.
     for cancel in read_cancels(trade_date, cancels_dir=cancels_dir):
-        if cancel.target_order_id in already_processed:
+        if (
+            cancel.target_order_id in already_processed
+            or cancel.request_id in already_processed
+        ):
             continue
-        removed = delete_pending(cancel.target_order_id, pending_dir=pending_dir)
-        reason = "CANCELLED_BY_AGENT" if removed else "CANCEL_TARGET_NOT_FOUND"
-        _emit(_reject(cancel.target_order_id, reason))
+        reason = _cancel_outcome(cancel, pending_dir=pending_dir)
+        # A refused cancel is recorded under the REQUEST id, never the target's:
+        # `execute_triggered_order` skips any order id already in the inbox, so a
+        # rejection filed under the target would let one agent disarm another's
+        # order just by asking, and a junk target id has no business in the ledger.
+        refused = reason == "CANCEL_NOT_OWNER" or not is_valid_order_id(
+            cancel.target_order_id
+        )
+        _emit(_reject(cancel.request_id if refused else cancel.target_order_id, reason))
 
     # --- Pass 2: read outbox and split conditional vs market ---
     orders, invalid_ids = _read_outbox_lines(trade_date, outbox_dir=outbox_dir)
@@ -925,6 +970,10 @@ def fill_day(
     market_orders: list[Order] = []
     for o in orders:
         if o.order_id in already_processed:
+            continue
+        if not is_valid_order_id(o.order_id):
+            _emit(_reject(o.order_id, "INVALID_ORDER_ID"))
+            already_processed.add(o.order_id)
             continue
         if o.trigger is None:
             market_orders.append(o)

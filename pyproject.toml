@@ -1,9 +1,12 @@
 [project]
 name = "midas-core"
-version = "0.1.1"
+version = "0.1.2"
 description = "Multi-agent paper-trading framework: LLM agents propose trades, a separate broker validates and executes them."
 readme = "README.md"
-requires-python = ">=3.12"
+# Capped below 3.14 because pandas-ta pins a numba release with no 3.14 build:
+# `pip install midas-core` on 3.14 must fail at resolution with a clear message,
+# not deep inside a numba build. Lift the cap when pandas-ta is replaced.
+requires-python = ">=3.12,<3.14"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "William Revah" }]
@@ -23,6 +26,7 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Office/Business :: Financial :: Investment",
 ]
 dependencies = [
@@ -31,6 +35,9 @@ dependencies = [
     "pandas>=2.0,!=3.0.4",
     "pandas-ta>=0.4.67b0",
     "numpy>=1.24",
+    # engine.market_data's parquet cache needs a parquet engine; without it the
+    # backtest runner raises its "usable engine" import error on a clean install.
+    "pyarrow>=14",
     "requests>=2.31",
     "ccxt>=4.0",
     "PyYAML>=6.0",

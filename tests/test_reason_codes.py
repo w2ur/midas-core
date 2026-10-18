@@ -20,14 +20,16 @@ SITE_RAILS = REPO_ROOT / "site" / "src" / "lib" / "rails.ts"
 WATCHER_CODES = {"TRIGGER_EXPIRED"}
 
 
-def test_declared_set_has_twenty_two_broker_codes():
+def test_declared_set_has_twenty_four_broker_codes():
     """15 → 19 on 2026-08-07: CURRENCY_UNRESOLVED, PRICE_IMPLAUSIBLE,
     TRIGGER_LEVEL_IMPLAUSIBLE and VALUATION_UNAVAILABLE (reliability review
     W1). 19 → 20 on 2026-09-25: TICKER_DENIED (J6 money review round 1, I3).
     20 → 22 on 2026-10-03: INSTRUMENT_SUSPENDED and STALE_PRICE (market data
-    plan 2026-10-03, 1.3). The literal count is the point — it is what forces
+    plan 2026-10-03, 1.3). 22 → 24 on 2026-10-18: CANCEL_NOT_OWNER and
+    INVALID_ORDER_ID (midas-core 0.1.2 path-traversal and ownership fixes).
+    The literal count is the point — it is what forces
     every mirror of this list to be looked at."""
-    assert len(REJECTION_REASON_CODES) == 22
+    assert len(REJECTION_REASON_CODES) == 24
 
 
 def test_every_code_emitted_in_the_broker_is_declared():

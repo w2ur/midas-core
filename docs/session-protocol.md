@@ -146,7 +146,8 @@ equity benchmarks is more than four calendar days old, which is the guard
 against pricing a book on a dead vendor feed. A driver that catches this and
 continues publishes a valuation from stale prices, and snapshots are immutable,
 so that valuation is permanent. Do not work around it by fetching prices
-yourself — the session has no outbound HTTP by design.
+yourself — prices are read from the committed store, and the broker's fill path is
+HTTP-free by design.
 **Ordering:** first step after the session is anchored; everything that values a
 position depends on it.
 
@@ -582,11 +583,15 @@ someone notices the published site has not moved in a week.
 
 ## Price store
 
-A session performs no outbound HTTP. Prices come from the committed OHLCV store,
-populated out of band by `python scripts/fetch_ohlcv.py`. Populate it before the
-first session; refresh it on a schedule that completes before the session runs.
-Universe membership is committed too, for the same reason — a resolver that
-reaches for the network at session time is a resolver that fails in a sandbox.
+The price and fill path performs no outbound HTTP. Prices come from the committed
+OHLCV store, populated out of band by `python scripts/fetch_ohlcv.py`. Populate
+it before the first session; refresh it on a schedule that completes before the
+session runs. Universe membership is committed too, for the same reason — a
+resolver that reaches for the network at session time is a resolver that fails
+in a sandbox. Orders are committed as well. The one thing an agent may reach for
+outside the repository is a capped web search (a few per session, a model-side
+tool, never a price source); the agent's own account of it is recorded under
+`data/research/` as self-reported provenance.
 
 `scripts/fetch_market_data.py` refuses to price against a store that has stopped
 advancing. That refusal is the guard against publishing a valuation from stale

@@ -7,8 +7,11 @@
 # Workflow:
 #   1. Edit constraints here.
 #   2. Regenerate the lock:
-#        pip install pip-tools
-#        pip-compile --strip-extras -o requirements.txt requirements.in
+#        uv pip compile requirements.in --python-version 3.12 \
+#          --python-platform linux --no-header --no-annotate --strip-extras \
+#          -o requirements.txt
+#      (the existing requirements.txt is kept as the preference; only what
+#       changed here moves, then restore the header comment)
 #      (or seed requirements.txt from the "Successfully installed ..." line
 #       of a green CI run on the Linux runner).
 #   3. Commit requirements.in and requirements.txt together.
@@ -20,6 +23,7 @@ yfinance>=0.2.30
 pandas>=2.0,!=3.0.4
 pandas-ta>=0.4.67b0
 numpy>=1.24
+pyarrow>=14
 streamlit>=1.30
 plotly>=5.18
 pytest>=8.0

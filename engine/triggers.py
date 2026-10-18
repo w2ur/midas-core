@@ -68,6 +68,20 @@ class CancelRequest:
 # ---------- Pending order storage ----------
 
 
+def _pending_path(base: Path, order_id: str) -> Path:
+    """The pending file for ``order_id``, refused unless it stays inside ``base``.
+
+    Resolved before the comparison so both ``..`` segments and a symlink planted
+    in the folder are caught: the id is agent-authored text and ends up in an
+    ``unlink`` and a ``write_text``.
+    """
+    root = base.resolve()
+    path = (base / f"{order_id}.json").resolve()
+    if not path.is_relative_to(root):
+        raise ValueError(f"pending path for {order_id!r} escapes {base}")
+    return path
+
+
 def save_pending(order: Order, pending_dir: Path | None = None) -> None:
     """Persist a conditional order to its per-order JSON file. Overwrites if same order_id."""
     if order.trigger is None:
@@ -78,7 +92,7 @@ def save_pending(order: Order, pending_dir: Path | None = None) -> None:
         pending_dir if pending_dir is not None else get_config().orders_dir / "pending"
     )
     base.mkdir(parents=True, exist_ok=True)
-    path = base / f"{order.order_id}.json"
+    path = _pending_path(base, order.order_id)
     path.write_text(json.dumps(order.to_dict(), indent=2), encoding="utf-8")
 
 
@@ -104,11 +118,26 @@ def delete_pending(order_id: str, pending_dir: Path | None = None) -> bool:
     base = (
         pending_dir if pending_dir is not None else get_config().orders_dir / "pending"
     )
-    path = base / f"{order_id}.json"
+    path = _pending_path(base, order_id)
     if not path.exists():
         return False
     path.unlink()
     return True
+
+
+def load_pending(order_id: str, pending_dir: Path | None = None) -> Order | None:
+    """The pending order with this id, or None if absent or unreadable."""
+    base = (
+        pending_dir if pending_dir is not None else get_config().orders_dir / "pending"
+    )
+    path = _pending_path(base, order_id)
+    if not path.is_file():
+        return None
+    try:
+        return Order.from_dict(json.loads(path.read_text(encoding="utf-8")))
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        logger.warning("Unreadable pending file %s: %s", path.name, exc)
+        return None
 
 
 # ---------- Cancel request I/O ----------

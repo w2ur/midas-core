@@ -898,7 +898,7 @@
     "currency": "EUR"
   },
   "BBOX.L": {
-    "name": "Tritax Big Box REIT plc",
+    "name": "Tritax Big Box Ord",
     "type": "equity",
     "currency": "GBp"
   },
@@ -3125,6 +3125,11 @@
     "type": "equity",
     "currency": "GBp"
   },
+  "HILS.L": {
+    "name": "Hill & Smith PLC",
+    "type": "equity",
+    "currency": "GBp"
+  },
   "HLI.L": {
     "name": null,
     "type": "unknown",
@@ -4865,7 +4870,7 @@
     "currency": "USD"
   },
   "PCT.L": {
-    "name": "Polar Capital Technology Trust plc",
+    "name": "Polar Capital Technology Ord",
     "type": "equity",
     "currency": "GBp"
   },
@@ -5861,6 +5866,11 @@
     "type": "etf",
     "currency": null
   },
+  "SKYD": {
+    "name": "Skydance Corporation",
+    "type": "equity",
+    "currency": "USD"
+  },
   "SLB": {
     "name": "SLB N.V.",
     "type": "equity",
@@ -5892,7 +5902,7 @@
     "currency": "GBp"
   },
   "SMT.L": {
-    "name": "Scottish Mortgage Investment Trust PLC",
+    "name": "Scottish Mortgage Ord",
     "type": "equity",
     "currency": "GBp"
   },
@@ -6629,6 +6639,11 @@
     "type": "equity",
     "currency": "GBp"
   },
+  "TWLO": {
+    "name": "Twilio Inc.",
+    "type": "equity",
+    "currency": "USD"
+  },
   "TXN": {
     "name": "Texas Instruments Incorporated",
     "type": "equity",
@@ -6920,7 +6935,7 @@
     "currency": "USD"
   },
   "VMRK": {
-    "name": "Vivmark Residential",
+    "name": "AvalonBay Communities, Inc.",
     "type": "equity",
     "currency": "USD"
   },
@@ -7023,6 +7038,11 @@
     "name": "Vestas Wind Systems A/S",
     "type": "equity",
     "currency": "DKK"
+  },
+  "VYLR": {
+    "name": "Vylor Inc.",
+    "type": "equity",
+    "currency": "USD"
   },
   "VZ": {
     "name": "Verizon Communications Inc.",

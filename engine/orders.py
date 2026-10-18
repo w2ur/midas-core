@@ -10,6 +10,7 @@ Z suffix for readability; deserialization round-trips cleanly.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -228,6 +229,24 @@ class DroppedTrade:
             reason=d["reason"],
             raw=d.get("raw", {}),
         )
+
+
+#: The alphabet every order id the system mints lives in: letters, digits, ``_``
+#: and ``-`` (``make_order_id`` gives ``ord_{date}_{agent}_{seq}``). No ``/``,
+#: ``\\`` or ``.``, so an id can never name a path outside the folder a pending
+#: order lives in. Deliberately the alphabet, not the full minted shape: the
+#: committed ledger holds two legacy ids without an agent segment, and the
+#: suite's fixtures use short ids such as ``o1``.
+_ORDER_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
+
+
+def is_valid_order_id(order_id: object) -> bool:
+    """True if ``order_id`` has the shape the broker mints (see ``_ORDER_ID_RE``).
+
+    ``fullmatch`` on a ``str`` only: ``$`` would accept a trailing newline and
+    a non-string must not reach a path join at all.
+    """
+    return isinstance(order_id, str) and _ORDER_ID_RE.fullmatch(order_id) is not None
 
 
 def make_order_id(d: date, agent_id: str, seq: int) -> str:
