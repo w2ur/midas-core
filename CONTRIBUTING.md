@@ -39,8 +39,24 @@ Typo fixes, clarifications, and broken-link fixes there are appreciated.
 Useful bug reports include:
 
 - the command you ran and the observed vs. expected output;
-- your Python version (3.12+ is required) and OS;
+- your Python version (3.12 or 3.13 is required) and OS;
 - the relevant `roster.yaml` snippet if the issue is desk-configuration-specific.
+
+## Releasing
+
+Maintainer only. A release is cut from the mirror, never from a hand edit:
+
+1. In [`w2ur/midas`](https://github.com/w2ur/midas), bump `version` in `pyproject.toml` and get
+   both test suites green.
+2. Run `uv run python scripts/sync_core.py apply --core <path to this checkout>` from that
+   repo, and commit the result here as its own `sync:` commit.
+3. Tag that commit `vX.Y.Z`. `publish.yml` runs only from a `v*` tag, refuses a tag that differs
+   from the version in `pyproject.toml` (on a manual dispatch too), and publishes to PyPI by
+   trusted publishing through the `pypi` environment, whose deployment rule admits `v*` tags only.
+   A PyPI version number can never be reused, so a wrong tag burns it.
+4. Check the release cold: in a fresh virtual environment, `pip install midas-core==X.Y.Z`,
+   then `midas init-demo`, `midas fetch-ohlcv` and `midas fill-day` as in the README quickstart,
+   and confirm `fill-day` reports a filled order.
 
 ## License
 
