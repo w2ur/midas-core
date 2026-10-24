@@ -34,3 +34,30 @@ jobs:
         env:
           MIDAS_DATA_DIR: ${{ github.workspace }}/examples/demo-desk
         run: pytest -q
+
+  # The pytest job installs the checkout editable, which hides a wheel that
+  # cannot run on its own. This one builds the wheel, installs it alone in a
+  # fresh venv (its declared dependencies, never requirements.txt) and runs
+  # the README quickstart from outside the checkout. Through workflow_call it
+  # also gates publish.yml, so a wheel that cannot reach a fill never ships.
+  wheel-quickstart:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Build the wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel --outdir "$RUNNER_TEMP/dist"
+      - name: Install the wheel alone in a fresh venv
+        run: |
+          python -m venv "$RUNNER_TEMP/clean"
+          "$RUNNER_TEMP/clean/bin/pip" install "$RUNNER_TEMP"/dist/*.whl
+      - name: README quickstart against the installed wheel
+        run: bash .github/quickstart-smoke.sh "$RUNNER_TEMP/clean"

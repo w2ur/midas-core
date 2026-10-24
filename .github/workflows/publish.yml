@@ -15,8 +15,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  # The whole suite (Python 3.12 and 3.13) runs first, and `build`, hence
-  # `publish`, needs it: a red suite never reaches PyPI.
+  # The whole suite and the wheel quickstart (Python 3.12 and 3.13) run first,
+  # and `build`, hence `publish`, needs them: a red suite never reaches PyPI.
   tests:
     uses: ./.github/workflows/tests.yml
 
