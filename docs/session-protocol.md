@@ -86,7 +86,7 @@ valuation lands on the next real close.
 **The derived-artifact steps are unconditional.** Baselines, the tax shadow and
 the live leaderboard run whether or not any agent traded, and they run after the
 portfolio mutations so the benchmark window matches the freshly-appended agent
-snapshots. A session that commits posts and portfolios but no baselines skipped
+snapshots (baselines before the board is built, the other two after). A session that commits posts and portfolios but no baselines skipped
 a step; the deltas the site renders come out of that step, so the failure
 surfaces as a chart that is subtly, permanently short.
 
@@ -111,7 +111,7 @@ surprising, report it and stop; do not repair it mid-run.
 
 ## The steps
 
-Twenty-two functions in `scripts/daily_session.py`. They are described below in
+The `step_*` functions in `scripts/daily_session.py` are described below in
 **execution order**, grouped into phases. The authoritative list is the file
 itself — re-derive it rather than trusting any transcription, including this one:
 
@@ -150,12 +150,6 @@ yourself — prices are read from the committed store, and the broker's fill pat
 HTTP-free by design.
 **Ordering:** first step after the session is anchored; everything that values a
 position depends on it.
-
-### Retired — `step_check_sentiment_freshness`
-
-Not part of the sequence any more: the sentiment A/B it recorded has ended and
-nothing calls it. The helper remains only because the previous live prompt still
-calls it, and it goes with the sentiment cleanup after the owner re-pastes.
 
 ## Phase 2 — The trading round
 
@@ -364,14 +358,16 @@ the board rather than published at zero, so a *short* board is the symptom to
 watch for; and if no book at all can be valued the result is an empty list,
 rather than an invented one.
 
-**Ordering:** before anything that narrates standings — which puts it *before*
-the baseline refresh in phase 7, not after. That is the live behaviour and it
-has a visible consequence: the benchmark delta published on a given day is
-measured against a baseline series that is one session stale. Do not reorder to
-"fix" it; the two curves are dated from the price index either way, and moving
-the refresh earlier would rank today's books against a benchmark window that
-the day's fills have not yet been snapshotted into. Just know which day's
-benchmark the number is against.
+**Ordering:** before anything that narrates standings, and **after the baseline
+refresh** (`step_build_baselines`, driven at Step 4c of the trigger prompt, right
+after the day's snapshots). Until 2026-10-22 the refresh ran after the board, so
+the bundle ranked against a baseline series one session stale while a rebuild for
+`current.json` ranked against the fresh one: on 2026-10-13 the two published
+different leaders (#116). The refresh now sits between the snapshots and the
+board, so the benchmark window already holds the day's fills, and the rows are
+built **once** and reused by the bundle, the journals and `current.json`.
+`scripts/check_leaderboard_consistency.py` (run by `session-integrity` on the
+session commit) fails when the bundle's rows and `current.json`'s differ.
 Never hand-roll this from the snapshot series: the first persisted snapshot is
 not inception for a book seeded with non-cash positions, so differencing the
 series understates exactly those agents. The helper anchors to each agent's
@@ -528,7 +524,9 @@ the agent snapshot it shares a chart with, so a revised close cannot move a
 benchmark curve retroactively under a frozen agent curve. Restating a published
 date is a separate, deliberate, disclosed operation.
 **Ordering:** after all portfolio mutations, so the benchmark window matches the
-snapshots just appended. Marker-idempotent.
+snapshots just appended, and **before the leaderboard** (the board ranks on the
+series this step writes). The weekend refresh already ran in this order.
+Marker-idempotent.
 
 ### Tax shadow — `step_build_tax_shadow`
 
