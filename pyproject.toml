@@ -1,6 +1,6 @@
 [project]
 name = "midas-core"
-version = "0.1.2"
+version = "0.1.3"
 description = "Multi-agent paper-trading framework: LLM agents propose trades, a separate broker validates and executes them."
 readme = "README.md"
 # No upper cap. It sat at <3.14 while pandas-ta pinned a numba release with no

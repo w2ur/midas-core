@@ -7245,12 +7245,12 @@
     "currency": "USD"
   },
   "XLM-EUR": {
-    "name": "Stellar",
+    "name": "Stellar EUR",
     "type": "crypto",
     "currency": "EUR"
   },
   "XLM-USD": {
-    "name": "Stellar",
+    "name": "Stellar USD",
     "type": "crypto",
     "currency": "USD"
   },
@@ -7285,12 +7285,12 @@
     "currency": "USD"
   },
   "XRP-EUR": {
-    "name": "XRP",
+    "name": "XRP EUR",
     "type": "crypto",
     "currency": "EUR"
   },
   "XRP-USD": {
-    "name": "XRP",
+    "name": "XRP USD",
     "type": "crypto",
     "currency": "USD"
   },
