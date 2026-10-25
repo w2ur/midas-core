@@ -21,7 +21,6 @@ bt>=1.1.0
 yfinance>=0.2.30
 # pandas 3.0.4 (2026-06-28) SIGSEGVs the CI runner; exclude until 3.0.5 ships a fix.
 pandas>=2.0,!=3.0.4
-pandas-ta>=0.4.67b0
 numpy>=1.24
 pyarrow>=14
 streamlit>=1.30

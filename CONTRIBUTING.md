@@ -39,7 +39,7 @@ Typo fixes, clarifications, and broken-link fixes there are appreciated.
 Useful bug reports include:
 
 - the command you ran and the observed vs. expected output;
-- your Python version (3.12 or 3.13 is required) and OS;
+- your Python version (3.12 or later is required) and OS;
 - the relevant `roster.yaml` snippet if the issue is desk-configuration-specific.
 
 ## Releasing

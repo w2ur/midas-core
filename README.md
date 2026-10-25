@@ -3,8 +3,8 @@ name: "midas-core"
 tagline_fr: "Un moteur Brain/Hands open source pour agents IA en paper trading — la sécurité vit dans le broker, pas dans le prompt."
 tagline_en: "An open Brain/Hands engine for paper-trading AI agents — safety enforced by the broker, not the prompt."
 about_en: "Multi-agent paper-trading framework: LLM agents propose trades, a separate broker validates and executes them. pip install, runnable demo desk."
-facts_fr: "Licence MIT, Python 3.12 ou 3.13, garde-fous appliqués par le broker, desk de démo exécutable, pip install midas-core."
-facts_en: "MIT license, Python 3.12 or 3.13, safety rails enforced by the broker, a runnable demo desk, pip install midas-core."
+facts_fr: "Licence MIT, Python 3.12 à 3.14, garde-fous appliqués par le broker, desk de démo exécutable, pip install midas-core."
+facts_en: "MIT license, Python 3.12 to 3.14, safety rails enforced by the broker, a runnable demo desk, pip install midas-core."
 ---
 
 # midas-core
@@ -17,7 +17,7 @@ desk, and the deterministic Hands pipeline. Bring your own agents.
 [![tests](https://github.com/w2ur/midas-core/actions/workflows/tests.yml/badge.svg)](https://github.com/w2ur/midas-core/actions/workflows/tests.yml)
 [![PyPI](https://img.shields.io/pypi/v/midas-core.svg)](https://pypi.org/project/midas-core/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
-[![Python 3.12 | 3.13](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12 | 3.13 | 3.14](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.14-blue.svg)](https://www.python.org/downloads/)
 
 ![A terminal session: pip install midas-core, midas init-demo, then midas fill-day reporting one order filled and one rejected with reason MAX_ORDER_NOTIONAL](./docs/images/demo-fill-day.png)
 
@@ -192,7 +192,7 @@ A driver that lets an agent choose its own ids hands it the ability to act as an
 
 | To run…                                                        | Requirements                                   |
 | -------------------------------------------------------------- | ---------------------------------------------- |
-| **Deterministic pipeline** — fills, baselines, backtests       | Python 3.12 or 3.13. No API keys, no accounts. |
+| **Deterministic pipeline** — fills, baselines, backtests       | Python 3.12, 3.13 or 3.14. No API keys, no accounts. |
 | **LLM trading sessions** — personas, journals, narration       | Runs under [Claude Code](https://claude.com/claude-code) (`scripts/daily_session.py`). |
 
 The deterministic pipeline is headless and fully tested; you can drive a desk end-to-end with no

@@ -14,8 +14,8 @@ from typing import Callable
 
 import bt
 import pandas as pd
-import pandas_ta as ta
 
+from engine.indicators import wilder_rsi
 from engine.types import StrategySpec
 
 # ---------------------------------------------------------------------------
@@ -145,7 +145,7 @@ def _selector_rsi_oversold(
     """RSI < 30 signals oversold entry."""
     rsi_frames = {}
     for col in price_data.columns:
-        rsi_series = ta.rsi(price_data[col], length=14)
+        rsi_series = wilder_rsi(price_data[col], length=14)
         rsi_frames[col] = rsi_series
     rsi_df = pd.DataFrame(rsi_frames, index=price_data.index)
     signal = rsi_df < 30

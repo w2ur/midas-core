@@ -3,10 +3,10 @@ name = "midas-core"
 version = "0.1.2"
 description = "Multi-agent paper-trading framework: LLM agents propose trades, a separate broker validates and executes them."
 readme = "README.md"
-# Capped below 3.14 because pandas-ta pins a numba release with no 3.14 build:
-# `pip install midas-core` on 3.14 must fail at resolution with a clear message,
-# not deep inside a numba build. Lift the cap when pandas-ta is replaced.
-requires-python = ">=3.12,<3.14"
+# No upper cap. It sat at <3.14 while pandas-ta pinned a numba release with no
+# 3.14 build; pandas-ta is gone (RSI is inlined in engine.indicators), and the
+# core CI matrix runs 3.12 through 3.14.
+requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "William Revah" }]
@@ -27,13 +27,13 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Office/Business :: Financial :: Investment",
 ]
 dependencies = [
     "bt>=1.1.0",
     "yfinance>=0.2.30",
     "pandas>=2.0,!=3.0.4",
-    "pandas-ta>=0.4.67b0",
     "numpy>=1.24",
     # engine.market_data's parquet cache needs a parquet engine; without it the
     # backtest runner raises its "usable engine" import error on a clean install.
@@ -153,9 +153,6 @@ filterwarnings = [
     # Fixed only by migrating to httpx2, which is a dependency decision for the
     # backtester spin-out, not for its test suite.
     "ignore:Using `httpx` with `starlette.testclient` is deprecated:",
-    # pandas_ta sets mode.copy_on_write at import. Under pandas >= 3 the option
-    # is a no-op and deprecated; nothing downstream of us can unset it.
-    "ignore:The 'mode.copy_on_write' option is deprecated:",
     # bt's own chained assignment inside Backtest.get_transactions. Ours is the
     # calling code, not the assignment; bt would have to fix it upstream.
     "ignore:A value is being set on a copy of a DataFrame or Series through chained assignment:",
