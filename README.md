@@ -111,8 +111,8 @@ strictly positive (Midas is long-only):
 {"order_id": "ord_demo_002", "ts": "2026-04-17T20:00:00Z", "agent_id": "demo-momentum", "action": "BUY", "ticker": "SPY", "shares": 10, "reasoning": "Deliberately oversized clip to demonstrate the notional rail.", "currency": "USD"}
 ```
 
-`demo-momentum`'s `max_order_notional` is `5000`. With SPY near $740 the first order (~$2,200)
-clears; the second (~$7,400) breaches the cap. Run the broker:
+`demo-momentum`'s `max_order_notional` is `5000`. With SPY near $760 the first order (~$2,280)
+clears; the second (~$7,600) breaches the cap. Run the broker:
 
 ```bash
 midas fill-day
@@ -126,13 +126,14 @@ cat $MIDAS_DATA_DIR/data/orders/inbox/<TODAY>.jsonl
 ```
 
 ```jsonl
-{"order_id": "ord_demo_001", "status": "filled",   "fill_price": 738.18, "notional_base": 2214.54, "fees": 1.25, "reason": null}
-{"order_id": "ord_demo_002", "status": "rejected",  "fill_price": null,   "notional_base": null,    "fees": null, "reason": "MAX_ORDER_NOTIONAL"}
+{"order_id": "ord_demo_001", "ts_filled": "2026-10-26T17:48:51.025216Z", "status": "filled", "fill_price": 759.969970703125, "fill_currency": "USD", "notional_base": 2279.909912109375, "fees": 1.25, "reason": null}
+{"order_id": "ord_demo_002", "ts_filled": "2026-10-26T17:48:51.026092Z", "status": "rejected", "fill_price": null, "fill_currency": null, "notional_base": null, "fees": null, "reason": "MAX_ORDER_NOTIONAL"}
 ```
 
 The filled order mutated `data/portfolios/demo-momentum/portfolio.json` (cash debited, a SPY
-position opened); the rejected one changed nothing but its reason. Exact prices depend on the day
-you fetch — the shape (one fill, one rejection, a debited portfolio) is the point.
+position opened); the rejected one changed nothing but its reason. Exact prices and timestamps depend
+on the day you fetch — the shape (one fill, one rejection, a debited portfolio) is the point. Outside a
+git checkout the `executed_sha` stamp is omitted, as above.
 
 The full walkthrough — the portfolio JSON, the `executed_sha` provenance stamp, and the roster
 schema — is in [`./examples/demo-desk/README.md`](./examples/demo-desk/README.md).
@@ -144,11 +145,17 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt   # pinned lockfile (incl. pytest + hypothesis)
 pip install -e .                  # the midas-core package + the `midas` CLI
 
-# Point the engine at a working copy of the demo desk.
-cp -R examples/demo-desk /tmp/my-desk
-export MIDAS_DATA_DIR=/tmp/my-desk
-
 pytest -q
+```
+
+A bare `pytest` works from a fresh checkout: when `MIDAS_DATA_DIR` is unset and the tree has no
+desk of its own, `tests/conftest.py` points it at `examples/demo-desk` (CI sets the same value
+explicitly). To run against a different desk, export the variable yourself; an explicit value is
+never overridden:
+
+```bash
+cp -R examples/demo-desk /tmp/my-desk
+MIDAS_DATA_DIR=/tmp/my-desk pytest -q
 ```
 
 The suite runs with **warnings as errors** (`filterwarnings` in `pyproject.toml`). Three
