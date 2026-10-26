@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
@@ -35,6 +36,29 @@ settings.register_profile(
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 settings.load_profile("midas")
+
+
+def _default_to_demo_desk(root: Path, environ=os.environ) -> bool:
+    """Point an unset MIDAS_DATA_DIR at the bundled demo desk when ``root`` has no desk.
+
+    A bare ``pytest`` in a checkout that ships ``examples/demo-desk`` but no
+    ``.claude/agents`` of its own (midas-core) would otherwise resolve the
+    engine's root and fail on the persona directory. CI sets the variable
+    explicitly; this makes a stranger's bare run match it. An explicit value is
+    never overridden, and a tree with its own desk (the live repo) is left alone.
+    Returns True when it set the variable.
+    """
+    if environ.get("MIDAS_DATA_DIR"):
+        return False
+    demo = root / "examples" / "demo-desk"
+    if (root / ".claude" / "agents").is_dir() or not (demo / "roster.yaml").is_file():
+        return False
+    environ["MIDAS_DATA_DIR"] = str(demo)
+    return True
+
+
+# Runs at import so collection-time readers (_running_live_cast) see it too.
+_default_to_demo_desk(Path(__file__).resolve().parent.parent)
 
 
 @pytest.fixture
