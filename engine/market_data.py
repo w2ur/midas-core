@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date
+import sys
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -161,11 +162,12 @@ def _close_frame(tickers: list[str], start: date, end: date) -> pd.DataFrame:
     everything" — and each carried the same two defects (W7.1).
     """
     served, missing = _load_prices_from_store(tickers, start, end)
+    vendor_served: set[str] = set()
     if missing:
         raw = yf.download(
             missing,
             start=str(start),
-            end=str(end),
+            end=str(_vendor_end(end)),
             auto_adjust=False,  # raw Close, matching the store's basis
             progress=False,
         )
@@ -174,11 +176,82 @@ def _close_frame(tickers: list[str], start: date, end: date) -> pd.DataFrame:
             fetched = _normalise_vendor_frame(close)
             for ticker in fetched.columns:
                 served[str(ticker)] = fetched[ticker]
+                vendor_served.add(str(ticker))
 
     # Preserve the caller's column order.
     df = pd.DataFrame({t: served[t] for t in tickers if t in served})
     df.index.name = "Date"
-    return df
+    return _trim_to_common_tail(df, vendor_served)
+
+
+def _vendor_end(end: date) -> date:
+    """The exclusive `end` to hand `yf.download` so it serves `[start, end]`.
+
+    The store read is inclusive of `end`; yfinance's `end` is exclusive. Passed
+    straight through, every vendor-served column stopped one row before every
+    store-served one, and a backtest holding that ticker on the end date died
+    in bt on "latest price is NaN" (2026-10-30). Capped at today (UTC, the
+    day Yahoo's daily bar opens on), so the vendor is never asked for a bar
+    still forming: the rule
+    `scripts/fetch_ohlcv.py` keeps on the ingest side.
+    """
+    return min(end + timedelta(days=1), datetime.now(UTC).date())
+
+
+# Largest calendar-day gap between the store's last date and the vendor's last
+# date that still counts as "one source is a day late". Five covers a Friday
+# close against the following Wednesday (a long weekend plus a day) and no
+# more; a gap beyond it is a dead column, not a lagging source.
+_TAIL_LAG_MAX_DAYS = 5
+
+
+def _trim_to_common_tail(df: pd.DataFrame, vendor_served: set[str]) -> pd.DataFrame:
+    """Drop trailing dates that only one of the two sources reaches.
+
+    When the store and the vendor both contributed columns, their newest
+    dates can differ by a day: a checkout whose store has not caught up with
+    a close the vendor already serves, or the vendor's overnight withdrawal
+    of yesterday's close. A row past the earlier of the two is NaN for every
+    column of the other source, which is a held position with no price.
+
+    The trim fires only when the two sources' last dates are at most
+    `_TAIL_LAG_MAX_DAYS` calendar days apart (weekends and one-day lags
+    trim). A wider gap means one source holds a dead column, for instance a
+    delisted name served alone by the vendor, and cutting every other column
+    back to it would erase months of valid history; the frame is then left
+    alone. Only the tail is trimmed, and only across sources: a single store
+    column that stopped early never shortens the frame.
+
+    A mixed crypto + equity frame ends on the equity side's last weekday: the
+    crypto columns' weekend rows past it are dropped whenever the sources are
+    within the threshold. When the trim fires, the dropped dates and the
+    number of vendor-served columns are printed to stderr.
+    """
+    if df.empty or not vendor_served:
+        return df
+    store_cols = [c for c in df.columns if c not in vendor_served]
+    vendor_cols = [c for c in df.columns if c in vendor_served]
+    if not store_cols or not vendor_cols:
+        return df
+    store_last = df[store_cols].dropna(how="all").index.max()
+    vendor_last = df[vendor_cols].dropna(how="all").index.max()
+    if pd.isna(store_last) or pd.isna(vendor_last):
+        return df
+    if abs((store_last - vendor_last).days) > _TAIL_LAG_MAX_DAYS:
+        return df
+    cut = min(store_last, vendor_last)
+    dropped = df.index[df.index > cut]
+    if len(dropped) == 0:
+        return df
+    print(
+        f"market_data: trimmed {len(dropped)} trailing date(s) "
+        f"({', '.join(d.strftime('%Y-%m-%d') for d in dropped)}) that only one "
+        f"source reaches; store ends {store_last:%Y-%m-%d}, vendor ends "
+        f"{vendor_last:%Y-%m-%d}. {len(vendor_cols)} vendor-served column(s) "
+        f"and {len(store_cols)} store-served column(s) in the frame.",
+        file=sys.stderr,
+    )
+    return df.loc[:cut]
 
 
 def _latest_close_from_store(ticker: str) -> float | None:
@@ -290,8 +363,10 @@ class MarketDataFetcher:
         Serves from the committed OHLCV store when it covers the range;
         otherwise falls back to yfinance.
         """
+        # "prices-v2": frames cached before the 2026-10-30 end-date fix carry
+        # a vendor column one row short; a new key keeps them from being served.
         cache_key = self._make_cache_key(
-            "prices", tickers=sorted(tickers), start=str(start), end=str(end)
+            "prices-v2", tickers=sorted(tickers), start=str(start), end=str(end)
         )
         cached = self._load_cache(cache_key)
         if cached is not None:
@@ -307,7 +382,10 @@ class MarketDataFetcher:
         Columns: sp500, msci_world, gold, btc
         """
         tickers = list(BENCHMARK_TICKERS.values())
-        cache_key = self._make_cache_key("benchmarks", start=str(start), end=str(end))
+        # see "prices-v2"
+        cache_key = self._make_cache_key(
+            "benchmarks-v2", start=str(start), end=str(end)
+        )
         cached = self._load_cache(cache_key)
         if cached is not None:
             return cached
